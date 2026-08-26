@@ -104,15 +104,34 @@ cd frontend && npm run lint       # oxlint
 cd backend && python manage.py test
 ```
 
-Il n'y a pas de `requirements.txt` ; les dépendances ne sont installées que dans
-`backend/.venv`. Si ce venv est absent/à recréer, il faudra au minimum `django`,
-`djangorestframework`, `django-cors-headers`, `django-extensions`, `Werkzeug`,
-`pyOpenSSL`, `django-storages`, `boto3`.
+`requirements.txt` (racine du projet, `pip freeze` du venv backend) existe depuis le
+26/08/2026 — **régénéré ce jour-là** : le fichier commité juste avant (commit "Ajout du
+requirement.txt") était en réalité un `pip freeze` d'un tout autre environnement
+(`ruamel.yaml`, `uv` — rien à voir avec ce projet), encodé en UTF-16LE (probablement
+`pip freeze > requirements.txt` lancé sous PowerShell dans le mauvais venv, qui
+redirige en UTF-16 par défaut). `pip install -r requirements.txt` installe tout ce
+qu'il faut : `django`, `djangorestframework`, `django-cors-headers`,
+`django-extensions`, `Werkzeug`, `pyOpenSSL`, `django-storages`, `boto3` + leurs
+dépendances transitives.
+
+**Piège d'encodage à surveiller** : l'outil d'écriture de fichiers de Claude Code a, au
+moins une fois dans cet environnement, écrit un fichier texte pourtant purement ASCII
+en UTF-16LE sans raison apparente (`requirements.txt` à nouveau, cette fois via l'outil
+plutôt qu'un `pip freeze` malheureux) — tous les autres fichiers écrits/édités pendant
+la même session étaient corrects. Vérifier `file <chemin>` après toute création de
+fichier texte non trivial sur ce projet si le contenu semble ne pas correspondre à ce
+qui a été écrit ; en cas de souci, réécrire via un heredoc Bash (`cat > fichier <<
+'EOF' ... EOF`) plutôt que l'outil d'écriture, qui a produit un fichier ASCII propre
+sans plus de problème.
 
 `mkcert` n'est pas sur le PATH de Git Bash/PowerShell dans cet environnement — installé
 via WinGet, binaire trouvable via
 `AppData\Local\Microsoft\WinGet\Packages\FiloSottile.mkcert_.../mkcert.exe` si besoin de
 l'invoquer par chemin complet.
+
+`SETUP.md` (racine du projet, créé le 26/08/2026) est le guide d'installation pas-à-pas
+pour un nouveau développeur — reprend les commandes ci-dessus dans l'ordre, avec
+prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
 
 ## Architecture multi-tenant (décision confirmée — plus de simplification)
 
@@ -418,8 +437,9 @@ session si le code a bougé.
   ne gère pas bien des alias de DB enregistrés paresseusement à l'exécution (voir limite
   déjà notée pour le chantier routeur) ; vérifiée manuellement par inspection directe
   des fichiers `.sqlite3` et du dossier `media/` à la place.
-- **Pas de `requirements.txt`** : dépendances Python installées uniquement dans
-  `backend/.venv` (venv Windows), rien de figé/reproductible pour l'instant.
+- **✅ Fait le 26/08/2026 — `requirements.txt` + `SETUP.md`** : voir section
+  Commandes pour le détail (régénération suite à un fichier corrompu commité par
+  erreur, et le guide d'installation pas-à-pas pour un nouveau développeur).
 - **Frontend stack** : Vite 8 + React 19 + TypeScript, lint via `oxlint` (pas
   ESLint) configuré dans `frontend/.oxlintrc.json`, pas de framework CSS (juste
   `App.css`/`index.css` par défaut de `npm create vite`, non utilisés par `App.tsx`
