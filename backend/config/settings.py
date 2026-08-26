@@ -25,12 +25,15 @@ SECRET_KEY = 'django-insecure-h9=4e^uhvrvk_$p(f(8*l+ga-ffug(07k6076)41a#t+f_q&&1
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['.localhost']
 
 
 # Application definition
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://[a-z0-9-]*\.?localhost:5173$",
+]
+CORS_ALLOW_CREDENTIALS = True
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -42,8 +45,35 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'django_extensions',
+    'storages',
     'datarooms',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
+
+# Chaque office garde sa PROPRE session (cookie scopé exactement à son hôte, sans
+# attribut Domain). Domain=.localhost a été essayé et est rejeté par les navigateurs
+# (localhost est traité comme un suffixe public par la Public Suffix List, RFC 6265bis
+# anti-supercookie) — vérifié avec curl ET Chrome réel. Le passage d'un office à l'autre
+# se fait donc par échange de ticket signé (datarooms/tenancy/sso.py), pas par un cookie
+# partagé — voir CLAUDE.md, section "Architecture multi-tenant".
+#
+# CSRF_TRUSTED_ORIGINS est nécessaire dès qu'un POST authentifié par session (ex:
+# /api/sso/issue/) est fait cross-port depuis le frontend Vite (:5173) vers le backend
+# Django (:8000) : Origin != Host de la requête sinon rejeté par CsrfViewMiddleware.
+CSRF_TRUSTED_ORIGINS = ['https://*.localhost:5173']
+
+# Les deux serveurs de dev tournent exclusivement en HTTPS (certificats mkcert, voir
+# CLAUDE.md) : cookies Secure activés. Si jamais quelqu'un relance `runserver` en HTTP
+# nu par erreur, les cookies cessent d'être transmis — c'est le signal qu'il faut
+# repasser par `runserver_plus --cert-file --key-file`.
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -52,6 +82,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'datarooms.tenancy.middleware.TenantResolutionMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -85,6 +116,13 @@ DATABASES = {
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# Une base SQLite physique distincte par office (tenant), enregistrée dynamiquement
+# via datarooms.tenancy.registry.ensure_tenant_registered — voir CLAUDE.md, section
+# "Architecture multi-tenant".
+TENANT_DB_DIR = BASE_DIR / 'tenants'
+
+DATABASE_ROUTERS = ['datarooms.tenancy.router.TenantRouter']
 
 
 # Password validation
@@ -122,6 +160,31 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Fichiers uploadés (Document) — stockage S3-compatible via MinIO local (remplace le
+# stockage disque du chantier précédent). Le préfixe par tenant est calculé par
+# datarooms.tenancy.storage.tenant_document_path, inchangé : c'est tout l'intérêt de
+# l'abstraction FileField standard, le nom relatif ne dépend pas du backend.
+# Bucket à créer une fois (voir CLAUDE.md, Commandes) — ni MinIO ni S3 ne le créent
+# automatiquement.
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "bucket_name": "espace-notarial-documents",
+            "endpoint_url": "http://localhost:9000",
+            "access_key": "minioadmin",
+            "secret_key": "minioadmin",
+            "region_name": "us-east-1",  # ignoré par MinIO mais requis par boto3
+            "addressing_style": "path",  # MinIO sans DNS wildcard : path-style requis
+            "use_ssl": False,  # MinIO local sans TLS propre à lui (indépendant du HTTPS Vite/Django)
+            "default_acl": None,  # pas d'en-tête ACL — MinIO le rejette souvent
+        },
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 
 # Email

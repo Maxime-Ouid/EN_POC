@@ -1,0 +1,313 @@
+warning: in the working copy of 'CLAUDE.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/datarooms/tests.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/datarooms/views.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/vite.config.ts', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mindex 3c8b8d4..6fd58c9 100644[m
+[1m--- a/.gitignore[m
+[1m+++ b/.gitignore[m
+[36m@@ -3,5 +3,7 @@[m [mnode_modules/[m
+ __pycache__/[m
+ *.pyc[m
+ db.sqlite3[m
+[32m+[m[32mtenants/[m
+[32m+[m[32mmedia/[m
+ .env[m
+ dist/[m
+\ No newline at end of file[m
+[1mdiff --git a/CLAUDE.md b/CLAUDE.md[m
+[1mindex b25ddff..3e6e04b 100644[m
+[1m--- a/CLAUDE.md[m
+[1m+++ b/CLAUDE.md[m
+[36m@@ -1,3 +1,7 @@[m
+[32m+[m[32m# CLAUDE.md[m
+[32m+[m
+[32m+[m[32mThis file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.[m
+[32m+[m
+ # Espace Notarial — POC[m
+ [m
+ ## Contexte[m
+[36m@@ -35,25 +39,81 @@[m [mdoit ressembler à la vraie cible, pas à une maquette simplifiée.[m
+ [m
+ ## Stack[m
+ [m
+[31m-- **Backend** : Django + Django REST Framework, auth par token DRF (`rest_framework.authtoken`)[m
+[32m+[m[32m- **Backend** : Django + Django REST Framework, auth par session Django[m
+[32m+[m[32m  (`SessionAuthentication`) — pas de token DRF (abandonné, voir Architecture ci-dessous)[m
+ - **Frontend** : React + Vite + TypeScript[m
+ - **Base** : SQLite — **une base physique distincte par office** (pas de base partagée)[m
+ - **Sous-domaine** : routage réel via `*.localhost` (résolution automatique sur OS/navigateurs[m
+   modernes, pas besoin d'éditer le fichier hosts)[m
+[32m+[m[32m- **HTTPS en dev** : certificats mkcert (racine du projet), Vite en HTTPS natif,[m
+[32m+[m[32m  Django via `runserver_plus` (django-extensions) — voir Commandes et « État réel du code »[m
+[32m+[m[32m  pour le piège du wildcard `*.localhost` non valide en TLS.[m
+[32m+[m[32m- **Stockage fichiers** : MinIO (S3-compatible) en conteneur Docker local, via[m
+[32m+[m[32m  `django-storages` + `boto3` — remplace le stockage disque du POC initial. Voir[m
+[32m+[m[32m  Commandes pour la commande de lancement et la création du bucket.[m
+ [m
+ ## Commandes[m
+ [m
+[31m-```bash[m
+[31m-# Backend[m
+[31m-cd backend && source .venv/bin/activate && python manage.py runserver[m
+[32m+[m[32mLe `.venv` backend est un venv **Windows** (`backend/.venv/Scripts/`), pas un venv Unix.[m
+[32m+[m
+[32m+[m[32m```powershell[m
+[32m+[m[32m# Backend — HTTPS via runserver_plus (django-extensions), remplace runserver depuis le[m
+[32m+[m[32m# passage en HTTPS. Les deux serveurs de dev tournent exclusivement en HTTPS[m
+[32m+[m[32m# (SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE=True) : ne pas revenir à runserver nu, les[m
+[32m+[m[32m# cookies de session cesseraient d'être transmis.[m
+[32m+[m[32mcd backend; .venv\Scripts\Activate.ps1; python manage.py runserver_plus --cert-file ../localhost+5.pem --key-file ../localhost+5-key.pem[m
+[32m+[m
+[32m+[m[32m# Backend (Git Bash / le tool Bash de Claude Code)[m
+[32m+[m[32mcd backend && source .venv/Scripts/activate && python manage.py runserver_plus --cert-file ../localhost+5.pem --key-file ../localhost+5-key.pem[m
+[32m+[m
+[32m+[m[32m# Régénérer les certificats mkcert si besoin (racine du projet). IMPORTANT : lister les[m
+[32m+[m[32m# sous-domaines EXACTS en plus du wildcard — *.localhost seul ne suffit pas, voir[m
+[32m+[m[32m# "État réel du code" pour l'explication (wildcard rejeté sur un domaine à un seul[m
+[32m+[m[32m# label par tous les validateurs TLS, pas juste une bizarrerie Windows).[m
+[32m+[m[32mmkcert localhost "*.localhost" officea.localhost officeb.localhost 127.0.0.1 ::1[m
+[32m+[m
+[32m+[m[32m# MinIO (stockage S3-compatible des Document) — conteneur sans volume ni --name : les[m
+[32m+[m[32m# données ne survivent pas à la suppression du conteneur, le bucket est à recréer à[m
+[32m+[m[32m# chaque fois (voir juste après).[m
+[32m+[m[32mdocker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"[m
+[32m+[m
+[32m+[m[32m# Créer le bucket MinIO (jamais automatique) — identifiants par défaut minioadmin/minioadmin[m
+[32m+[m[32mpython -c "[m
+[32m+[m[32mimport boto3[m
+[32m+[m[32ms3 = boto3.client('s3', endpoint_url='http://localhost:9000',[m
+[32m+[m[32m                   aws_access_key_id='minioadmin', aws_secret_access_key='minioadmin')[m
+[32m+[m[32ms3.create_bucket(Bucket='espace-notarial-documents')[m
+[32m+[m[32m"[m
+ [m
+[31m-# Frontend[m
+[31m-cd frontend && npm run dev[m
+[32m+[m[32m# Migrations (déjà générées et appliquées — à relancer seulement après modif de modèle)[m
+[32m+[m[32mcd backend && python manage.py makemigrations && python manage.py migrate[m
+ [m
+ # Recréer les données de démo (idempotent, peut être relancé sans risque)[m
+ cd backend && python manage.py seed_demo[m
+[32m+[m
+[32m+[m[32m# Enregistrer/migrer la base SQLite de chaque office (à relancer après tout nouvel[m
+[32m+[m[32m# Office créé — idempotent). Accepte --office=<subdomain> pour n'en cibler qu'un.[m
+[32m+[m[32mcd backend && python manage.py migrate_all_tenants[m
+[32m+[m
+[32m+[m[32m# Frontend — HTTPS natif Vite (server.https dans vite.config.ts, mêmes certificats mkcert)[m
+[32m+[m[32mcd frontend && npm run dev        # serveur de dev Vite (https://localhost:5173)[m
+[32m+[m[32mcd frontend && npm run build      # tsc -b && vite build[m
+[32m+[m[32mcd frontend && npm run lint       # oxlint[m
+[32m+[m
+[32m+[m[32m# Tests backend (15 tests sur la plomberie multi-tenant dans datarooms/tests.py)[m
+[32m+[m[32mcd backend && python manage.py test[m
+ ```[m
+ [m
+[32m+[m[32mIl n'y a pas de `requirements.txt` ; les dépendances ne sont installées que dans[m
+[32m+[m[32m`backend/.venv`. Si ce venv est absent/à recréer, il faudra au minimum `django`,[m
+[32m+[m[32m`djangorestframework`, `django-cors-headers`, `django-extensions`, `Werkzeug`,[m
+[32m+[m[32m`pyOpenSSL`, `django-storages`, `boto3`.[m
+[32m+[m
+[32m+[m[32m`mkcert` n'est pas sur le PATH de Git Bash/PowerShell dans cet environnement — installé[m
+[32m+[m[32mvia WinGet, binaire trouvable via[m
+[32m+[m[32m`AppData\Local\Microsoft\WinGet\Packages\FiloSottile.mkcert_.../mkcert.exe` si besoin de[m
+[32m+[m[32ml'invoquer par chemin complet.[m
+[32m+[m
+ ## Architecture multi-tenant (décision confirmée — plus de simplification)[m
+ [m
+ - **Une base SQLite par office**, routée dynamiquement via un routeur de base de données[m
+[36m@@ -67,9 +127,19 @@[m [mcd backend && python manage.py seed_demo[m
+   un office précis (comptes utilisateurs et `OfficeMembership`, registre des `Office`[m
+   eux-mêmes, `Module`) — c'est cette base par défaut qui permet de savoir, avant même de[m
+   choisir la base tenant, à quels offices un utilisateur a accès.[m
+[31m-- **Sous-domaine** : middleware qui lit le `Host` de la requête pour résoudre l'office, et[m
+[31m-  cookie de session avec `domain=.localhost` pour que l'identité partagée fonctionne en[m
+[31m-  traversant les sous-domaines sans reconnexion.[m
+[32m+[m[32m- **Sous-domaine** : middleware qui lit le `Host` de la requête pour résoudre l'office[m
+[32m+[m[32m  (`datarooms.tenancy.middleware.TenantResolutionMiddleware`, fait le 26/08/2026).[m
+[32m+[m[32m- **Identité partagée — ⚠️ pas un cookie `domain=.localhost`, comme envisagé[m
+[32m+[m[32m  initialement** : testé et confirmé cassé (curl + Chrome réel, le 26/08/2026) —[m
+[32m+[m[32m  `localhost` est traité par les navigateurs comme un suffixe public (Public Suffix[m
+[32m+[m[32m  List, protection anti-supercookie RFC 6265bis), donc un cookie ne peut pas y être[m
+[32m+[m[32m  scopé à `.localhost` en entier. À la place : **chaque office garde sa propre session**[m
+[32m+[m[32m  (cookie scopé exactement à son hôte, sans `Domain`), et passer d'un office à l'autre se[m
+[32m+[m[32m  fait par un **échange de ticket signé à usage unique** (`datarooms/tenancy/sso.py`,[m
+[32m+[m[32m  `django.core.signing`) — le navigateur navigue vers[m
+[32m+[m[32m  `<office_cible>.localhost:8000/api/sso/consume/?ticket=...`, qui pose la session locale[m
+[32m+[m[32m  puis redirige vers le frontend de l'office cible. Le résultat perçu (« sans[m
+[32m+[m[32m  reconnexion ») reste identique pour l'utilisateur.[m
+ [m
+ ## Modèle de données clé[m
+ [m
+[36m@@ -79,8 +149,26 @@[m [mcd backend && python manage.py seed_demo[m
+ - `OfficeMembership` : table pivot **user × office × rôle** — base par défaut. Porte le[m
+   principe « compte unique, plusieurs offices » du document de vision (§2 et §6 pour les[m
+   rôles : superadmin / admin / membre / client)[m
+[31m-- Les modèles métier propres à un office (datarooms, documents...) vivront dans la base du[m
+[31m-  tenant, pas dans la base par défaut.[m
+[32m+[m[32m- `Dataroom` : premier modèle métier tenant (fait le 26/08/2026) — vit dans la base de[m
+[32m+[m[32m  l'office (`tenant_<subdomain>`), pas dans `default`. Un seul type de dataroom (pas de[m
+[32m+[m[32m  distinction électronique / espace de travail / dossier de divorce comme en V1 — voir[m
+[32m+[m[32m  « Écarts assumés »). Volontairement pas de `ForeignKey` vers `Office` : l'office est[m
+[32m+[m[32m  déjà déterminé par le fichier SQLite dans lequel la ligne est stockée, et une vraie FK[m
+[32m+[m[32m  cross-DB n'est de toute façon pas possible avec ce mécanisme (limite déjà anticipée).[m
+[32m+[m[32m  Absent de `SHARED_MODELS` dans `tenancy/router.py` **par conception** — c'est ce qui le[m
+[32m+[m[32m  fait router vers la base tenant. Champs : `name`, `created_at`.[m
+[32m+[m[32m- `Document` : deuxième modèle métier tenant (fait le 26/08/2026) — vit dans la même base[m
+[32m+[m[32m  tenant que `Dataroom`. `ForeignKey` vers `Dataroom` **classique** (pas de limite ici :[m
+[32m+[m[32m  les deux modèles vivent dans la même base physique, contrairement à une FK vers[m
+[32m+[m[32m  `Office`/`User`). Champs : `dataroom`, `name`, `file` (`FileField`), `uploaded_at`.[m
+[32m+[m[32m  Fichier stocké sous `backend/media/<subdomain>/dataroom_<id>/<nom>` — chemin calculé par[m
+[32m+[m[32m  `datarooms.tenancy.storage.tenant_document_path`, qui réutilise le même `ContextVar` que[m
+[32m+[m[32m  le routeur DB (`get_current_tenant()`), pas un nouveau mécanisme. Validation du format à[m
+[32m+[m[32m  l'upload par extension (`datarooms/validators.py`, liste tirée de[m
+[32m+[m[32m  `EN_vision_AMOA_MVP_v0.5_fusionne.md` §4.7) — pas d'antivirus/analyse de contenu (§7.5[m
+[32m+[m[32m  du document de vision, hors périmètre POC).[m
+[32m+[m[32m- Les futurs modèles métier propres à un office suivront le même principe que[m
+[32m+[m[32m  `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.[m
+ [m
+ ## Repères visuels V1 (référence de STYLE uniquement)[m
+ [m
+[36m@@ -145,23 +233,245 @@[m [mcd backend && python manage.py seed_demo[m
+    Office A → revenir côté React, rafraîchir → le bouton disparaît sans redéploiement[m
+    (preuve du pari n°1, le point qui doit le plus percuter)[m
+ [m
+[32m+[m[32m## État réel du code (audit du 25/08/2026, corrigé le 26/08/2026)[m
+[32m+[m
+[32m+[m[32mCette section reflète ce qui est *effectivement dans le code*, par opposition à ce que[m
+[32m+[m[32mla section suivante décrit comme cible atteinte. À vérifier/mettre à jour à chaque[m
+[32m+[m[32msession si le code a bougé.[m
+[32m+[m
+[32m+[m[32m- **App Django `datarooms`**, dans `backend/datarooms/` : `models.py` (`Module`,[m
+[32m+[m[32m  `Office`, `OfficeMembership` — tous routés vers la base `default`), `admin.py`,[m
+[32m+[m[32m  `views.py`, `urls.py`, `management/commands/` (`seed_demo`, `migrate_all_tenants`),[m
+[32m+[m[32m  et le sous-package `tenancy/` (`context.py`, `registry.py`, `router.py`,[m
+[32m+[m[32m  `middleware.py`) ajouté le 26/08/2026 pour le multi-DB.[m
+[32m+[m[32m- **✅ Fait le 26/08/2026 — HTTPS en dev (mkcert) + stockage MinIO** :[m
+[32m+[m[32m  - **HTTPS** : `runserver_plus` (django-extensions + Werkzeug + pyOpenSSL) côté backend,[m
+[32m+[m[32m    `server.https` natif côté Vite (`frontend/vite.config.ts`), certificats mkcert à la[m
+[32m+[m[32m    racine du projet. **Découverte importante, indépendante de Windows/curl** : un[m
+[32m+[m[32m    certificat wildcard `*.localhost` seul ne suffit **pas** pour `officea.localhost`/[m
+[32m+[m[32m    `officeb.localhost` — `openssl verify` confirme `hostname mismatch` (`num=62`), et[m
+[32m+[m[32m    Chrome affiche un interstitiel « Erreur liée à la confidentialité » (`mkcert`[m
+[32m+[m[32m    lui-même avertit à la génération : *"many browsers don't support second-level[m
+[32m+[m[32m    wildcards like `*.localhost`"*). Cause : même famille de restriction que le rejet des[m
+[32m+[m[32m    cookies `Domain=.localhost` déjà rencontré (protection Public-Suffix-List contre les[m
+[32m+[m[32m    wildcards trop larges) — mais appliquée ici à la correspondance TLS, pas aux cookies.[m
+[32m+[m[32m    **Solution** : régénérer le certificat en listant les sous-domaines **exacts** en[m
+[32m+[m[32m    plus du wildcard (`mkcert localhost "*.localhost" officea.localhost officeb.localhost[m
+[32m+[m[32m    127.0.0.1 ::1`) — un SAN exact n'est jamais soumis à cette restriction. Fichiers[m
+[32m+[m[32m    actuels : `localhost+5.pem`/`localhost+5-key.pem` (les anciens `localhost+1.*`[m
+[32m+[m[32m    wildcard-only ont été supprimés). Vérifié de bout en bout en Chrome réel : chargement[m
+[32m+[m[32m    direct de `https://officea.localhost:5173` sans avertissement, aucune erreur console,[m
+[32m+[m[32m    tous les appels API en `200`.[m
+[32m+[m[32m  - **Piège opérationnel rencontré en cours de route** : `netstat` via Git Bash a affiché[m
+[32m+[m[32m    des PID de processus déjà terminés comme toujours `LISTENING` (sortie manifestement[m
+[32m+[m[32m    périmée), ce qui a fait tuer les mauvais PID à plusieurs reprises et laissé[m
+[32m+[m[32m    s'accumuler jusqu'à 8 processus `runserver_plus` zombies sur le port 8000 (dont[m
+[32m+[m[32m    d'anciens avec l'ancien certificat, expliquant des `403`/échecs TLS intermittents[m
+[32m+[m[32m    malgré un redémarrage apparemment réussi). `Get-NetTCPConnection`/[m
+[32m+[m[32m    `Get-CimInstance Win32_Process` (PowerShell) se sont montrés fiables, contrairement[m
+[32m+[m[32m    à `netstat -ano` dans ce Git Bash — à privilégier pour diagnostiquer quel processus[m
+[32m+[m[32m    tient réellement un port sur cette machine.[m
+[32m+[m[32m  - **Répercussions HTTP → HTTPS corrigées** : `CORS_ALLOWED_ORIGIN_REGEXES`,[m
+[32m+[m[32m    `CSRF_TRUSTED_ORIGINS` (`settings.py`), la redirection de `consume_sso_ticket`[m
+[32m+[m[32m    (`views.py`), `apiOrigin` et l'URL de ticket SSO dans `switchOffice` (`App.tsx`) —[m
+[32m+[m[32m    tous passés en `https://`. Ajouté `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE =[m
+[32m+[m[32m    True` : si quelqu'un relance `runserver` nu (HTTP) par erreur, les cookies de[m
+[32m+[m[32m    session cessent d'être transmis — c'est le signal qu'il faut repasser par[m
+[32m+[m[32m    `runserver_plus` avec les certificats.[m
+[32m+[m[32m  - **Stockage MinIO** : `Document.file` était déjà un `FileField` standard (aucune[m
+[32m+[m[32m    correction nécessaire, vérifié) — bascule transparente vers[m
+[32m+[m[32m    `storages.backends.s3.S3Storage` via `STORAGES["default"]["OPTIONS"]`[m
+[32m+[m[32m    (`bucket_name`, `endpoint_url=http://localhost:9000`, `access_key`/`secret_key[m
+[32m+[m[32m    =minioadmin`, `addressing_style="path"` — requis pour MinIO sans DNS wildcard,[m
+[32m+[m[32m    `default_acl=None` — MinIO rejette souvent les en-têtes ACL). `MEDIA_URL`/[m
+[32m+[m[32m    `MEDIA_ROOT` et le service local de `/media/` (`config/urls.py`) supprimés,[m
+[32m+[m[32m    devenus morts. `tenant_document_path` (déjà existant) réutilisé sans changement —[m
+[32m+[m[32m    c'est tout l'intérêt de l'abstraction `FileField`. Bucket `espace-notarial-documents`[m
+[32m+[m[32m    créé manuellement (ni MinIO ni S3 ne le font automatiquement). **Isolation vérifiée[m
+[32m+[m[32m    à trois niveaux indépendants** : upload dans `officea` → objet sous[m
+[32m+[m[32m    `officea/dataroom_2/...` (confirmé par `boto3.list_objects_v2` en dehors de[m
+[32m+[m[32m    Django, et visuellement dans la console MinIO `localhost:9001`) ; upload dans[m
+[32m+[m[32m    `officeb` → `officeb/dataroom_1/...`, aucun mélange. `document.file.url` renvoie[m
+[32m+[m[32m    désormais une URL MinIO **présignée** (expire) plutôt qu'un chemin `/media/`[m
+[32m+[m[32m    statique — améliore la limite de sécurité notée précédemment (fichiers servis sans[m
+[32m+[m[32m    contrôle d'accès une fois l'URL connue).[m
+[32m+[m[32m  - **Limites connues, pas corrigées** : conteneur MinIO lancé sans `-v`/`--name`[m
+[32m+[m[32m    (commande demandée telle quelle) — les données ne survivent pas à sa suppression, le[m
+[32m+[m[32m    bucket est à recréer à chaque nouveau conteneur (commande documentée ci-dessus). Le[m
+[32m+[m[32m    document `contrat.pdf` uploadé lors d'un chantier précédent (stockage disque) n'a[m
+[32m+[m[32m    pas été migré vers MinIO — sa ligne existe toujours en base tenant mais pointe vers[m
+[32m+[m[32m    une clé S3 inexistante, sans conséquence pour la démo (nouveaux documents testés à[m
+[32m+[m[32m    la place).[m
+[32m+[m[32m- **✅ Fait le 26/08/2026 — une base SQLite par office** : `DATABASE_ROUTERS` pointe[m
+[32m+[m[32m  vers `datarooms.tenancy.router.TenantRouter`. Les 3 modèles existants (`Module`,[m
+[32m+[m[32m  `Office`, `OfficeMembership`) sont tous classés partagés (`SHARED_MODELS`/[m
+[32m+[m[32m  `SHARED_APPS` dans `router.py`) et restent sur `default` (`backend/db.sqlite3`).[m
+[32m+[m[32m  `datarooms.tenancy.middleware.TenantResolutionMiddleware` résout le tenant depuis[m
+[32m+[m[32m  le sous-domaine du `Host` de la requête (fait le 26/08/2026 — voir entrée dédiée[m
+[32m+[m[32m  plus bas ; l'ancien `?office=<subdomain>` transitoire a disparu) et peuple une[m
+[32m+[m[32m  `ContextVar` consultée par le routeur, ainsi que `request.office`.[m
+[32m+[m[32m  `python manage.py migrate_all_tenants` crée/migre un fichier SQLite par `Office`[m
+[32m+[m[32m  sous `backend/tenants/` (ignoré par `.gitignore`).[m
+[32m+[m[32m- **✅ Fait le 26/08/2026 — premier modèle métier tenant (`Dataroom`), isolation[m
+[32m+[m[32m  physique vérifiée** : `Dataroom` (`name`, `created_at`, pas de FK vers `Office` —[m
+[32m+[m[32m  voir « Modèle de données clé ») ajouté à `models.py`, migration[m
+[32m+[m[32m  `datarooms/migrations/0002_dataroom.py` générée. Confirmé par inspection directe des[m
+[32m+[m[32m  3 fichiers `.sqlite3` (donc sans dépendre du routeur/ORM pour la preuve) :[m
+[32m+[m[32m  `db.sqlite3` (default) n'a **pas** la table `datarooms_dataroom` (le routeur bloque[m
+[32m+[m[32m  sa migration là) ; `tenants/officea.sqlite3` et `tenants/officeb.sqlite3` l'ont[m
+[32m+[m[32m  toutes les deux (via `migrate_all_tenants`, rejoué après la nouvelle migration). Une[m
+[32m+[m[32m  dataroom créée dans `officea` (`Succession Dupont`) via[m
+[32m+[m[32m  `Dataroom.objects.create(...)` sous contexte tenant `officea` n'apparaît ni dans[m
+[32m+[m[32m  `officeb.sqlite3` (vide) ni dans `default`. C'était le point sur lequel le chantier[m
+[32m+[m[32m  précédent (routeur multi-DB) restait non prouvé faute de modèle métier réel — c'est[m
+[32m+[m[32m  fait.[m
+[32m+[m[32m- **✅ Fait le 26/08/2026 — API Dataroom/Document + deuxième modèle métier tenant** :[m
+[32m+[m[32m  `GET`/`POST /api/datarooms/` (liste/création) et[m
+[32m+[m[32m  `GET`/`POST /api/datarooms/<id>/documents/` (liste/upload multipart) ajoutés à[m
+[32m+[m[32m  `views.py`/`urls.py`. `Document` (`dataroom` FK, `name`, `file`, `uploaded_at`) suit[m
+[32m+[m[32m  le même patron que `Dataroom` (absent de `SHARED_MODELS`, migration[m
+[32m+[m[32m  `0003_document.py`). Fichiers stockés sous `backend/media/<subdomain>/dataroom_<id>/`[m
+[32m+[m[32m  (`MEDIA_ROOT`/`MEDIA_URL` ajoutés à `settings.py`, servis en dev via `static()` dans[m
+[32m+[m[32m  `config/urls.py`, `media/` ignoré par `.gitignore`) — le chemin par tenant réutilise[m
+[32m+[m[32m  `get_current_tenant()`, pas de nouveau mécanisme. Validation d'upload par extension[m
+[32m+[m[32m  (`datarooms/validators.py`, liste §4.7 du document de vision). **CSRF vérifié en[m
+[32m+[m[32m  conditions réelles** : `POST /api/datarooms/` sans header `X-CSRFToken` → `403`[m
+[32m+[m[32m  ("CSRF token missing"), avec le header (valeur du cookie `csrftoken`) → `201` — le[m
+[32m+[m[32m  frontend (pas encore branché sur ces endpoints) devra utiliser le helper[m
+[32m+[m[32m  `getCookie('csrftoken')` déjà présent dans `App.tsx` pour `switchOffice`. Isolation[m
+[32m+[m[32m  confirmée par inspection directe des 3 fichiers `.sqlite3` (comme pour `Dataroom` :[m
+[32m+[m[32m  `TestCase` ne gère pas bien les alias de DB enregistrés paresseusement — limite déjà[m
+[32m+[m[32m  documentée) et du dossier `media/`.[m
+[32m+[m[32m- ⚠️ **Limite connue — fichiers servis sans contrôle d'accès** : `/media/<subdomain>/...`[m
+[32m+[m[32m  est servi par `django.views.static.serve` (dev only) sans revérifier l'appartenance à[m
+[32m+[m[32m  l'office une fois l'URL connue, contrairement aux endpoints API qui vérifient bien[m
+[32m+[m[32m  `IsAuthenticated` + membership. Le chemin par subdomain évite une fuite *accidentelle*[m
+[32m+[m[32m  entre tenants au niveau stockage mais n'est pas un contrôle d'accès. Cohérent avec le[m
+[32m+[m[32m  niveau de simplification déjà accepté ailleurs (`DEBUG=True`, pas de HTTPS, pas de vrai[m
+[32m+[m[32m  stockage S3 — déjà hors périmètre) ; à durcir (vue de téléchargement authentifiée) si[m
+[32m+[m[32m  ce chantier va au-delà du POC.[m
+[32m+[m[32m- **Note pour tout futur modèle métier tenant** : suivre exactement le patron de[m
+[32m+[m[32m  `Dataroom`/`Document` — l'ajouter à `models.py`, **ne pas** l'ajouter à[m
+[32m+[m[32m  `SHARED_MODELS` dans `tenancy/router.py` (l'absence est ce qui le fait router vers le[m
+[32m+[m[32m  tenant), générer la migration, puis relancer `migrate_all_tenants` (le `migrate`[m
+[32m+[m[32m  simple sur `default` l'ignorera correctement, c'est attendu).[m
+[32m+[m[32m- **✅ Corrigé le 26/08/2026 — routage API** : `datarooms/urls.py` route désormais[m
+[32m+[m[32m  `ping/`, `login/` (→ `login_view`), `my-offices/`, `tenant-config/` et[m
+[32m+[m[32m  `modules/coffre-fort/` (→ `coffre_fort_view`) ; `views.py` définit maintenant[m
+[32m+[m[32m  `ping` (`@api_view(['GET'])`, sans auth requise). Les 5 routes ont été testées[m
+[32m+[m[32m  manuellement via `curl` avec le compte `carla` et répondent en 200.[m
+[32m+[m[32m- **✅ Corrigé le 26/08/2026 — auth par token DRF inopérante** (obsolète depuis, voir[m
+[32m+[m[32m  entrée suivante) : `settings.py` ne déclarait aucun[m
+[32m+[m[32m  `REST_FRAMEWORK.DEFAULT_AUTHENTICATION_CLASSES`, donc le header[m
+[32m+[m[32m  `Authorization: Token <key>` était ignoré. Le token DRF a depuis été abandonné au[m
+[32m+[m[32m  profit d'une auth par session (voir ci-dessous) ; `rest_framework.authtoken` reste[m
+[32m+[m[32m  installé (table orpheline dans `default`, inoffensive) mais n'est plus référencé.[m
+[32m+[m[32m- **✅ Fait le 26/08/2026 — routage par sous-domaine réel + identité partagée sans[m
+[32m+[m[32m  reconnexion (pari n°2)** : `TenantResolutionMiddleware` résout désormais l'office[m
+[32m+[m[32m  depuis le `Host` réel (`officea.localhost:8000` → `subdomain="officea"`), plus[m
+[32m+[m[32m  besoin de `?office=`. Auth basculée de `TokenAuthentication` vers[m
+[32m+[m[32m  `SessionAuthentication` (`login_view` appelle `django.contrib.auth.login`).[m
+[32m+

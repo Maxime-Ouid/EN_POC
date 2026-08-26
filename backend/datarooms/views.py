@@ -1,18 +1,36 @@
+from django.contrib.auth import authenticate, get_user_model, login
+from django.http import HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import render
 
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.views import ObtainAuthToken
-from .models import Office
 
-# Create your views here.
-class LoginView(ObtainAuthToken):
-    def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        token = Token.objects.get(key=response.data['token'])
-        return Response({"token": token.key, "username": token.user.username})
+from .models import Dataroom, Document, Office
+from .tenancy.sso import consume_ticket, issue_ticket
+from .validators import is_accepted_extension
+
+User = get_user_model()
+
+@api_view(['GET'])
+def ping(request):
+    return Response({"status": "ok"})
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return Response({"error": "Identifiants incorrects"}, status=400)
+    login(request, user)
+    return Response({"username": user.username})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whoami(request):
+    return Response({"username": request.user.username})
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -26,13 +44,12 @@ def my_offices(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def tenant_config(request):
-    subdomain = request.GET.get('office')
-    if not subdomain:
-        return Response({"error": "paramètre 'office' requis"}, status=400)
-    if not request.user.memberships.filter(office__subdomain=subdomain).exists():
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
-    office = Office.objects.get(subdomain=subdomain)
     return Response({
         "name": office.name,
         "logo_url": office.logo_url,
@@ -43,10 +60,82 @@ def tenant_config(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def coffre_fort_view(request):
-    subdomain = request.GET.get('office')
-    if not request.user.memberships.filter(office__subdomain=subdomain).exists():
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
         return Response({"error": "accès non autorisé à cet office"}, status=403)
-    office = Office.objects.get(subdomain=subdomain)
     if not office.enabled_modules.filter(slug="coffre-fort").exists():
         return Response({"error": "module non activé pour cet office"}, status=403)
     return Response({"message": "Contenu du module Coffre-fort (démo)"})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def issue_sso_ticket(request):
+    target = request.data.get('target')
+    office = Office.objects.filter(subdomain=target).first()
+    if office is None or not request.user.memberships.filter(office=office).exists():
+        return Response({"error": "office cible invalide ou non autorisé"}, status=400)
+    ticket = issue_ticket(request.user.id, office.subdomain)
+    return Response({"ticket": ticket})
+
+def consume_sso_ticket(request):
+    payload = consume_ticket(request.GET.get('ticket', ''))
+    if payload is None or request.office is None or payload.get('target') != request.office.subdomain:
+        return HttpResponseBadRequest("Ticket SSO invalide ou expiré.")
+    try:
+        user = User.objects.get(pk=payload['user_id'])
+    except User.DoesNotExist:
+        return HttpResponseBadRequest("Ticket SSO invalide ou expiré.")
+    login(request, user)
+    return HttpResponseRedirect(f"https://{request.office.subdomain}.localhost:5173/")
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def datarooms_view(request):
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    if request.method == 'POST':
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        dataroom = Dataroom.objects.create(name=name)
+        return Response({"id": dataroom.id, "name": dataroom.name}, status=201)
+
+    datarooms = Dataroom.objects.order_by('-created_at')
+    return Response([
+        {"id": d.id, "name": d.name, "created_at": d.created_at} for d in datarooms
+    ])
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def documents_view(request, dataroom_id):
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    try:
+        dataroom = Dataroom.objects.get(pk=dataroom_id)
+    except Dataroom.DoesNotExist:
+        return Response({"error": "dataroom introuvable"}, status=404)
+
+    if request.method == 'POST':
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({"error": "fichier requis"}, status=400)
+        if not is_accepted_extension(upload.name):
+            return Response({"error": "format de fichier non pris en charge"}, status=400)
+        document = Document.objects.create(dataroom=dataroom, name=upload.name, file=upload)
+        return Response({"id": document.id, "name": document.name, "file": document.file.url}, status=201)
+
+    documents = dataroom.documents.order_by('-uploaded_at')
+    return Response([
+        {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at}
+        for d in documents
+    ])
