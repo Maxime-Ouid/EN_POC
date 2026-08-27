@@ -18,7 +18,7 @@
    =========================================================================== */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FRONTEND_DIR = fileURLToPath(new URL('..', import.meta.url));
@@ -41,14 +41,26 @@ const BASELINE_PATH = join(FRONTEND_DIR, 'scripts', 'design-system-baseline.json
                                            avoir CORRIGÉ, jamais pour se taire.
    ------------------------------------------------------------------------ */
 
+/* --- Chemins ---------------------------------------------------------------
+   Tous les chemins manipulés ici sont en séparateurs `/`, y compris sous
+   Windows. Sans cette normalisation, les clés de la référence generée sur une
+   machine (`src/styles/components.css::…`) ne correspondent à rien sur l'autre
+   (`src\styles\components.css::…`) et les 57 écarts hérités ressortent tous
+   comme nouveaux — constaté, pas théorique.
+   ------------------------------------------------------------------------ */
+// Découpe sur les deux séparateurs plutôt que sur `path.sep` : le comportement
+// devient identique quel que soit l'OS, donc testable partout.
+const toPosix = p => p.split(/[\\/]/).join('/');
+const relPath = file => toPosix(relative(FRONTEND_DIR, file));
+
 /* --- Ce qui a le DROIT de contenir des couleurs littérales ---------------- */
 // tokens.css EST la palette ; schema.ts porte les mêmes valeurs par défaut pour
 // l'écran de personnalisation ; color.ts manipule des couleurs par nature.
 const COLOR_LITERAL_ALLOWED = [
-  join('src', 'styles', 'tokens.css'),
-  join('src', 'theme', 'schema.ts'),
-  join('src', 'theme', 'color.ts'),
-  join('src', 'theme', 'engine.ts'),
+  'src/styles/tokens.css',
+  'src/theme/schema.ts',
+  'src/theme/color.ts',
+  'src/theme/engine.ts',
 ];
 
 /* --- Classes de composants : où chacune a le droit d'être écrite ---------- */
@@ -79,7 +91,7 @@ const COMPONENT_FILES = {
   slideover: ['Slideover.tsx', 'DocumentSlideover.tsx'],
 };
 // Le UI kit montre les composants ET leurs classes : il est hors périmètre.
-const COMPONENT_CLASS_EXEMPT_DIRS = [join('src', 'uikit')];
+const COMPONENT_CLASS_EXEMPT_DIRS = ['src/uikit'];
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 const FUNCTIONAL_COLOR = /\b(?:rgba?|hsla?)\s*\(/g;
@@ -99,13 +111,13 @@ function walk(dir) {
 const files = walk(SRC_DIR).filter(f => /\.(tsx?|css)$/.test(f));
 
 function report(file, line, rule, message) {
-  violations.push({ file: relative(FRONTEND_DIR, file), line, rule, message });
+  violations.push({ file: relPath(file), line, rule, message });
 }
 
 /* --- 1. Couleurs codées en dur ------------------------------------------- */
 function checkHardcodedColors(file, lines) {
-  const rel = relative(FRONTEND_DIR, file);
-  if (COLOR_LITERAL_ALLOWED.some(allowed => rel === allowed)) return;
+  const rel = relPath(file);
+  if (COLOR_LITERAL_ALLOWED.includes(rel)) return;
 
   lines.forEach((text, i) => {
     if (text.trimStart().startsWith('*') || text.trimStart().startsWith('//')) return;
@@ -149,10 +161,10 @@ function checkUnknownClasses(file, lines, defined) {
 
 /* --- 3. Classes de composants recopiées ---------------------------------- */
 function checkComponentClasses(file, lines) {
-  const rel = relative(FRONTEND_DIR, file);
+  const rel = relPath(file);
   if (rel.endsWith('.css')) return;
-  if (COMPONENT_CLASS_EXEMPT_DIRS.some(dir => rel.startsWith(dir + sep))) return;
-  const basename = rel.split(sep).pop();
+  if (COMPONENT_CLASS_EXEMPT_DIRS.some(dir => rel.startsWith(`${dir}/`))) return;
+  const basename = rel.split('/').pop();
 
   lines.forEach((text, i) => {
     for (const [cls, component] of Object.entries(COMPONENT_CLASSES)) {
@@ -197,6 +209,28 @@ const argv = process.argv.slice(2);
 const strict = argv.includes('--strict');
 const updating = argv.includes('--update-baseline');
 const counts = tally(violations);
+
+/* --- Auto-test : `--self-test` -------------------------------------------
+   Garde-fou du garde-fou. La référence a déjà été rendue inopérante une fois
+   sous Windows (clés en `\` d'un côté, `/` de l'autre : les 57 écarts hérités
+   ressortaient tous comme nouveaux, le script devenait inutilisable sur la
+   machine de développement). Ces trois assertions le rattraperaient.
+   ------------------------------------------------------------------------ */
+if (argv.includes('--self-test')) {
+  const checks = [
+    ['chemin Windows normalisé', toPosix('src\\styles\\components.css') === 'src/styles/components.css'],
+    ['chemin POSIX inchangé', toPosix('src/styles/components.css') === 'src/styles/components.css'],
+    [
+      'aucune clé de référence en séparateur Windows',
+      Object.keys(existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : {}).every(
+        k => !k.includes('\\'),
+      ),
+    ],
+  ];
+  const failed = checks.filter(([, ok]) => !ok);
+  for (const [label, ok] of checks) console.log(`${ok ? 'ok  ' : 'ÉCHEC'} ${label}`);
+  process.exit(failed.length ? 1 : 0);
+}
 
 if (updating) {
   writeFileSync(BASELINE_PATH, `${JSON.stringify(counts, null, 2)}\n`, 'utf8');

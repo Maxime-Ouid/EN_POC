@@ -146,3 +146,9 @@ python manage.py makemigrations --check --dry-run   # doit dire « No changes de
 `check:ds` compare à une **référence** : les écarts hérités du prototype sont
 acceptés, tout écart nouveau fait échouer. `--update-baseline` ne se lance
 qu'après avoir corrigé — jamais pour faire taire le script.
+
+Si le script annonce d'un coup ~57 écarts nouveaux sans que rien n'ait changé,
+c'est la référence qui n'est plus lue, pas le code qui a régressé :
+`node scripts/check-design-system.mjs --self-test` le dit en trois assertions
+(le cas s'est produit une fois, avec des chemins Windows en `\` face à une
+référence en `/`).
