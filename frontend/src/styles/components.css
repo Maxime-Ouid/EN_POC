@@ -559,3 +559,6 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 }
 .save-flash{font-size:11px;color:var(--success);font-weight:600;opacity:0;transition:opacity .25s;display:inline-flex;align-items:center;gap:4px;}
 .save-flash.show{opacity:1;}
+/* Pendant d'échec de .save-flash : l'enregistrement serveur a échoué, ce qui est
+   affiché n'est pas ce qui est enregistré pour l'office. */
+.save-error{font-size:11px;color:var(--warning);font-weight:600;display:inline-flex;align-items:center;gap:4px;}

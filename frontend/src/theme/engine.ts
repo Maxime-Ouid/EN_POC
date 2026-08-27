@@ -26,9 +26,47 @@ export interface ThemeState {
   shape: ShapeKey;
 }
 
-export const STORE_KEY = 'ent-tenant-theme-v2';
+/**
+ * Transport du thème vers sa source de vérité (l'office, côté serveur).
+ *
+ * Volontairement une interface et pas un appel direct à `api` : le dossier
+ * theme/ ne doit dépendre ni du client HTTP ni du backend du POC — c'est ce qui
+ * permet de le monter tel quel dans le UI kit et la maquette, sans réseau. Voir
+ * l'implémentation réelle dans src/api/theme.ts.
+ */
+export interface ThemeTransport {
+  /** Thème de l'office, ou null s'il n'a jamais été personnalisé (204). */
+  load: (signal?: AbortSignal) => Promise<ThemeState | null>;
+  save: (state: ThemeState) => Promise<void>;
+}
+
+const STORE_PREFIX = 'ent-tenant-theme-v2';
 /** id du <style> injecté dans le <head> qui porte les variables calculées. */
 export const STYLE_TAG_ID = 'tenant-theme-vars';
+
+/**
+ * Sous-domaine de l'office courant (`briand-hamon.localhost` → `briand-hamon`).
+ * `_` quand il n'y en a pas (localhost nu, tests, rendu hors navigateur).
+ */
+export function currentOfficeScope(): string {
+  if (typeof window === 'undefined') return '_';
+  const [label] = window.location.hostname.split('.');
+  return label && label !== 'localhost' ? label.toLowerCase() : '_';
+}
+
+/**
+ * Clé de stockage local, TOUJOURS suffixée par l'office.
+ *
+ * Sans ce suffixe, deux offices ouverts dans le même navigateur (cas normal
+ * pour un utilisateur multi-études, c'est tout l'intérêt du SSO) se partagent
+ * la personnalisation : le dernier qui enregistre repeint l'autre.
+ *
+ * Ce stockage n'est PAS la source de vérité — c'est un cache anti-flash. Le
+ * thème de référence est celui de l'office, servi par GET /api/tenant-theme/.
+ */
+export function themeStoreKey(scope: string = currentOfficeScope()): string {
+  return `${STORE_PREFIX}:${scope}`;
+}
 
 export function defaultThemeState(): ThemeState {
   const colors: Record<ThemeMode, Record<string, string>> = { light: {}, dark: {} };
@@ -121,20 +159,25 @@ export function normalizeThemeState(raw: unknown): ThemeState {
   return state;
 }
 
-export function loadThemeState(): ThemeState {
-  let raw: unknown = null;
+/** Lit le cache local de CET office. Renvoie null si rien n'y est enregistré. */
+export function readCachedThemeState(): ThemeState | null {
   try {
-    const s = localStorage.getItem(STORE_KEY);
-    if (s) raw = JSON.parse(s);
+    const s = localStorage.getItem(themeStoreKey());
+    if (!s) return null;
+    return normalizeThemeState(JSON.parse(s));
   } catch {
-    /* stockage indisponible (navigation privée, quota) — on repart des défauts */
+    /* stockage indisponible (navigation privée, quota) ou JSON abîmé */
+    return null;
   }
-  return normalizeThemeState(raw);
+}
+
+export function loadThemeState(): ThemeState {
+  return readCachedThemeState() ?? defaultThemeState();
 }
 
 export function persistThemeState(state: ThemeState): void {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    localStorage.setItem(themeStoreKey(), JSON.stringify(state));
   } catch {
     /* idem : la personnalisation reste appliquée en mémoire pour la session */
   }
@@ -142,7 +185,7 @@ export function persistThemeState(state: ThemeState): void {
 
 export function clearPersistedThemeState(): void {
   try {
-    localStorage.removeItem(STORE_KEY);
+    localStorage.removeItem(themeStoreKey());
   } catch {
     /* rien à faire */
   }

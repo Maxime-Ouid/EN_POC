@@ -1,14 +1,17 @@
+import json
+
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import connections
 from django.test import RequestFactory, TestCase
 
-from .models import Office
+from .models import Office, OfficeMembership
 from .tenancy.context import get_current_tenant, reset_current_tenant, set_current_tenant, TenantContext
 from .tenancy.middleware import TenantResolutionMiddleware
 from .tenancy.registry import tenant_alias, tenant_db_path
 from .tenancy.router import TenantRouter
 from .tenancy.sso import consume_ticket, issue_ticket
-from .validators import is_accepted_extension
+from .validators import ThemeValidationError, clean_theme_payload, is_accepted_extension
 
 
 class TenantContextTests(TestCase):
@@ -130,6 +133,131 @@ class TenantResolutionMiddlewareTests(TestCase):
         middleware(request)
 
         self.assertIsNone(seen["office"])
+
+
+class ThemeValidatorTests(TestCase):
+    def _payload(self, **overrides):
+        base = {
+            "colors": {"light": {"bg": "#fafafd"}, "dark": {"bg": "#100d1f"}},
+            "typography": "classique",
+            "shape": "equilibre",
+        }
+        base.update(overrides)
+        return base
+
+    def test_accepts_and_normalizes_a_valid_payload(self):
+        cleaned = clean_theme_payload(self._payload())
+        self.assertEqual(set(cleaned), {"colors", "typography", "shape"})
+        self.assertEqual(cleaned["colors"]["light"]["bg"], "#fafafd")
+
+    def test_drops_unknown_top_level_keys(self):
+        # Le stockage ne doit contenir que les trois clés du contrat : un client
+        # qui envoie du rab ne pollue pas Office.theme.
+        cleaned = clean_theme_payload(self._payload(surprise={"a": 1}))
+        self.assertNotIn("surprise", cleaned)
+
+    def test_rejects_unknown_presets(self):
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(self._payload(typography="comic"))
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(self._payload(shape="triangulaire"))
+
+    def test_rejects_css_escape_characters_in_a_value(self):
+        # La valeur finit dans une déclaration CSS générée côté front : une accolade
+        # permettrait de fermer la règle et d'en injecter d'autres.
+        payload = self._payload()
+        payload["colors"]["light"]["bg"] = "#fff} body{display:none"
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(payload)
+
+    def test_rejects_malformed_token_names(self):
+        payload = self._payload()
+        payload["colors"]["light"]["Fond Principal"] = "#fff"
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(payload)
+
+
+class TenantThemeApiTests(TestCase):
+    """GET/PUT /api/tenant-theme/ — persistance de la personnalisation par office."""
+
+    HOST = "officea.localhost"
+
+    def setUp(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("officea"), None)
+        self.addCleanup(connections.databases.pop, tenant_alias("officeb"), None)
+        self.office = Office.objects.create(subdomain="officea", name="Office A")
+        self.other_office = Office.objects.create(subdomain="officeb", name="Office B")
+
+        self.admin = User.objects.create_user(username="admin-a", password="motdepasse")
+        OfficeMembership.objects.create(user=self.admin, office=self.office, role="admin")
+
+        self.membre = User.objects.create_user(username="membre-a", password="motdepasse")
+        OfficeMembership.objects.create(user=self.membre, office=self.office, role="membre")
+
+        self.etranger = User.objects.create_user(username="etranger", password="motdepasse")
+        OfficeMembership.objects.create(user=self.etranger, office=self.other_office, role="admin")
+
+    def _theme(self, bg="#ffffff"):
+        return {
+            "colors": {"light": {"bg": bg}, "dark": {"bg": "#100d1f"}},
+            "typography": "moderne",
+            "shape": "arrondi",
+        }
+
+    def _put(self, theme):
+        return self.client.put(
+            "/api/tenant-theme/",
+            data=json.dumps(theme),
+            content_type="application/json",
+            HTTP_HOST=self.HOST,
+        )
+
+    def test_get_returns_204_when_office_never_customised(self):
+        # 204 et pas 200 avec un objet vide : le front doit pouvoir distinguer
+        # « jamais personnalisé » (→ valeurs Notantis) de « personnalisé en blanc ».
+        self.client.force_login(self.admin)
+        res = self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 204)
+
+    def test_admin_can_save_then_read_back(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self._put(self._theme("#eeeeee")).status_code, 200)
+
+        res = self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["colors"]["light"]["bg"], "#eeeeee")
+        self.assertEqual(res.json()["typography"], "moderne")
+
+    def test_saved_theme_is_scoped_to_the_office(self):
+        # Le point de toute l'opération : deux offices ne partagent pas leur thème.
+        self.client.force_login(self.admin)
+        self._put(self._theme("#eeeeee"))
+        self.other_office.refresh_from_db()
+        self.assertIsNone(self.other_office.theme)
+
+    def test_membre_can_read_but_not_write(self):
+        self.client.force_login(self.membre)
+        self.assertEqual(self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST).status_code, 204)
+        self.assertEqual(self._put(self._theme()).status_code, 403)
+
+    def test_non_member_is_refused(self):
+        self.client.force_login(self.etranger)
+        self.assertEqual(self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST).status_code, 403)
+
+    def test_anonymous_is_refused(self):
+        self.assertIn(self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST).status_code, (401, 403))
+
+    def test_unknown_subdomain_returns_404(self):
+        self.client.force_login(self.admin)
+        res = self.client.get("/api/tenant-theme/", HTTP_HOST="inconnu.localhost")
+        self.assertEqual(res.status_code, 404)
+
+    def test_invalid_payload_is_refused_and_nothing_is_stored(self):
+        self.client.force_login(self.admin)
+        res = self._put({"colors": {}, "typography": "comic", "shape": "arrondi"})
+        self.assertEqual(res.status_code, 400)
+        self.office.refresh_from_db()
+        self.assertIsNone(self.office.theme)
 
 
 class SsoTicketTests(TestCase):

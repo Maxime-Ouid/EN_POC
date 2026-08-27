@@ -99,8 +99,9 @@ cd backend && python manage.py migrate_all_tenants
 cd frontend && npm run dev        # serveur de dev Vite (https://localhost:5173)
 cd frontend && npm run build      # tsc -b && vite build
 cd frontend && npm run lint       # oxlint
+cd frontend && npm run check:ds   # écarts au design system (couleurs en dur, classes inconnues)
 
-# Tests backend (15 tests sur la plomberie multi-tenant dans datarooms/tests.py)
+# Tests backend (plomberie multi-tenant + API de personnalisation, datarooms/tests.py)
 cd backend && python manage.py test
 ```
 
@@ -132,6 +133,37 @@ l'invoquer par chemin complet.
 `SETUP.md` (racine du projet, créé le 26/08/2026) est le guide d'installation pas-à-pas
 pour un nouveau développeur — reprend les commandes ci-dessus dans l'ordre, avec
 prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
+
+## Front — design system et personnalisation par office
+
+**Avant de toucher à `frontend/src`, lire le skill `design-system`**
+(`.claude/skills/design-system/SKILL.md`, chargé automatiquement par Claude Code) :
+il porte les règles d'usage, l'inventaire des 72 composants, la procédure pour
+ajouter une couleur personnalisable et les pièges déjà rencontrés.
+
+L'essentiel en trois points :
+
+- **Aucune couleur en dur.** Tout passe par `var(--…)` — sinon la personnalisation
+  par office ne l'atteint pas. `npm run check:ds` le vérifie.
+- **Composer, pas recréer.** 72 composants existent dans
+  `frontend/src/components/{atoms,molecules,organisms,templates,pages}` ; le
+  catalogue interactif est sur `?view=ui-kit`.
+- **Le thème de l'office fait foi côté serveur** (`Office.theme`,
+  `GET`/`PUT /api/tenant-theme/`, écriture réservée aux rôles admin/superadmin).
+  `localStorage` n'est qu'un cache anti-flash, sous une clé suffixée par
+  sous-domaine.
+
+La doc de référence (typographie, ombres, grilles) est dans
+`docs/design-system/DESIGN_SYSTEM.md`, avec les mêmes tokens en JSON et en Python
+pour le code qui en a besoin hors navigateur (PDF, emails).
+
+> Ces éléments **remplacent** deux constats plus bas dans « État réel du code »,
+> écrits avant la reprise du front : `App.tsx` n'est plus un composant unique, et
+> « pas de framework CSS, juste `App.css`/`index.css` » n'est plus vrai —
+> `index.css` a été supprimé (il bridait `#root` à 1126px et écrasait des tokens),
+> le style vient maintenant de `styles/tokens.css` + `styles/components.css`.
+> Toujours aucune dépendance de style, en revanche : `package.json` ne contient
+> que React.
 
 ## Architecture multi-tenant (décision confirmée — plus de simplification)
 

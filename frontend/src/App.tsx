@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AppShell,
   LoginScreen,
@@ -15,6 +15,7 @@ import {
   type TreeNodeData,
 } from './components';
 import { useSession } from './hooks/useSession';
+import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDocuments } from './hooks/useDatarooms';
 import { api } from './api/endpoints';
 import {
@@ -92,6 +93,14 @@ export default function App() {
 
   const datarooms = useDatarooms(authenticated);
   const documents = useDocuments(screen === 'dataroom' ? openDataroomId : null);
+
+  // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
+  // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
+  // est déjà appliqué depuis main.tsx).
+  const { syncFromServer } = useTenantTheme();
+  useEffect(() => {
+    if (authenticated) void syncFromServer();
+  }, [authenticated, syncFromServer]);
 
   const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
 

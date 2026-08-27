@@ -1,3 +1,9 @@
+/* Le thème du serveur est chargé au montage : `syncFromServer` n'écrit l'état
+   qu'APRÈS le premier await (la requête réseau). La règle
+   react/set-state-in-effect ne distingue pas un setState synchrone d'un setState
+   post-await ; elle est neutralisée ici, et uniquement ici, comme dans
+   src/hooks/useSession.ts. */
+/* oxlint-disable react/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   applyTheme,
@@ -7,6 +13,7 @@ import {
   persistThemeState,
   withColor,
   type ThemeState,
+  type ThemeTransport,
 } from './engine';
 import type { ShapeKey, ThemeMode, TypographyKey } from './schema';
 import { TenantThemeContext, type TenantThemeContextValue } from './context';
@@ -15,22 +22,34 @@ const SAVE_FLASH_MS = 1600;
 
 export interface ThemeProviderProps {
   children?: ReactNode;
-  /** État initial imposé (ex. thème renvoyé par l'API pour cet office). */
+  /** État initial imposé (ex. cache local appliqué avant le premier rendu). */
   initialState?: ThemeState;
   /**
    * `false` pour ne pas relire/écrire localStorage — utile quand le thème
    * vient du backend et ne doit pas être écrasé par un cache navigateur.
    */
   persist?: boolean;
+  /**
+   * Accès au thème enregistré côté serveur pour l'office courant. Absent (UI
+   * kit, maquette, tests), la personnalisation reste locale au navigateur :
+   * c'est exactement le comportement d'avant, en mode dégradé assumé.
+   */
+  transport?: ThemeTransport;
 }
 
 // Fournit le moteur de personnalisation à l'arbre React. Monte le <style> des
 // variables CSS et le tient à jour à chaque changement d'état ; pose aussi
 // data-theme sur <html> pour que l'aperçu corresponde toujours au thème édité.
-export function ThemeProvider({ children, initialState, persist = true }: ThemeProviderProps) {
+export function ThemeProvider({
+  children,
+  initialState,
+  persist = true,
+  transport,
+}: ThemeProviderProps) {
   const [state, setState] = useState<ThemeState>(
     () => initialState ?? (persist ? loadThemeState() : defaultThemeState()),
   );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [editMode, setEditModeState] = useState<ThemeMode>(() =>
     typeof document !== 'undefined' &&
     document.documentElement.getAttribute('data-theme') === 'dark'
@@ -72,43 +91,90 @@ export function ThemeProvider({ children, initialState, persist = true }: ThemeP
     [editMode],
   );
 
+  /**
+   * Enregistre : cache local d'abord (immédiat, c'est ce qui évite le flash au
+   * prochain chargement), puis serveur. Une erreur réseau n'annule pas ce qui
+   * est affiché — elle est exposée par `saveError` pour que l'écran puisse dire
+   * que rien n'est parti.
+   */
+  const save = useCallback(
+    (next: ThemeState) => {
+      if (persist) persistThemeState(next);
+      flashSaved();
+      if (!transport) return;
+      setSaveError(null);
+      transport.save(next).catch((err: unknown) => {
+        setSaveError(err instanceof Error ? err.message : 'Enregistrement impossible');
+      });
+    },
+    [persist, transport, flashSaved],
+  );
+
   const commit = useCallback(() => {
     setState(prev => {
-      if (persist) persistThemeState(prev);
+      save(prev);
       return prev;
     });
-    flashSaved();
-  }, [persist, flashSaved]);
+  }, [save]);
 
   const setTypography = useCallback(
     (key: TypographyKey) => {
       setState(prev => {
         const next = { ...prev, typography: key };
-        if (persist) persistThemeState(next);
+        save(next);
         return next;
       });
-      flashSaved();
     },
-    [persist, flashSaved],
+    [save],
   );
 
   const setShape = useCallback(
     (key: ShapeKey) => {
       setState(prev => {
         const next = { ...prev, shape: key };
-        if (persist) persistThemeState(next);
+        save(next);
         return next;
       });
-      flashSaved();
     },
-    [persist, flashSaved],
+    [save],
   );
 
   const reset = useCallback(() => {
     if (persist) clearPersistedThemeState();
-    setState(defaultThemeState());
+    const defaults = defaultThemeState();
+    setState(defaults);
     flashSaved();
-  }, [persist, flashSaved]);
+    if (!transport) return;
+    setSaveError(null);
+    // Revenir aux valeurs d'origine est aussi une décision de l'office : elle
+    // doit atteindre le serveur, sinon le thème réapparaît au rechargement.
+    transport.save(defaults).catch((err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : 'Enregistrement impossible');
+    });
+  }, [persist, transport, flashSaved]);
+
+  /**
+   * Le serveur fait foi. Un échec (403 avant connexion, backend injoignable)
+   * laisse volontairement le cache local en place : mieux vaut l'apparence de
+   * l'office au dernier chargement connu qu'un retour brutal aux couleurs
+   * Notantis.
+   */
+  const syncFromServer = useCallback(async () => {
+    if (!transport) return;
+    try {
+      const remote = await transport.load();
+      if (remote) {
+        setState(remote);
+        if (persist) persistThemeState(remote);
+      }
+    } catch {
+      /* thème du cache conservé */
+    }
+  }, [transport, persist]);
+
+  useEffect(() => {
+    void syncFromServer();
+  }, [syncFromServer]);
 
   const value = useMemo<TenantThemeContextValue>(
     () => ({
@@ -121,8 +187,22 @@ export function ThemeProvider({ children, initialState, persist = true }: ThemeP
       setShape,
       reset,
       justSaved,
+      saveError,
+      syncFromServer,
     }),
-    [state, editMode, setEditMode, setColor, commit, setTypography, setShape, reset, justSaved],
+    [
+      state,
+      editMode,
+      setEditMode,
+      setColor,
+      commit,
+      setTypography,
+      setShape,
+      reset,
+      justSaved,
+      saveError,
+      syncFromServer,
+    ],
   );
 
   return <TenantThemeContext.Provider value={value}>{children}</TenantThemeContext.Provider>;

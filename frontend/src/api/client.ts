@@ -25,7 +25,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** Corps JSON. Ignoré si `formData` est fourni. */
   body?: unknown;
   formData?: FormData;

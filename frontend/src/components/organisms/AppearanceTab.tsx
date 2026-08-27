@@ -27,7 +27,7 @@ const EDIT_MODES: Array<{ key: ThemeMode; label: string }> = [
 // thème prévisualisé (data-theme sur <html>), pour que l'aperçu corresponde
 // toujours exactement à ce qu'on modifie.
 export function AppearanceTab() {
-  const { state, editMode, setEditMode, setTypography, setShape, reset, justSaved } =
+  const { state, editMode, setEditMode, setTypography, setShape, reset, justSaved, saveError } =
     useTenantTheme();
 
   return (
@@ -36,10 +36,19 @@ export function AppearanceTab() {
         <div className="appearance-block">
           <div className="appearance-block-head">
             <div className="appearance-block-title">Couleurs</div>
-            <span className={justSaved ? 'save-flash show' : 'save-flash'} aria-live="polite">
-              <Icon id="check" style={{ width: 11, height: 11 }} />
-              Enregistré
-            </span>
+            {/* Un échec d'enregistrement remplace le badge « Enregistré » : afficher
+                les deux laisserait croire que la couleur est partie au serveur. */}
+            {saveError ? (
+              <span className="save-error" role="status">
+                <Icon id="x" style={{ width: 11, height: 11 }} />
+                Non enregistré — {saveError}
+              </span>
+            ) : (
+              <span className={justSaved ? 'save-flash show' : 'save-flash'} aria-live="polite">
+                <Icon id="check" style={{ width: 11, height: 11 }} />
+                Enregistré
+              </span>
+            )}
           </div>
           <div className="appearance-block-desc">
             Chaque couleur de l'interface se règle individuellement — fonds, dégradés, texte, icônes

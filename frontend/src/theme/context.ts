@@ -18,6 +18,17 @@ export interface TenantThemeContextValue {
   reset: () => void;
   /** Vrai pendant ~1,6 s après un enregistrement — pilote le badge « Enregistré ». */
   justSaved: boolean;
+  /**
+   * Message d'erreur du dernier enregistrement serveur, null si tout va bien.
+   * Non nul = ce qui est affiché n'est PAS ce qui est enregistré pour l'office :
+   * l'écran doit le dire, sinon l'utilisateur croit avoir enregistré.
+   */
+  saveError: string | null;
+  /**
+   * Recharge le thème depuis le serveur (à appeler après une connexion : au
+   * montage, l'utilisateur est encore anonyme et l'API répond 403).
+   */
+  syncFromServer: () => Promise<void>;
 }
 
 // Contexte isolé dans son propre fichier pour que ThemeProvider.tsx n'exporte

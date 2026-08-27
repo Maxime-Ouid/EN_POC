@@ -1,0 +1,20 @@
+{
+  "src/components/molecules/DocPanel.tsx::composant-recopie::classe .btn écrite à la main — importer <Button> à la place": 1,
+  "src/components/molecules/NavItem.tsx::composant-recopie::classe .badge écrite à la main — importer <Badge> à la place": 1,
+  "src/components/molecules/SidebarBrand.tsx::couleur-en-dur::#fff — utiliser un token (var(--…), voir src/styles/tokens.css)": 1,
+  "src/components/molecules/SidebarFoot.tsx::composant-recopie::classe .avatar écrite à la main — importer <Avatar> à la place": 1,
+  "src/components/molecules/TabStrip.tsx::composant-recopie::classe .badge écrite à la main — importer <Badge> à la place": 1,
+  "src/components/organisms/DocumentSlideover.tsx::composant-recopie::classe .btn écrite à la main — importer <Button> à la place": 1,
+  "src/components/organisms/NewDataroomModal.tsx::composant-recopie::classe .btn écrite à la main — importer <Button> à la place": 2,
+  "src/components/organisms/QACard.tsx::composant-recopie::classe .btn écrite à la main — importer <Button> à la place": 1,
+  "src/components/pages/HomeScreen.tsx::composant-recopie::classe .stat-card écrite à la main — importer <StatCard> à la place": 1,
+  "src/components/pages/LoginScreen.tsx::composant-recopie::classe .badge écrite à la main — importer <Badge> à la place": 3,
+  "src/components/pages/LoginScreen.tsx::composant-recopie::classe .btn écrite à la main — importer <Button> à la place": 2,
+  "src/components/templates/AppShell.tsx::composant-recopie::classe .avatar écrite à la main — importer <Avatar> à la place": 1,
+  "src/styles/components.css::couleur-en-dur::#fff — utiliser un token (var(--…), voir src/styles/tokens.css)": 5,
+  "src/styles/components.css::couleur-en-dur::#ffffff — utiliser un token (var(--…), voir src/styles/tokens.css)": 5,
+  "src/styles/components.css::couleur-en-dur::rgba( — utiliser un token (var(--…), voir src/styles/tokens.css)": 27,
+  "src/styles/components.css::couleur-en-dur::rgb( — utiliser un token (var(--…), voir src/styles/tokens.css)": 2,
+  "src/styles/components.css::couleur-en-dur::#bdbfc36e — utiliser un token (var(--…), voir src/styles/tokens.css)": 1,
+  "src/styles/components.css::couleur-en-dur::#8fe3f8 — utiliser un token (var(--…), voir src/styles/tokens.css)": 1
+}

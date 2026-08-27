@@ -32,6 +32,19 @@ export interface TenantConfig {
   enabled_modules: string[];
 }
 
+/**
+ * Thème enregistré pour l'office (GET/PUT /api/tenant-theme/).
+ *
+ * `colors` est volontairement un dictionnaire ouvert : le catalogue des tokens
+ * vit dans src/theme/schema.ts, et une couleur ajoutée au design system ne doit
+ * exiger ni migration Django ni changement de type ici.
+ */
+export interface TenantThemePayload {
+  colors: { light: Record<string, string>; dark: Record<string, string> };
+  typography: string;
+  shape: string;
+}
+
 export interface DataroomSummary {
   id: number;
   name: string;
@@ -56,6 +69,14 @@ export const api = {
   myOffices: (signal?: AbortSignal) => apiFetch<OfficeMembership[]>('/api/my-offices/', { signal }),
 
   tenantConfig: (signal?: AbortSignal) => apiFetch<TenantConfig>('/api/tenant-config/', { signal }),
+
+  /** Thème de l'office. `undefined` = 204, l'office n'a jamais personnalisé. */
+  tenantTheme: (signal?: AbortSignal) =>
+    apiFetch<TenantThemePayload | undefined>('/api/tenant-theme/', { signal }),
+
+  /** Réservé aux rôles admin/superadmin de l'office (403 sinon). */
+  saveTenantTheme: (theme: TenantThemePayload) =>
+    apiFetch<TenantThemePayload>('/api/tenant-theme/', { method: 'PUT', body: theme }),
 
   coffreFort: () => apiFetch<{ message: string }>('/api/modules/coffre-fort/'),
 
