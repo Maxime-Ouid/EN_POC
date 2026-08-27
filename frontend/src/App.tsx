@@ -1,360 +1,328 @@
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
+import { useMemo, useState } from 'react';
+import {
+  AppShell,
+  LoginScreen,
+  HomeScreen,
+  PortfoliosScreen,
+  DataroomsListScreen,
+  type DataroomRow,
+  DataroomDetailScreen,
+  type DataroomDocument,
+  NewDataroomModal,
+  StatsScreen,
+  SettingsScreen,
+  Card,
+  type TreeNodeData,
+} from './components';
+import { useSession } from './hooks/useSession';
+import { useDatarooms, useDocuments } from './hooks/useDatarooms';
+import { api } from './api/endpoints';
+import {
+  CLIENT_SPACE_OPTIONS,
+  CLIENT_USAGE,
+  CONNECTED_USERS,
+  DATAROOM_TEMPLATES,
+  DEMO_HOME_STATS,
+  HISTORY,
+  INVOICES,
+  MEMBERS,
+  MODULE_CATALOG,
+  NAV_SECTIONS,
+  NEW_DATAROOM_TEMPLATES,
+  PORTFOLIOS,
+  PORTFOLIO_OPTIONS,
+  QA_ENTRIES,
+  RECENT_ACTIVITY,
+} from './data/demo';
 
-interface OfficeMembership {
-  subdomain: string;
-  name: string;
-  role: string;
-}
+/* ===========================================================================
+   Application réelle de l'Espace Notarial V2 (POC).
 
-interface TenantConfig {
-  name: string;
-  logo_url: string;
-  primary_color: string;
-  enabled_modules: string[];
-}
+   Même bibliothèque de composants et mêmes écrans que la maquette
+   (PrototypeDemo.tsx), mais alimentés par le backend Django partout où un
+   endpoint existe :
 
-interface DataroomSummary {
-  id: number;
-  name: string;
-  created_at: string;
-}
+     - connexion, identité, offices, config d'office ....... /api/login,
+       /api/whoami, /api/my-offices, /api/tenant-config
+     - liste et création de dossiers ....................... /api/datarooms/
+     - documents d'un dossier et dépôt de pièces ........... /api/datarooms/<id>/documents/
 
-interface DocumentSummary {
-  id: number;
-  name: string;
-  file: string;
-  uploaded_at: string;
-}
+   Tout le reste (portefeuilles, arborescence de rubriques, Q&R, membres,
+   historique d'audit, statistiques, facturation, sessions ouvertes, modèles)
+   n'est pas encore modélisé côté serveur et s'affiche à partir des jeux de
+   démonstration de src/data/demo.tsx. La pastille de la topbar le dit à
+   l'écran : on ne laisse pas croire que ces chiffres sont réels.
+   =========================================================================== */
 
-type View =
-  | { kind: 'home' }
-  | { kind: 'datarooms' }
-  | { kind: 'dataroom'; dataroom: { id: number; name: string } }
-  | { kind: 'module'; slug: string; label: string };
+type ScreenKey = 'dashboard' | 'portfolios' | 'datarooms' | 'dataroom' | 'stats' | 'settings';
 
-const MODULE_LABELS: Record<string, string> = {
-  'coffre-fort': 'Coffre-fort',
-  'confiance-rib': 'ConfianceRIB',
+const CRUMB_LABELS: Record<ScreenKey, string> = {
+  dashboard: 'Accueil',
+  portfolios: 'Portefeuilles',
+  datarooms: 'Dossiers',
+  dataroom: 'Dossiers',
+  stats: 'Statistiques & facturation',
+  settings: 'Personnalisation',
 };
 
-const apiOrigin = `https://${window.location.hostname}:8000`;
+/** Rubrique unique servie tant que le backend n'a pas d'arborescence. */
+const FLAT_FOLDER_ID = 'all';
 
-function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
+function initialsOf(name: string): string {
+  const parts = name.replace(/[@.].*$/, '').split(/[\s._-]+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
 }
 
-async function switchOffice(subdomain: string) {
-  const res = await fetch(`${apiOrigin}/api/sso/issue/`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': getCookie('csrftoken') ?? '',
-    },
-    body: JSON.stringify({ target: subdomain }),
-  });
-  if (!res.ok) {
-    alert("Impossible de changer d'office");
-    return;
-  }
-  const { ticket } = await res.json();
-  window.location.href =
-    `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function OfficePicker({ offices, title }: { offices: OfficeMembership[]; title: string }) {
-  return (
-    <div>
-      <p>{title}</p>
-      <ul>
-        {offices.map(o => (
-          <li key={o.subdomain}>
-            <button onClick={() => switchOffice(o.subdomain)}>{o.name} ({o.role})</button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+export default function App() {
+  const session = useSession();
+  const authenticated = session.status === 'authenticated';
 
-function Header({
-  config,
-  otherOffices,
-  currentUser,
-  view,
-  setView,
-}: {
-  config: TenantConfig;
-  otherOffices: OfficeMembership[];
-  currentUser: string | null;
-  view: View;
-  setView: (v: View) => void;
-}) {
-  return (
-    <header>
-      <h1 style={{ color: 'var(--primary-color)' }}>{config.name}</h1>
-      <p>Connecté(e) : {currentUser ?? '...'}</p>
-      <nav>
-        <button disabled={view.kind === 'home'} onClick={() => setView({ kind: 'home' })}>Accueil</button>
-        <button disabled={view.kind === 'datarooms'} onClick={() => setView({ kind: 'datarooms' })}>Datarooms</button>
-        {config.enabled_modules.map(slug => (
-          <button
-            key={slug}
-            disabled={view.kind === 'module' && view.slug === slug}
-            onClick={() => setView({ kind: 'module', slug, label: MODULE_LABELS[slug] ?? slug })}
-          >
-            {MODULE_LABELS[slug] ?? slug}
-          </button>
-        ))}
-      </nav>
-      {otherOffices.length > 0 && <OfficePicker offices={otherOffices} title="Changer d'office :" />}
-    </header>
-  );
-}
+  const [screen, setScreen] = useState<ScreenKey>('dashboard');
+  const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [loginError, setLoginError] = useState<string | undefined>();
+  const [modules, setModules] = useState(MODULE_CATALOG);
 
-function HomePage({ config }: { config: TenantConfig }) {
-  return <p>Bienvenue sur l'espace de {config.name}.</p>;
-}
+  const datarooms = useDatarooms(authenticated);
+  const documents = useDocuments(screen === 'dataroom' ? openDataroomId : null);
 
-function ModulePage({ slug, label }: { slug: string; label: string }) {
-  const [message, setMessage] = useState<string | null>(null);
+  const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
 
-  useEffect(() => {
-    if (slug !== 'coffre-fort') return;
-    fetch(`${apiOrigin}/api/modules/coffre-fort/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => setMessage(data.message ?? data.error ?? null));
-  }, [slug]);
+  // Les modules réellement activés viennent de /api/tenant-config/ ; le
+  // catalogue (libellés, icônes, « à venir ») reste côté front faute de
+  // description exposée par l'API.
+  const modulesWithServerState = useMemo(() => {
+    const enabled = new Set(session.tenant?.enabled_modules ?? []);
+    return modules.map(m => (m.comingSoon ? m : { ...m, enabled: enabled.has(m.slug) || m.enabled }));
+  }, [modules, session.tenant]);
 
-  return (
-    <section>
-      <h2>{label}</h2>
-      {slug === 'coffre-fort'
-        ? <p>{message ?? 'Chargement...'}</p>
-        : <p>Module « {label} » activé — pas de contenu de démonstration implémenté.</p>}
-    </section>
-  );
-}
+  const dataroomRows: DataroomRow[] = datarooms.items.map(d => ({
+    id: String(d.id),
+    icon: 'folder',
+    iconBg: 'var(--info-bg)',
+    iconColor: 'var(--info)',
+    name: d.name,
+    tags: [],
+    members: [],
+    storage: '—',
+    activity: formatDate(d.created_at),
+    status: { kind: 'success', label: 'Actif' },
+  }));
 
-function DataroomsPage({ onOpen }: { onOpen: (d: { id: number; name: string }) => void }) {
-  const [datarooms, setDatarooms] = useState<DataroomSummary[]>([]);
-  const [name, setName] = useState('');
+  const documentRows: DataroomDocument[] = documents.items.map(doc => ({
+    id: String(doc.id),
+    name: doc.name,
+    status: { kind: 'neutral', label: 'Déposé' },
+    addedBy: session.user?.username ?? '—',
+    date: formatDate(doc.uploaded_at),
+    // Le backend ne renvoie pas encore la taille du fichier (Document n'expose
+    // que name/file/uploaded_at) — pas de valeur inventée.
+    size: '—',
+  }));
 
-  function loadDatarooms() {
-    fetch(`${apiOrigin}/api/datarooms/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setDatarooms);
+  const tree: TreeNodeData[] = [
+    { id: FLAT_FOLDER_ID, label: 'Documents', count: documents.items.length },
+  ];
+
+  async function switchOffice(subdomain: string) {
+    const { ticket } = await api.issueSsoTicket(subdomain);
+    window.location.href = `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
   }
 
-  useEffect(loadDatarooms, []);
-
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const res = await fetch(`${apiOrigin}/api/datarooms/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ name: trimmed }),
-    });
-    if (!res.ok) {
-      alert('Impossible de créer la dataroom');
-      return;
-    }
-    setName('');
-    loadDatarooms();
+  function navigate(key: string) {
+    setScreen(key as ScreenKey);
+    setOpenDataroomId(null);
   }
 
-  return (
-    <section>
-      <h2>Datarooms</h2>
-      <ul>
-        {datarooms.map(d => (
-          <li key={d.id}>
-            <button onClick={() => onOpen({ id: d.id, name: d.name })}>{d.name}</button>
-          </li>
-        ))}
-      </ul>
-      <form onSubmit={handleCreate}>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nom de la dataroom" />
-        <button type="submit">Créer</button>
-      </form>
-    </section>
-  );
-}
-
-function DataroomDetailPage({
-  dataroom,
-  onBack,
-}: {
-  dataroom: { id: number; name: string };
-  onBack: () => void;
-}) {
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-
-  function loadDocuments() {
-    fetch(`${apiOrigin}/api/datarooms/${dataroom.id}/documents/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setDocuments);
+  if (session.status === 'loading') {
+    return <CenteredMessage>Chargement de votre espace…</CenteredMessage>;
   }
 
-  useEffect(loadDocuments, [dataroom.id]);
-
-  async function uploadFile(file: File) {
-    const body = new FormData();
-    body.append('file', file);
-    const res = await fetch(`${apiOrigin}/api/datarooms/${dataroom.id}/documents/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-CSRFToken': getCookie('csrftoken') ?? '' },
-      body,
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? "Échec de l'upload");
-      return;
-    }
-    loadDocuments();
-  }
-
-  function handleDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
-  }
-
-  return (
-    <section>
-      <button onClick={onBack}>← Retour aux datarooms</button>
-      <h2>{dataroom.name}</h2>
-      <ul>
-        {documents.map(d => (
-          <li key={d.id}>
-            <a href={d.file} target="_blank" rel="noreferrer">{d.name}</a>
-          </li>
-        ))}
-      </ul>
-      <div
-        onDragOver={e => e.preventDefault()}
-        onDrop={handleDrop}
-        style={{ border: '1px dashed #999', padding: '16px' }}
-      >
-        <p>Glisser-déposer un fichier ici, ou :</p>
-        <label>
-          Parcourir…
-          <input
-            type="file"
-            style={{ display: 'block' }}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) uploadFile(file);
-              e.target.value = '';
-            }}
-          />
-        </label>
-      </div>
-    </section>
-  );
-}
-
-function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null); // null = en cours de vérification
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-  const [offices, setOffices] = useState<OfficeMembership[]>([]);
-  const [config, setConfig] = useState<TenantConfig | null>(null);
-  const [configResolved, setConfigResolved] = useState(false);
-  const [view, setView] = useState<View>({ kind: 'home' });
-
-  async function loadOffices() {
-    const res = await fetch(`${apiOrigin}/api/my-offices/`, { credentials: 'include' });
-    if (res.ok) {
-      setAuthed(true);
-      setOffices(await res.json());
-      fetch(`${apiOrigin}/api/whoami/`, { credentials: 'include' })
-        .then(res => res.json())
-        .then(data => setCurrentUser(data.username));
-    } else {
-      setAuthed(false);
-    }
-  }
-
-  useEffect(() => {
-    loadOffices();
-  }, []);
-
-  async function handleLogin(e: FormEvent) {
-    e.preventDefault();
-    const res = await fetch(`${apiOrigin}/api/login/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setCurrentUser(data.username);
-      await loadOffices();
-    } else {
-      alert('Identifiants incorrects');
-    }
-  }
-
-  useEffect(() => {
-    if (!authed) return;
-    fetch(`${apiOrigin}/api/tenant-config/`, { credentials: 'include' })
-      .then(res => {
-        setConfigResolved(true);
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then(data => {
-        if (data) {
-          setConfig(data);
-          document.documentElement.style.setProperty('--primary-color', data.primary_color);
-        }
-      });
-  }, [authed]);
-
-  if (authed === null) return <p>Chargement...</p>;
-
-  if (!authed) {
+  if (session.status === 'error') {
     return (
-      <form onSubmit={handleLogin}>
-        <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)} placeholder="Utilisateur" />
-        <input value={loginPassword} onChange={e => setLoginPassword(e.target.value)} type="password" placeholder="Mot de passe" />
-        <button type="submit">Connexion</button>
-      </form>
+      <CenteredMessage>
+        Backend injoignable — {session.error}
+        <div className="tiny dim" style={{ marginTop: 8 }}>
+          Vérifiez que le serveur Django tourne (voir SETUP.md).
+        </div>
+      </CenteredMessage>
     );
   }
 
-  if (!configResolved) return <p>Chargement...</p>;
-
-  if (!config) {
-    return <OfficePicker offices={offices} title="Choisis un office :" />;
+  if (!authenticated) {
+    return (
+      <LoginScreen
+        officeName={session.tenant?.name ?? 'Espace Notarial'}
+        officeDomain={window.location.host}
+        error={loginError}
+        onSubmit={(identifier, password) => {
+          setLoginError(undefined);
+          session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
+        }}
+      />
+    );
   }
 
-  const otherOffices = offices.filter(o => `${o.subdomain}.localhost` !== window.location.hostname);
+  const username = session.user?.username ?? '';
+  const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
 
   return (
-    <div>
-      <Header config={config} otherOffices={otherOffices} currentUser={currentUser} view={view} setView={setView} />
-      {view.kind === 'home' && <HomePage config={config} />}
-      {view.kind === 'datarooms' && (
-        <DataroomsPage onOpen={d => setView({ kind: 'dataroom', dataroom: d })} />
+    <AppShell
+      officeName={session.tenant?.name ?? 'Office'}
+      officeRole={currentOffice?.role ?? '—'}
+      logoUrl={session.tenant?.logo_url || undefined}
+      navSections={NAV_SECTIONS}
+      activeScreen={screen}
+      onNavigate={navigate}
+      onSwitchOffice={
+        session.offices.length > 1
+          ? () => {
+              const next = session.offices.find(o => o.subdomain !== currentOffice?.subdomain);
+              if (next) void switchOffice(next.subdomain);
+            }
+          : undefined
+      }
+      userInitials={initialsOf(username)}
+      userName={username}
+      userRole={currentOffice?.role ?? 'Membre'}
+      breadcrumbRoot={session.tenant?.name}
+      breadcrumbCurrent={openDataroom ? openDataroom.name : CRUMB_LABELS[screen]}
+      noticeLabel="Données partiellement simulées"
+    >
+      {screen === 'dashboard' && (
+        <HomeScreen
+          officeName={session.tenant?.name ?? 'votre office'}
+          userFirstName={username.split(/[.@]/)[0]}
+          // Seul le nombre de dossiers est réel ; les autres compteurs n'ont pas
+          // encore de source côté backend.
+          stats={{ ...DEMO_HOME_STATS, activeDatarooms: datarooms.items.length }}
+          recentPortfolios={PORTFOLIOS.map(p => ({
+            id: p.id,
+            icon: p.icon,
+            iconBg: p.iconBg,
+            iconColor: p.iconColor,
+            name: p.name,
+            desc: p.desc,
+            status: p.status,
+          }))}
+          recentActivity={RECENT_ACTIVITY}
+          onOpenPortfolio={() => setScreen('datarooms')}
+          onSeeAllPortfolios={() => setScreen('portfolios')}
+          onSeeFullHistory={() => setScreen('stats')}
+        />
       )}
-      {view.kind === 'dataroom' && (
-        <DataroomDetailPage dataroom={view.dataroom} onBack={() => setView({ kind: 'datarooms' })} />
+
+      {screen === 'portfolios' && (
+        <PortfoliosScreen
+          portfolios={PORTFOLIOS}
+          onCreate={() => {}}
+          onFilter={() => {}}
+          onOpen={() => setScreen('datarooms')}
+        />
       )}
-      {view.kind === 'module' && <ModulePage slug={view.slug} label={view.label} />}
-    </div>
+
+      {screen === 'datarooms' && (
+        <>
+          <DataroomsListScreen
+            totalCount={datarooms.items.length}
+            rows={dataroomRows}
+            onOpen={id => {
+              setOpenDataroomId(Number(id));
+              setScreen('dataroom');
+            }}
+            onCreate={() => setModalOpen(true)}
+            displayRange={
+              datarooms.loading
+                ? 'Chargement…'
+                : datarooms.error
+                  ? datarooms.error
+                  : `${datarooms.items.length} dossier${datarooms.items.length > 1 ? 's' : ''}`
+            }
+          />
+          <NewDataroomModal
+            open={modalOpen}
+            onClose={() => setModalOpen(false)}
+            onCreate={({ name }) => {
+              void datarooms.create(name).then(() => setModalOpen(false));
+            }}
+            portfolioOptions={PORTFOLIO_OPTIONS}
+            clientSpaceOptions={CLIENT_SPACE_OPTIONS}
+            templates={NEW_DATAROOM_TEMPLATES}
+          />
+        </>
+      )}
+
+      {screen === 'dataroom' && openDataroom && (
+        <DataroomDetailScreen
+          dataroomName={openDataroom.name}
+          tags={[]}
+          status={{ kind: 'success', label: 'Actif' }}
+          meta={[
+            { label: 'Créé le', value: formatDate(openDataroom.created_at) },
+            { label: 'Documents', value: `${documents.items.length} fichier(s)` },
+          ]}
+          tree={tree}
+          documentsByFolder={{ [FLAT_FOLDER_ID]: documentRows }}
+          // Non modélisés côté backend — jeux de démonstration assumés.
+          qaEntries={QA_ENTRIES}
+          members={MEMBERS}
+          history={HISTORY}
+          onBackToList={() => navigate('datarooms')}
+          onAddDocuments={() => pickFileAndUpload(documents.upload)}
+        />
+      )}
+
+      {screen === 'stats' && (
+        <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
+      )}
+
+      {screen === 'settings' && (
+        <SettingsScreen
+          identity={{
+            identity: {
+              displayName: session.tenant?.name ?? '',
+              subdomain: window.location.host,
+              logoUrl: session.tenant?.logo_url,
+            },
+            // Aucun endpoint d'écriture sur Office pour l'instant : l'onglet
+            // édite localement et le dit, plutôt que de simuler un succès.
+            error: "L'enregistrement de l'identité n'est pas encore exposé par l'API.",
+          }}
+          modules={{
+            modules: modulesWithServerState,
+            templates: DATAROOM_TEMPLATES,
+            onToggleModule: (slug, next) =>
+              setModules(prev => prev.map(m => (m.slug === slug ? { ...m, enabled: next } : m))),
+          }}
+        />
+      )}
+    </AppShell>
   );
 }
 
-export default App;
+function pickFileAndUpload(upload: (file: File) => Promise<void>) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (file) void upload(file);
+  };
+  input.click();
+}
+
+function CenteredMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 24 }}>
+      <Card padded style={{ maxWidth: 420, textAlign: 'center' }}>
+        {children}
+      </Card>
+    </div>
+  );
+}

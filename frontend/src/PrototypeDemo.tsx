@@ -1,287 +1,96 @@
 import { useState } from 'react';
-import { LoginScreen } from './screens/LoginScreen';
-import { AppShell, type NavSection } from './screens/AppShell';
-import { HomeScreen } from './screens/HomeScreen';
-import { PortfoliosScreen, type Portfolio } from './screens/PortfoliosScreen';
-import { DataroomsListScreen, type DataroomRow } from './screens/DataroomsListScreen';
-import { DataroomDetailScreen } from './screens/DataroomDetailScreen';
-import { NewDataroomModal } from './screens/NewDataroomModal';
-import type { TreeNodeData } from './components/Explorer';
-import type { DataroomDocument, QAEntry, MemberRow, HistoryRow } from './screens/DataroomDetailScreen';
+import {
+  LoginScreen,
+  AppShell,
+  HomeScreen,
+  PortfoliosScreen,
+  DataroomsListScreen,
+  DataroomDetailScreen,
+  NewDataroomModal,
+  StatsScreen,
+  SettingsScreen,
+} from './components';
+import {
+  CLIENT_SPACE_OPTIONS,
+  CLIENT_USAGE,
+  CONNECTED_USERS,
+  DATAROOM_ROWS,
+  DATAROOM_TEMPLATES,
+  DEMO_DATAROOM_DETAIL,
+  DEMO_HOME_STATS,
+  DEMO_OFFICE,
+  DOCS_BY_FOLDER,
+  HISTORY,
+  INVOICES,
+  MEMBERS,
+  MODULE_CATALOG,
+  NAV_SECTIONS,
+  NEW_DATAROOM_TEMPLATES,
+  PORTFOLIOS,
+  PORTFOLIO_OPTIONS,
+  QA_ENTRIES,
+  RECENT_ACTIVITY,
+  TREE,
+} from './data/demo';
 
-// Reconstitution du prototype "Espace Notarial Next" (index_16.html) à partir
-// des composants React de src/components + src/screens, données statiques en
-// dur (aucun appel réseau) — juste pour valider visuellement l'ensemble avant
-// que le contenu ne soit branché sur les vraies données/endpoints du backend.
-// Accessible en dev sur https://<host>:5173/?view=prototype-preview (voir
-// main.tsx) ; n'a aucune influence sur App.tsx (l'app réelle).
-
-const NAV_SECTIONS: NavSection[] = [
-  {
-    label: 'Général',
-    items: [
-      { key: 'dashboard', icon: 'home', label: 'Accueil' },
-      { key: 'portfolios', icon: 'layers', label: 'Portefeuilles' },
-      { key: 'datarooms', icon: 'folder', label: 'Dossiers', count: 245 },
-    ],
-  },
-  {
-    label: 'Pilotage',
-    items: [{ key: 'stats', icon: 'clock', label: 'Statistiques & facturation' }],
-  },
-  {
-    label: 'Office',
-    items: [{ key: 'settings', icon: 'settings', label: 'Personnalisation' }],
-  },
-];
-
-const PORTFOLIOS: Portfolio[] = [
-  {
-    id: 'ivry',
-    icon: 'layers',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'Opération Ivry — Le Monde Commerce',
-    desc: 'Projet APUI · 4 datarooms',
-    status: { kind: 'success', label: 'Actif' },
-    storage: '86,4 Go',
-    lastActivity: "Aujourd'hui",
-    members: [{ label: 'DB' }, { label: 'BH', gray: true }, { label: '+6', gray: true }],
-  },
-  {
-    id: 'jo2024',
-    icon: 'layers',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'JO 2024 — Parc immobilier',
-    desc: 'Multi-actifs · 12 datarooms',
-    status: { kind: 'success', label: 'Actif' },
-    storage: '1,8 To',
-    lastActivity: 'Hier',
-    members: [{ label: 'CD' }, { label: 'JD', gray: true }, { label: '+11', gray: true }],
-  },
-  {
-    id: 'nice-etoile',
-    icon: 'layers',
-    iconBg: 'var(--surface-alt)',
-    iconColor: 'var(--ink-500)',
-    muted: true,
-    name: 'Copropriété Nice Étoile',
-    desc: "Vente d'actif · 2 datarooms",
-    status: { kind: 'neutral', label: 'Clôturé' },
-    storage: '14,2 Go',
-    lastActivity: '12 juil. 2026',
-    members: [{ label: 'HH' }, { label: '+2', gray: true }],
-  },
-];
-
-const DATAROOM_ROWS: DataroomRow[] = [
-  {
-    id: 'caudan',
-    icon: 'folder',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'Dossier de vente Caudan',
-    portfolio: 'Ivry — Le Monde',
-    tags: [{ label: 'Vente' }],
-    members: [{ label: 'DB' }, { label: '+4', gray: true }],
-    storage: '18,2 Go',
-    activity: "Aujourd'hui",
-    status: { kind: 'success', label: 'Actif' },
-  },
-  {
-    id: 'choleur',
-    icon: 'folder',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'Vente actifs Choleur SA',
-    tags: [{ label: 'Vente' }, { label: 'Prioritaire', plain: true }],
-    members: [{ label: 'JD' }, { label: '+2', gray: true }],
-    storage: '6,1 Go',
-    activity: 'Hier',
-    status: { kind: 'success', label: 'Actif' },
-  },
-  {
-    id: 'hamon',
-    icon: 'folder',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'Dossier Hamon',
-    tags: [],
-    members: [{ label: 'BH' }],
-    storage: '640 Mo',
-    activity: 'Hier',
-    status: { kind: 'success', label: 'Actif' },
-  },
-  {
-    id: 'ivry-commerce',
-    icon: 'folder',
-    iconBg: 'var(--info-bg)',
-    iconColor: 'var(--info)',
-    name: 'IVRY — LE MONDE (COMMERCE)',
-    portfolio: 'Ivry — Le Monde',
-    tags: [{ label: 'APUI' }],
-    members: [{ label: 'CD' }, { label: '+9', gray: true }],
-    storage: '54,8 Go',
-    activity: '3 jours',
-    status: { kind: 'success', label: 'Actif' },
-  },
-  {
-    id: 'nice',
-    icon: 'folder',
-    iconBg: 'var(--surface-alt)',
-    iconColor: 'var(--ink-500)',
-    muted: true,
-    name: 'Nice étoile',
-    portfolio: 'Nice Étoile',
-    tags: [{ label: 'Copropriété', plain: true }],
-    members: [{ label: 'HH' }],
-    storage: '14,2 Go',
-    activity: '12 juil.',
-    status: { kind: 'neutral', label: 'Clôturé' },
-  },
-  {
-    id: 'modele-vente',
-    icon: 'file',
-    iconBg: 'var(--brass-100)',
-    iconColor: 'var(--brass-700)',
-    name: 'Dataroom — modèle vente immobilière',
-    portfolio: 'Modèles',
-    tags: [{ label: 'Template', plain: true }],
-    members: [],
-    storage: '212 Mo',
-    activity: '—',
-    status: { kind: 'info', label: 'Modèle' },
-  },
-];
-
-const TREE: TreeNodeData[] = [
-  {
-    id: '1', label: '1. Aspects sociétaires', count: 6,
-    children: [{ id: '1.1', label: '1.1 Société A' }, { id: '1.2', label: '1.2 Société B' }],
-  },
-  {
-    id: '2', label: "2. Présentation de l'actif", count: 11,
-    children: [{ id: '2.1', label: '2.1 Plans' }, { id: '2.2', label: '2.2 Note de désignation' }],
-  },
-  { id: '3', label: '3. Droit de propriété', count: 10 },
-  { id: '4', label: '4. Situation hypothécaire', count: 7 },
-  { id: '5', label: '5. Servitudes', count: 4 },
-  { id: '7', label: '7. Urbanisme', count: 5 },
-  { id: '8', label: '8. Autorisations administratives', count: 21 },
-  { id: '10', label: '10. Diagnostics', count: 6 },
-  { id: '14', label: '14. Fiscalité', count: 5 },
-];
-
-const DOCS_BY_FOLDER: Record<string, DataroomDocument[]> = {
-  '2.1': [
-    { id: 'd1', name: 'REF — COMMUNE X — Extrait du plan cadastral.pdf', status: { kind: 'neutral', label: 'Consulté' }, addedBy: 'D. Briand', date: '14/07/2026', size: '2,1 Mo' },
-    { id: 'd2', name: "Plan d'aménagement intérieur T2.pdf", status: { kind: 'warning', label: 'Nouveau' }, addedBy: 'C. Dumont', date: "Aujourd'hui", size: '4,7 Mo' },
-    { id: 'd3', name: 'Plan topographique T1.dwg', status: { kind: 'neutral', label: 'Consulté' }, addedBy: 'C. Dumont', date: '02/06/2026', size: '11,4 Mo' },
-    { id: 'd4', name: 'Géoportail — relevé.pdf', status: { kind: 'neutral', label: 'Consulté' }, addedBy: 'D. Briand', date: '02/06/2026', size: '870 Ko' },
-    { id: 'd5', name: 'Plan SDP — en attente de dépôt', status: { kind: 'info', label: 'En attente' }, addedBy: '—', date: '—', size: '—', muted: true },
-  ],
-};
-
-const QA_ENTRIES: QAEntry[] = [
-  {
-    id: 'q104',
-    status: { kind: 'warning', label: 'Sans réponse' },
-    object: 'Question sur : EHF réel 15.07.2026',
-    meta: "Réf. #Q104 · Sandrine ACQUÉREUR · aujourd'hui 09:15",
-    body: 'La fiche réelle mentionne une inscription de 1994 — est-elle toujours valable ou faut-il une mise à jour avant la signature ?',
-  },
-  {
-    id: 'q101',
-    status: { kind: 'info', label: 'Restreinte · Étude' },
-    object: 'Question sur : Servitude de passage 1989',
-    meta: 'Réf. #Q101 · Cyril Dumont · hier 16:20',
-    body: "Le vendeur souhaite-t-il que cette pièce reste masquée aux acquéreurs jusqu'à la levée des conditions suspensives ?",
-    answer: { author: 'Delphine Briand', text: "Oui, garder restreinte à l'étude pour l'instant.", time: 'hier 17:02' },
-  },
-  {
-    id: 'q098',
-    status: { kind: 'success', label: 'Répondue' },
-    object: 'Question sur : Rapport Géorisques du 09.07.2026',
-    meta: 'Réf. #Q098 · Marc VENDEUR · 18/07 11:03',
-    body: "Le rapport couvre-t-il l'intégralité de la parcelle B ou uniquement le bâtiment principal ?",
-    answer: { author: 'Cyril Dumont', text: "Il couvre l'intégralité de la parcelle, bâtiment et abords compris.", time: '18/07 14:40' },
-  },
-];
-
-const MEMBERS: MemberRow[] = [
-  { id: 'm1', initials: 'DB', name: 'Delphine Briand', group: 'Étude', access: { kind: 'success', label: 'Lecture / Écriture' }, lastLogin: "Aujourd'hui, 10:40" },
-  { id: 'm2', initials: 'MV', name: 'Marc — Vendeur', group: 'Vendeur', access: { kind: 'info', label: 'Lecture seule' }, lastLogin: '18/07/2026' },
-  { id: 'm3', initials: 'SA', name: 'Sandrine — Acquéreur', group: 'Acquéreur', access: { kind: 'info', label: 'Lecture seule' }, lastLogin: "Aujourd'hui, 09:15" },
-  { id: 'm4', initials: 'EX', gray: true, name: 'Cabinet Ferrand — Expert', group: 'Experts', access: { kind: 'warning', label: 'Sous-dossier limité' }, lastLogin: '12/07/2026' },
-  { id: 'm5', initials: '?', gray: true, name: 'Invitation en attente', group: 'Acquéreur', access: { kind: 'neutral', label: '—' }, lastLogin: 'Jamais connecté' },
-];
-
-const HISTORY: HistoryRow[] = [
-  { id: 'h1', timestamp: '2026-08-25 10:42:11', user: 'Delphine Briand', action: { kind: 'success', label: 'Dépôt' }, target: "Plan d'aménagement intérieur T2.pdf" },
-  { id: 'h2', timestamp: '2026-08-25 09:15:04', user: 'Sandrine — Acquéreur', action: { kind: 'info', label: 'Question posée' }, target: 'EHF réel 15.07.2026' },
-  { id: 'h3', timestamp: '2026-08-24 17:02:38', user: 'Delphine Briand', action: { kind: 'info', label: 'Réponse' }, target: 'Servitude de passage 1989' },
-  { id: 'h4', timestamp: '2026-08-24 16:12:57', user: 'Cyril Dumont', action: { kind: 'critical', label: 'Suppression' }, target: 'Ancien plan T2 (v1) — historisé' },
-  { id: 'h5', timestamp: '2026-08-24 11:20:02', user: 'Marc — Vendeur', action: { kind: 'neutral', label: 'Consultation' }, target: 'Titre immédiat — Vente Société C' },
-];
+// Reconstitution complète du prototype « Espace Notarial Next » (index_16.html)
+// à partir de src/components et src/screens, sur données de démonstration
+// (aucun appel réseau) — sert de référence visuelle et de banc d'essai des
+// composants. Accessible en dev sur
+// https://<host>:5173/?view=prototype-preview (voir main.tsx).
+//
+// L'application réelle, elle, est App.tsx : mêmes écrans, mêmes composants,
+// mais alimentés par le backend Django là où les endpoints existent.
 
 type ScreenKey = 'dashboard' | 'portfolios' | 'datarooms' | 'dataroom' | 'stats' | 'settings';
+
+const CRUMB_LABELS: Record<ScreenKey, string> = {
+  dashboard: 'Accueil',
+  portfolios: 'Portefeuilles',
+  datarooms: 'Dossiers',
+  dataroom: 'Dossiers',
+  stats: 'Statistiques & facturation',
+  settings: 'Personnalisation',
+};
 
 export function PrototypeDemo() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [screen, setScreen] = useState<ScreenKey>('dashboard');
   const [modalOpen, setModalOpen] = useState(false);
+  const [modules, setModules] = useState(MODULE_CATALOG);
 
   if (!loggedIn) {
     return (
       <LoginScreen
-        officeName="Briand & Hamon, notaires associés"
-        officeDomain="briand-hamon.espacenotarial.fr"
-        defaultIdentifier="cyril.dumont@paris.notaires.fr"
+        officeName={DEMO_OFFICE.fullName}
+        officeDomain={DEMO_OFFICE.subdomain}
+        defaultIdentifier={DEMO_OFFICE.identifier}
         onSubmit={() => setLoggedIn(true)}
         onSsoClick={() => setLoggedIn(true)}
       />
     );
   }
 
-  const crumbLabels: Record<ScreenKey, string> = {
-    dashboard: 'Accueil',
-    portfolios: 'Portefeuilles',
-    datarooms: 'Dossiers',
-    dataroom: 'Dossiers',
-    stats: 'Statistiques',
-    settings: 'Personnalisation',
-  };
-
   return (
     <AppShell
-      officeName="Briand & Hamon"
-      officeRole="Notaires associés"
+      officeName={DEMO_OFFICE.name}
+      officeRole={DEMO_OFFICE.role}
       navSections={NAV_SECTIONS}
       activeScreen={screen}
       onNavigate={key => setScreen(key as ScreenKey)}
-      userInitials="CD"
-      userName="Cyril Dumont"
-      userRole="Superadmin"
+      userInitials={DEMO_OFFICE.userInitials}
+      userName={DEMO_OFFICE.userName}
+      userRole={DEMO_OFFICE.userRole}
       onLogout={() => setLoggedIn(false)}
-      breadcrumbRoot="Briand & Hamon"
-      breadcrumbCurrent={crumbLabels[screen]}
+      breadcrumbRoot={DEMO_OFFICE.name}
+      breadcrumbCurrent={CRUMB_LABELS[screen]}
       hasUnreadNotifications
     >
       {screen === 'dashboard' && (
         <HomeScreen
-          officeName="Briand & Hamon"
-          userFirstName="Cyril"
-          stats={{
-            activeDatarooms: 64,
-            activeDeltaText: '+6 ce mois',
-            storageUsedGo: 312,
-            storageQuotaGo: 500,
-            pendingQuestions: 7,
-            pendingWarnText: '3 depuis plus de 48h',
-            connectedMembers: 18,
-            totalMembers: 43,
-          }}
+          officeName={DEMO_OFFICE.name}
+          userFirstName={DEMO_OFFICE.userFirstName}
+          stats={DEMO_HOME_STATS}
           recentPortfolios={PORTFOLIOS.map(p => ({
             id: p.id,
             icon: p.icon,
@@ -289,15 +98,9 @@ export function PrototypeDemo() {
             iconColor: p.iconColor,
             name: p.name,
             desc: p.desc,
-            status: p.status.kind === 'success' ? { kind: 'success', label: 'Actif' } : { kind: 'neutral', label: 'Clôturé' },
+            status: p.status,
           }))}
-          recentActivity={[
-            { id: 'a1', icon: 'file', iconBg: 'var(--info-bg)', iconColor: 'var(--info)', text: <><b>Delphine Briand</b> a déposé <b>3 pièces</b> dans « Dossier de vente Caudan »</>, time: "Aujourd'hui, 10:42" },
-            { id: 'a2', icon: 'msg', iconBg: 'var(--warning-bg)', iconColor: 'var(--warning)', text: 'Nouvelle question sur « EHF réel 15.07.2026 »', time: "Aujourd'hui, 09:15" },
-            { id: 'a3', icon: 'users', iconBg: 'var(--success-bg)', iconColor: 'var(--success)', text: <><b>Jules Dalier</b> a ajouté un membre à « Vente actifs Choleur SA »</>, time: 'Hier, 17:03' },
-            { id: 'a4', icon: 'zip', iconBg: 'var(--brass-100)', iconColor: 'var(--brass-700)', text: 'Export ZIP généré pour « IVRY — LE MONDE (COMMERCE) »', time: 'Hier, 15:47' },
-            { id: 'a5', icon: 'x', iconBg: 'var(--critical-bg)', iconColor: 'var(--critical)', text: 'Document supprimé dans « Dossier Hamon » — historisé', time: 'Hier, 11:20' },
-          ]}
+          recentActivity={RECENT_ACTIVITY}
           onOpenPortfolio={() => setScreen('datarooms')}
           onSeeAllPortfolios={() => setScreen('portfolios')}
           onSeeFullHistory={() => setScreen('stats')}
@@ -326,36 +129,20 @@ export function PrototypeDemo() {
             open={modalOpen}
             onClose={() => setModalOpen(false)}
             onCreate={() => setModalOpen(false)}
-            portfolioOptions={[
-              { id: 'ivry', label: 'Opération Ivry — Le Monde Commerce' },
-              { id: 'jo2024', label: 'JO 2024 — Parc immobilier' },
-            ]}
-            clientSpaceOptions={[
-              { id: 'republique', label: 'République' },
-              { id: 'arsenal', label: 'Arsenal' },
-            ]}
-            templates={[
-              { id: 'vente', icon: 'folder', name: 'Vente immobilière — standard', desc: 'Recommandé · le plus utilisé par les offices' },
-              { id: 'divorce', icon: 'folder', name: 'Dossier de divorce', desc: 'Groupes prédéfinis' },
-              { id: 'vide', icon: 'file', name: 'Dataroom vide', desc: 'Sans arborescence pré-remplie' },
-            ]}
+            portfolioOptions={PORTFOLIO_OPTIONS}
+            clientSpaceOptions={CLIENT_SPACE_OPTIONS}
+            templates={NEW_DATAROOM_TEMPLATES}
           />
         </>
       )}
 
       {screen === 'dataroom' && (
         <DataroomDetailScreen
-          portfolioName="Ivry — Le Monde"
-          dataroomName="Dossier de vente Caudan"
-          tags={[{ label: 'Vente' }, { label: 'Immobilier commercial', plain: true }]}
-          status={{ kind: 'success', label: 'Actif' }}
-          meta={[
-            { label: 'Créé le', value: '19 mai 2026 · Cyril Dumont' },
-            { label: 'Documents', value: '312 fichiers' },
-            { label: 'Poids', value: <span className="mono">18,2 Go</span> },
-            { label: 'Dernière modification', value: "Aujourd'hui, 10:42" },
-            { label: 'Modèle', value: 'Vente immobilière — standard' },
-          ]}
+          portfolioName={DEMO_DATAROOM_DETAIL.portfolioName}
+          dataroomName={DEMO_DATAROOM_DETAIL.name}
+          tags={DEMO_DATAROOM_DETAIL.tags}
+          status={DEMO_DATAROOM_DETAIL.status}
+          meta={DEMO_DATAROOM_DETAIL.meta}
           tree={TREE}
           documentsByFolder={DOCS_BY_FOLDER}
           qaEntries={QA_ENTRIES}
@@ -365,14 +152,25 @@ export function PrototypeDemo() {
         />
       )}
 
-      {(screen === 'stats' || screen === 'settings') && (
-        <section className="screen is-active">
-          <div className="eyebrow">Bientôt</div>
-          <h1 className="page-title">
-            {screen === 'stats' ? 'Statistiques & facturation' : 'Personnalisation'}
-          </h1>
-          <div className="page-sub">Écran non couvert par cette bibliothèque de composants.</div>
-        </section>
+      {screen === 'stats' && (
+        <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
+      )}
+
+      {screen === 'settings' && (
+        <SettingsScreen
+          identity={{
+            identity: {
+              displayName: DEMO_OFFICE.fullName,
+              subdomain: DEMO_OFFICE.subdomain,
+            },
+          }}
+          modules={{
+            modules,
+            templates: DATAROOM_TEMPLATES,
+            onToggleModule: (slug, next) =>
+              setModules(prev => prev.map(m => (m.slug === slug ? { ...m, enabled: next } : m))),
+          }}
+        />
       )}
     </AppShell>
   );

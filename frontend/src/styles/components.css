@@ -6,14 +6,21 @@
    .stat-card corrigés pour le thème sombre (ils étaient codés en dur, non
    adaptés).
    Mise à jour 26/08/2026 (après-midi) : #app-main et .card/.stat-card
-   utilisent maintenant les tokens --app-grad-*/--card-bg/--card-border au
+   utilisent maintenant les tokens --app-grad-…, --card-bg et --card-border au
    lieu de valeurs codées en dur, pour être éditables depuis Personnalisation
    → Apparence — plus aucun bloc @media/[data-theme] dédié à ces règles,
    les tokens portent déjà la variation par thème (voir DESIGN_SYSTEM.md §9).
-   Les classes .theme-edit-*/.token-* de l'écran Apparence remplacent les
-   anciennes .color-field/.locked-swatch (design à 2 couleurs ancres,
+   Les classes .theme-edit-… et .token-… de l'écran Apparence remplacent les
+   anciennes .color-field et .locked-swatch (design à 2 couleurs ancres,
    abandonné le même jour à la demande explicite de l'utilisateur en faveur
    d'un contrôle complet, variable par variable).
+
+   ATTENTION, piège déjà rencontré : ne jamais accoler un astérisque et une
+   barre oblique dans ces commentaires. Écrire un joker suivi d'une barre pour
+   énumérer des tokens ferme le commentaire par surprise, et tout le reste du
+   bloc devient du CSS invalide. Le serveur de dev ne le voit pas ; c'est la
+   minification de `vite build` (lightningcss) qui échoue, sur un message
+   « Unexpected end of input » pointant la toute fin du fichier.
    =========================================================================== */
 
 *{box-sizing:border-box;}
@@ -34,7 +41,36 @@ svg.icon{width:16px;height:16px;flex:none;display:block;}
 :focus-visible{outline:2px solid var(--brass-500);outline-offset:2px;}
 button, [role="button"], .clickable{cursor:pointer;}
 
+/* ============ SCROLLBARS ============ */
+/* Fines et discrètes, jamais de piste visible. Deux syntaxes sont nécessaires
+   et ne se remplacent pas : la propriété normalisée (Firefox, Chrome récent)
+   ne permet ni pouce arrondi ni état de survol ; les pseudo-éléments WebKit,
+   eux, sont ignorés par Firefox. */
+*{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-corner{background:transparent;}
+::-webkit-scrollbar-thumb{
+  /* La bordure transparente + background-clip donne un pouce de 6px entouré
+     d'air : c'est ce qui le fait paraître fin sans devenir difficile à viser. */
+  background:var(--scrollbar-thumb);background-clip:content-box;
+  border:2px solid transparent;border-radius:99px;
+}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);background-clip:content-box;}
+/* Zones posées sur le fond foncé de la sidebar : pouce clair. */
+.sidebar,.sidebar *{scrollbar-color:var(--scrollbar-thumb-on-shell) transparent;}
+.sidebar ::-webkit-scrollbar-thumb,.sidebar::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb-on-shell);background-clip:content-box;
+}
+.sidebar ::-webkit-scrollbar-thumb:hover,.sidebar::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-on-shell-hover);background-clip:content-box;
+}
+
 /* ============ APP SHELL ============ */
+/* L'app occupe toute la fenêtre : c'est .content qui défile, jamais le body.
+   Sans hauteur explicite sur #root, le 100vh de .app crée une seconde barre
+   de défilement au niveau du document. */
+html,body,#root{height:100%;}
 .app{display:none;height:100vh;width:100%;}
 .app.is-active{display:flex;}
 .sidebar{

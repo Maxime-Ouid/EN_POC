@@ -50,6 +50,17 @@
   --font-display:'Poppins', 'Segoe UI', sans-serif;
   --font-ui:'Inter', -apple-system, 'Segoe UI', sans-serif;
   --font-mono:'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+
+  /* Barres de défilement — dérivées des tokens de texte plutôt que définies
+     par thème : color-mix résout var() au moment du calcul, donc elles suivent
+     automatiquement le thème clair, le thème sombre ET toute couleur choisie
+     dans Personnalisation → Apparence, sans entrée supplémentaire à éditer.
+     La variante "on-shell" sert aux zones posées sur le fond foncé de la
+     sidebar, où un pouce sombre serait invisible. */
+  --scrollbar-thumb:color-mix(in srgb, var(--ink-400) 38%, transparent);
+  --scrollbar-thumb-hover:color-mix(in srgb, var(--ink-400) 68%, transparent);
+  --scrollbar-thumb-on-shell:color-mix(in srgb, var(--shell-text) 26%, transparent);
+  --scrollbar-thumb-on-shell-hover:color-mix(in srgb, var(--shell-text) 45%, transparent);
   --login-grad-1:rgba(150,104,244,.14);
   --login-grad-2:rgba(80,208,253,.24);
   --login-grad-3:rgba(91,123,251,.13);
