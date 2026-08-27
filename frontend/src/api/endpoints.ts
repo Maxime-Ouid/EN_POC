@@ -78,7 +78,17 @@ export const api = {
   saveTenantTheme: (theme: TenantThemePayload) =>
     apiFetch<TenantThemePayload>('/api/tenant-theme/', { method: 'PUT', body: theme }),
 
-  coffreFort: () => apiFetch<{ message: string }>('/api/modules/coffre-fort/'),
+  /**
+   * Contenu servi par un module activé pour l'office.
+   *
+   * Une seule route existe aujourd'hui côté Django (`coffre-fort`) : tout autre
+   * slug répond 404, ce que l'écran de module traite comme « module activé mais
+   * pas encore d'écran livré ». Le chemin est générique parce que c'est la
+   * forme que prendra la suite, pas pour faire croire que les autres existent.
+   * 403 = module non activé pour cet office (ou accès refusé).
+   */
+  moduleContent: (slug: string, signal?: AbortSignal) =>
+    apiFetch<{ message: string }>(`/api/modules/${encodeURIComponent(slug)}/`, { signal }),
 
   /** Émet un ticket SSO pour basculer vers un autre office du même utilisateur. */
   issueSsoTicket: (target: string) =>

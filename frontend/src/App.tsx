@@ -11,12 +11,14 @@ import {
   NewDataroomModal,
   StatsScreen,
   SettingsScreen,
+  ModuleScreen,
   Card,
   type TreeNodeData,
 } from './components';
 import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDocuments } from './hooks/useDatarooms';
+import { useModule } from './hooks/useModule';
 import { api } from './api/endpoints';
 import {
   CLIENT_SPACE_OPTIONS,
@@ -47,6 +49,10 @@ import {
        /api/whoami, /api/my-offices, /api/tenant-config
      - liste et création de dossiers ....................... /api/datarooms/
      - documents d'un dossier et dépôt de pièces ........... /api/datarooms/<id>/documents/
+     - personnalisation visuelle de l'office ............... /api/tenant-theme/
+     - modules activés et contenu d'un module .............. /api/tenant-config/,
+       /api/modules/<slug>/ — la section « Modules » du menu n'existe que pour
+       les modules réellement activés côté serveur
 
    Tout le reste (portefeuilles, arborescence de rubriques, Q&R, membres,
    historique d'audit, statistiques, facturation, sessions ouvertes, modèles)
@@ -56,6 +62,16 @@ import {
    =========================================================================== */
 
 type ScreenKey = 'dashboard' | 'portfolios' | 'datarooms' | 'dataroom' | 'stats' | 'settings';
+
+/**
+ * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
+ * le slug, il n'y a donc pas d'état parallèle à tenir synchronisé avec l'écran
+ * courant. Les modules disponibles venant du serveur, ils ne peuvent pas
+ * apparaître dans le type ScreenKey.
+ */
+const MODULE_PREFIX = 'module:';
+const moduleSlugOf = (key: string) =>
+  key.startsWith(MODULE_PREFIX) ? key.slice(MODULE_PREFIX.length) : null;
 
 const CRUMB_LABELS: Record<ScreenKey, string> = {
   dashboard: 'Accueil',
@@ -86,13 +102,14 @@ export default function App() {
   const authenticated = session.status === 'authenticated';
 
   const [screen, setScreen] = useState<ScreenKey>('dashboard');
+  const [moduleSlug, setModuleSlug] = useState<string | null>(null);
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>();
-  const [modules, setModules] = useState(MODULE_CATALOG);
 
   const datarooms = useDatarooms(authenticated);
   const documents = useDocuments(screen === 'dataroom' ? openDataroomId : null);
+  const openModule = useModule(moduleSlug);
 
   // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
   // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
@@ -107,10 +124,38 @@ export default function App() {
   // Les modules réellement activés viennent de /api/tenant-config/ ; le
   // catalogue (libellés, icônes, « à venir ») reste côté front faute de
   // description exposée par l'API.
+  //
+  // L'état affiché est CELUI DU SERVEUR, sans repli sur la valeur du catalogue :
+  // afficher un module comme activé alors que l'office n'y a pas droit ferait
+  // mentir l'écran qui sert justement à prouver l'activation par office.
   const modulesWithServerState = useMemo(() => {
     const enabled = new Set(session.tenant?.enabled_modules ?? []);
-    return modules.map(m => (m.comingSoon ? m : { ...m, enabled: enabled.has(m.slug) || m.enabled }));
-  }, [modules, session.tenant]);
+    return MODULE_CATALOG.map(m => (m.comingSoon ? m : { ...m, enabled: enabled.has(m.slug) }));
+  }, [session.tenant]);
+
+  /**
+   * Section « Modules » du menu, construite à partir des modules réellement
+   * activés pour l'office. C'est l'étape 3 du scénario de démo : désactiver le
+   * Coffre-fort dans l'admin Django et rafraîchir fait disparaître l'entrée,
+   * sans redéploiement.
+   */
+  const navSections = useMemo(() => {
+    const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
+    if (!active.length) return NAV_SECTIONS;
+    return [
+      ...NAV_SECTIONS,
+      {
+        label: 'Modules',
+        items: active.map(m => ({
+          key: `${MODULE_PREFIX}${m.slug}`,
+          icon: m.icon,
+          label: m.name,
+        })),
+      },
+    ];
+  }, [modulesWithServerState]);
+
+  const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
   const dataroomRows: DataroomRow[] = datarooms.items.map(d => ({
     id: String(d.id),
@@ -146,7 +191,12 @@ export default function App() {
   }
 
   function navigate(key: string) {
-    setScreen(key as ScreenKey);
+    const slug = moduleSlugOf(key);
+    setModuleSlug(slug);
+    // Un écran de module n'est pas un ScreenKey : `screen` reste sur sa dernière
+    // valeur pendant qu'un module est ouvert, et c'est `moduleSlug` qui décide
+    // de ce qui s'affiche (voir le rendu plus bas).
+    if (!slug) setScreen(key as ScreenKey);
     setOpenDataroomId(null);
   }
 
@@ -187,8 +237,8 @@ export default function App() {
       officeName={session.tenant?.name ?? 'Office'}
       officeRole={currentOffice?.role ?? '—'}
       logoUrl={session.tenant?.logo_url || undefined}
-      navSections={NAV_SECTIONS}
-      activeScreen={screen}
+      navSections={navSections}
+      activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
       onNavigate={navigate}
       onSwitchOffice={
         session.offices.length > 1
@@ -202,10 +252,26 @@ export default function App() {
       userName={username}
       userRole={currentOffice?.role ?? 'Membre'}
       breadcrumbRoot={session.tenant?.name}
-      breadcrumbCurrent={openDataroom ? openDataroom.name : CRUMB_LABELS[screen]}
+      breadcrumbCurrent={
+        openModuleEntry?.name ?? (openDataroom ? openDataroom.name : CRUMB_LABELS[screen])
+      }
       noticeLabel="Données partiellement simulées"
     >
-      {screen === 'dashboard' && (
+      {openModuleEntry && (
+        <ModuleScreen
+          name={openModuleEntry.name}
+          desc={openModuleEntry.desc}
+          icon={openModuleEntry.icon}
+          iconBg={openModuleEntry.iconBg}
+          iconColor={openModuleEntry.iconColor}
+          status={openModule.status}
+          message={openModule.message}
+          error={openModule.error}
+          onRetry={() => void openModule.refresh()}
+        />
+      )}
+
+      {!openModuleEntry && screen === 'dashboard' && (
         <HomeScreen
           officeName={session.tenant?.name ?? 'votre office'}
           userFirstName={username.split(/[.@]/)[0]}
@@ -228,7 +294,7 @@ export default function App() {
         />
       )}
 
-      {screen === 'portfolios' && (
+      {!openModuleEntry && screen === 'portfolios' && (
         <PortfoliosScreen
           portfolios={PORTFOLIOS}
           onCreate={() => {}}
@@ -237,7 +303,7 @@ export default function App() {
         />
       )}
 
-      {screen === 'datarooms' && (
+      {!openModuleEntry && screen === 'datarooms' && (
         <>
           <DataroomsListScreen
             totalCount={datarooms.items.length}
@@ -268,7 +334,7 @@ export default function App() {
         </>
       )}
 
-      {screen === 'dataroom' && openDataroom && (
+      {!openModuleEntry && screen === 'dataroom' && openDataroom && (
         <DataroomDetailScreen
           dataroomName={openDataroom.name}
           tags={[]}
@@ -288,11 +354,11 @@ export default function App() {
         />
       )}
 
-      {screen === 'stats' && (
+      {!openModuleEntry && screen === 'stats' && (
         <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
       )}
 
-      {screen === 'settings' && (
+      {!openModuleEntry && screen === 'settings' && (
         <SettingsScreen
           identity={{
             identity: {
@@ -307,8 +373,13 @@ export default function App() {
           modules={{
             modules: modulesWithServerState,
             templates: DATAROOM_TEMPLATES,
-            onToggleModule: (slug, next) =>
-              setModules(prev => prev.map(m => (m.slug === slug ? { ...m, enabled: next } : m))),
+            // Aucun endpoint d'activation : les interrupteurs montrent l'état
+            // réel de l'office et ne prétendent pas agir. Un interrupteur qui
+            // bascule sans rien changer côté serveur est pire que pas
+            // d'interrupteur du tout — il fait croire la démo faite.
+            readOnly: true,
+            readOnlyNote:
+              "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
           }}
         />
       )}

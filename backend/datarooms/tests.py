@@ -260,6 +260,51 @@ class TenantThemeApiTests(TestCase):
         self.assertIsNone(self.office.theme)
 
 
+class ModuleAccessTests(TestCase):
+    """Activation d'un module par office — le pari n°1 du POC.
+
+    L'écran de module du front repose entièrement sur ces trois réponses : 200
+    affiche le contenu, 403 dit « non activé pour cet office », 404 dit « activé
+    mais pas encore d'écran livré ». Si l'une d'elles change, l'écran ment.
+    """
+
+    def setUp(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("officea"), None)
+        self.addCleanup(connections.databases.pop, tenant_alias("officeb"), None)
+
+        from .models import Module
+
+        self.coffre_fort = Module.objects.create(slug="coffre-fort", name="Coffre-fort")
+        self.office_a = Office.objects.create(subdomain="officea", name="Office A")
+        self.office_a.enabled_modules.add(self.coffre_fort)
+        self.office_b = Office.objects.create(subdomain="officeb", name="Office B")
+
+        self.user = User.objects.create_user(username="alice", password="motdepasse")
+        OfficeMembership.objects.create(user=self.user, office=self.office_a, role="admin")
+        OfficeMembership.objects.create(user=self.user, office=self.office_b, role="admin")
+        self.client.force_login(self.user)
+
+    def test_enabled_module_serves_its_content(self):
+        res = self.client.get("/api/modules/coffre-fort/", HTTP_HOST="officea.localhost")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("message", res.json())
+
+    def test_same_module_is_refused_on_an_office_without_it(self):
+        # Même utilisateur, même module, autre office : c'est la démonstration
+        # que l'activation est bien portée par l'office et non par le code.
+        res = self.client.get("/api/modules/coffre-fort/", HTTP_HOST="officeb.localhost")
+        self.assertEqual(res.status_code, 403)
+
+    def test_deactivating_the_module_closes_access_without_redeploy(self):
+        self.office_a.enabled_modules.remove(self.coffre_fort)
+        res = self.client.get("/api/modules/coffre-fort/", HTTP_HOST="officea.localhost")
+        self.assertEqual(res.status_code, 403)
+
+    def test_unknown_module_slug_is_a_404(self):
+        res = self.client.get("/api/modules/inexistant/", HTTP_HOST="officea.localhost")
+        self.assertEqual(res.status_code, 404)
+
+
 class SsoTicketTests(TestCase):
     # _consumed_tickets est un set module-global : deux tickets émis pour le même
     # (user_id, target) dans la même seconde produisent la même chaîne signée

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   AppShell, Button, DataroomDetailScreen, DataroomsListScreen, HomeScreen,
-  LoginScreen, PortfoliosScreen, SettingsScreen, StatsScreen,
+  LoginScreen, ModuleScreen, PortfoliosScreen, SettingsScreen, StatsScreen,
 } from '../components';
 import { useTenantTheme } from '../theme/useTenantTheme';
 import * as demo from '../data/demo';
@@ -50,6 +50,16 @@ function ThemeSwitch() {
     </div>
   );
 }
+
+// Le Coffre-fort est le module réellement servi par le backend du POC — c'est
+// donc lui qui sert d'exemple ici, pas un module inventé.
+const DEMO_MODULE = {
+  name: 'Coffre-fort électronique',
+  desc: 'Archivage à valeur probante — module Notantis',
+  icon: 'lock',
+  iconBg: 'var(--info-bg)',
+  iconColor: 'var(--info)',
+};
 
 function ScreenSpecimens() {
   return (
@@ -130,6 +140,34 @@ function ScreenSpecimens() {
               <SettingsScreen defaultTab="sub3-apparence"
                 identity={{ identity: { displayName: demo.DEMO_OFFICE.fullName, subdomain: demo.DEMO_OFFICE.subdomain } }}
                 modules={{ modules: demo.MODULE_CATALOG, templates: demo.DATAROOM_TEMPLATES }} />
+            </ScreenPreview>
+          )},
+        ]}
+      />
+
+      {/* Les quatre états d'un module sont montrés côte à côte : c'est le seul
+          endroit où on peut les comparer sans manipuler la base. */}
+      <Specimen
+        name="ModuleScreen"
+        variants={[
+          { label: 'Activé', node: (
+            <ScreenPreview>
+              <ModuleScreen {...DEMO_MODULE} status="ready"
+                message="Contenu du module Coffre-fort (démo)" />
+            </ScreenPreview>
+          )},
+          { label: 'Chargement', node: (
+            <ScreenPreview><ModuleScreen {...DEMO_MODULE} status="loading" /></ScreenPreview>
+          )},
+          { label: 'Non activé pour cet office', node: (
+            <ScreenPreview><ModuleScreen {...DEMO_MODULE} status="disabled" /></ScreenPreview>
+          )},
+          { label: 'Activé, écran pas encore livré', node: (
+            <ScreenPreview><ModuleScreen {...DEMO_MODULE} status="no-screen" /></ScreenPreview>
+          )},
+          { label: 'Injoignable', node: (
+            <ScreenPreview>
+              <ModuleScreen {...DEMO_MODULE} status="error" error="Backend injoignable" onRetry={noop} />
             </ScreenPreview>
           )},
         ]}

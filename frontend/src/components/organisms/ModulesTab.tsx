@@ -23,6 +23,10 @@ export interface ModulesTabProps {
   modules: ModuleEntry[];
   templates: DataroomTemplate[];
   onToggleModule?: (slug: string, next: boolean) => void;
+  /** Interrupteurs consultables mais inactifs (aucun endpoint d'activation). */
+  readOnly?: boolean;
+  /** Pourquoi ils sont inactifs — affiché sous le titre, obligatoire en pratique. */
+  readOnlyNote?: string;
   onCreateTemplate?: () => void;
   onOpenTemplateMenu?: (id: string) => void;
 }
@@ -34,14 +38,21 @@ export function ModulesTab({
   modules,
   templates,
   onToggleModule,
+  readOnly,
+  readOnlyNote,
   onCreateTemplate,
   onOpenTemplateMenu,
 }: ModulesTabProps) {
   return (
     <Card padded style={{ maxWidth: 640 }}>
-      <div className="section-title" style={{ marginBottom: 14 }}>
+      <div className="section-title" style={{ marginBottom: readOnlyNote ? 6 : 14 }}>
         Modules activables
       </div>
+      {readOnlyNote && (
+        <div className="tiny dim" style={{ marginBottom: 14 }}>
+          {readOnlyNote}
+        </div>
+      )}
       {modules.map((m, i) => (
         <ModuleRow
           key={m.slug}
@@ -53,6 +64,7 @@ export function ModulesTab({
           desc={m.desc}
           enabled={m.comingSoon ? undefined : (m.enabled ?? false)}
           onToggle={next => onToggleModule?.(m.slug, next)}
+          disabled={readOnly}
           pill={m.comingSoon ? { kind: 'neutral', label: 'À venir' } : undefined}
           last={i === modules.length - 1}
         />

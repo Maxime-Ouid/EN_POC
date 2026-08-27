@@ -13,6 +13,8 @@ export interface ModuleRowProps {
   /** `undefined` = module non activable (affiche `pill` à la place). */
   enabled?: boolean;
   onToggle?: (next: boolean) => void;
+  /** Interrupteur visible mais inactif (état serveur consultable, pas modifiable). */
+  disabled?: boolean;
   /** Affiché quand le module n'est pas encore activable (« À venir »). */
   pill?: { kind: 'neutral' | 'info'; label: string };
   /** Dernière ligne d'une liste : pas de séparateur bas. */
@@ -31,6 +33,7 @@ export function ModuleRow({
   desc,
   enabled,
   onToggle,
+  disabled,
   pill,
   last,
 }: ModuleRowProps) {
@@ -50,7 +53,7 @@ export function ModuleRow({
         <div className="tiny dim">{desc}</div>
       </div>
       {typeof enabled === 'boolean' ? (
-        <Toggle checked={enabled} onChange={onToggle} />
+        <Toggle checked={enabled} onChange={onToggle} disabled={disabled} />
       ) : pill ? (
         <Pill kind={pill.kind}>{pill.label}</Pill>
       ) : null}

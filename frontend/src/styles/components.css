@@ -400,6 +400,9 @@ tbody tr:last-child td{border-bottom:none;}
 .toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--shadow-sm);transition:transform .15s;}
 .toggle.on{background:var(--brass-600);}
 .toggle.on::after{transform:translateX(16px);}
+/* Interrupteur consultable mais non modifiable (état servi par le backend, sans
+   endpoint d'écriture) : il doit se voir comme tel, sinon on clique en boucle. */
+.toggle:disabled{opacity:.55;cursor:not-allowed;}
 
 /* form-ish */
 .field{margin-bottom:14px;}

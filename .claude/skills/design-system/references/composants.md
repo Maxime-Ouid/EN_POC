@@ -99,6 +99,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `DataroomsListScreen` | Écran "Dossiers" (liste) — index_16.html #screen-datarooms. |
 | `HomeScreen` | Écran d'accueil / dashboard — voir index_16.html #screen-dashboard. |
 | `LoginScreen` | Écran de connexion — §6.15. Composant pur : `onSubmit` reçoit identifiant + mot de passe, à brancher sur POST /api/login/… |
+| `ModuleScreen` | Écran d'un module activé pour l'office. |
 | `PortfoliosScreen` | Écran "Portefeuilles" — index_16.html #screen-portfolios. |
 | `SettingsScreen` | Écran Personnalisation — index_16.html #screen-settings. |
 | `StatsScreen` | Écran Statistiques & facturation — index_16.html #screen-stats. |
