@@ -1,846 +1,509 @@
-import { useEffect, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AppShell,
+  LoginScreen,
+  MfaScreen,
+  HomeScreen,
+  PortfoliosScreen,
+  DataroomsListScreen,
+  type DataroomRow,
+  DataroomDetailScreen,
+  type DataroomDocument,
+  NewDataroomModal,
+  NewFolderModal,
+  StatsScreen,
+  SettingsScreen,
+  ModuleScreen,
+  Card,
+  type TreeNodeData,
+} from './components';
+import { useSession } from './hooks/useSession';
+import { useTenantTheme } from './theme/useTenantTheme';
+import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
+import { useModule } from './hooks/useModule';
+import { api, type DocumentSummary } from './api/endpoints';
+import {
+  CLIENT_SPACE_OPTIONS,
+  CLIENT_USAGE,
+  CONNECTED_USERS,
+  DATAROOM_TEMPLATES,
+  DEMO_HOME_STATS,
+  HISTORY,
+  INVOICES,
+  MEMBERS,
+  MODULE_CATALOG,
+  NAV_SECTIONS,
+  NEW_DATAROOM_TEMPLATES,
+  PORTFOLIOS,
+  PORTFOLIO_OPTIONS,
+  QA_ENTRIES,
+  RECENT_ACTIVITY,
+} from './data/demo';
 
-interface OfficeMembership {
-  subdomain: string;
-  name: string;
-  role: string;
-}
+/* ===========================================================================
+   Application réelle de l'Espace Notarial V2 (POC).
 
-interface TenantConfig {
-  name: string;
-  logo_url: string;
-  primary_color: string;
-  enabled_modules: string[];
-}
+   Même bibliothèque de composants et mêmes écrans que la maquette
+   (PrototypeDemo.tsx), mais alimentés par le backend Django partout où un
+   endpoint existe :
 
-interface DataroomSummary {
-  id: number;
-  name: string;
-  created_at: string;
-}
+     - connexion, identité, offices, config d'office ....... /api/login,
+       /api/whoami, /api/my-offices, /api/tenant-config
+     - liste et création de dossiers ....................... /api/datarooms/
+     - documents d'un dossier et dépôt de pièces ........... /api/datarooms/<id>/documents/
+     - personnalisation visuelle de l'office ............... /api/tenant-theme/
+     - modules activés et contenu d'un module .............. /api/tenant-config/,
+       /api/modules/<slug>/ — la section « Modules » du menu n'existe que pour
+       les modules réellement activés côté serveur
 
-interface DocumentSummary {
-  id: number;
-  name: string;
-  file: string;
-  uploaded_at: string;
-}
+   Tout le reste (portefeuilles, arborescence de rubriques, Q&R, membres,
+   historique d'audit, statistiques, facturation, sessions ouvertes, modèles)
+   n'est pas encore modélisé côté serveur et s'affiche à partir des jeux de
+   démonstration de src/data/demo.tsx. La pastille de la topbar le dit à
+   l'écran : on ne laisse pas croire que ces chiffres sont réels.
+   =========================================================================== */
 
-interface FolderSummary {
-  id: number;
-  name: string;
-  created_at: string;
-}
+type ScreenKey = 'dashboard' | 'portfolios' | 'datarooms' | 'dataroom' | 'stats' | 'settings';
 
-interface OfficeUserRow {
-  membership_id: number;
-  user_id: number;
-  username: string;
-  role: string;
-}
+/**
+ * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
+ * le slug, il n'y a donc pas d'état parallèle à tenir synchronisé avec l'écran
+ * courant. Les modules disponibles venant du serveur, ils ne peuvent pas
+ * apparaître dans le type ScreenKey.
+ */
+const MODULE_PREFIX = 'module:';
+const moduleSlugOf = (key: string) =>
+  key.startsWith(MODULE_PREFIX) ? key.slice(MODULE_PREFIX.length) : null;
 
-interface AccessRestrictionSummary {
-  id: number;
-  kind: 'dataroom' | 'folder' | 'document';
-  dataroom_id: number;
-  target_id: number;
-  label: string;
-  user_ids: number[];
-}
-
-function accessEndpoint(kind: 'dataroom' | 'folder' | 'document', dataroomId: number, targetId: number): string {
-  if (kind === 'dataroom') return `${apiOrigin}/api/datarooms/${dataroomId}/access/`;
-  if (kind === 'folder') return `${apiOrigin}/api/datarooms/${dataroomId}/folders/${targetId}/access/`;
-  return `${apiOrigin}/api/datarooms/${dataroomId}/documents/${targetId}/access/`;
-}
-
-const ROLE_OPTIONS = ['superadmin', 'admin', 'membre', 'client'];
-// Même ordre hiérarchique que OfficeMembership.ROLE_RANK côté backend (source de
-// vérité — le serveur revalide toujours, ce filtrage n'est qu'un confort d'UI pour ne
-// pas proposer des rôles que l'appelant ne pourrait de toute façon pas assigner).
-const ROLE_RANK: Record<string, number> = { superadmin: 3, admin: 2, membre: 1, client: 0 };
-
-function rolesAtOrBelow(role: string): string[] {
-  const rank = ROLE_RANK[role] ?? -1;
-  return ROLE_OPTIONS.filter(r => ROLE_RANK[r] <= rank);
-}
-
-type View =
-  | { kind: 'home' }
-  | { kind: 'datarooms' }
-  | { kind: 'dataroom'; dataroom: { id: number; name: string } }
-  | { kind: 'module'; slug: string; label: string }
-  | { kind: 'users' };
-
-const MODULE_LABELS: Record<string, string> = {
-  'coffre-fort': 'Coffre-fort',
-  'confiance-rib': 'ConfianceRIB',
+const CRUMB_LABELS: Record<ScreenKey, string> = {
+  dashboard: 'Accueil',
+  portfolios: 'Portefeuilles',
+  datarooms: 'Dossiers',
+  dataroom: 'Dossiers',
+  stats: 'Statistiques & facturation',
+  settings: 'Personnalisation',
 };
 
-const apiOrigin = `https://${window.location.hostname}:8000`;
+/**
+ * Nœud synthétique représentant la racine de la dataroom dans l'arbre passé à
+ * `Explorer` — les documents à la racine (folder=None côté backend) n'ont pas
+ * de dossier réel pour les porter. `DataroomDetailScreen` sélectionne
+ * `tree[0].children[0]` par défaut s'il existe, sinon `tree[0]` : ce nœud est
+ * donc toujours `tree[0]`, avec les vrais dossiers de premier niveau comme
+ * enfants.
+ */
+const ROOT_NODE_ID = 'root';
 
-function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
+/** Convertit un id de nœud de l'arbre (string) en id de dossier pour l'API (undefined = racine). */
+function toParentId(nodeId: string | undefined): number | undefined {
+  if (!nodeId || nodeId === ROOT_NODE_ID) return undefined;
+  return Number(nodeId);
 }
 
-async function switchOffice(subdomain: string) {
-  const res = await fetch(`${apiOrigin}/api/sso/issue/`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': getCookie('csrftoken') ?? '',
+function toDataroomDocument(doc: DocumentSummary, username: string): DataroomDocument {
+  return {
+    id: String(doc.id),
+    name: doc.name,
+    status: { kind: 'neutral', label: 'Déposé' },
+    addedBy: username || '—',
+    date: formatDate(doc.uploaded_at),
+    // Le backend ne renvoie pas encore la taille du fichier (Document n'expose
+    // que name/file/uploaded_at) — pas de valeur inventée.
+    size: '—',
+  };
+}
+
+/** Mappe l'arbre de dossiers (id numériques, forme API) vers TreeNodeData (id string, forme Explorer). */
+function toTreeNodes(nodes: FolderTreeNode[]): TreeNodeData[] {
+  return nodes.map(node => ({
+    id: String(node.id),
+    label: node.name,
+    count: node.documentCount,
+    children: node.children.length ? toTreeNodes(node.children) : undefined,
+  }));
+}
+
+function countAllDocuments(nodes: FolderTreeNode[]): number {
+  return nodes.reduce((sum, node) => sum + node.documentCount + countAllDocuments(node.children), 0);
+}
+
+function findFolderLabel(nodes: TreeNodeData[], id: string): string | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node.label;
+    if (node.children) {
+      const found = findFolderLabel(node.children, id);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function initialsOf(name: string): string {
+  const parts = name.replace(/[@.].*$/, '').split(/[\s._-]+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+export default function App() {
+  const session = useSession();
+  const authenticated = session.status === 'authenticated';
+  const username = session.user?.username ?? '';
+
+  const [screen, setScreen] = useState<ScreenKey>('dashboard');
+  const [moduleSlug, setModuleSlug] = useState<string | null>(null);
+  const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
+  const [loginError, setLoginError] = useState<string | undefined>();
+  const [mfaError, setMfaError] = useState<string | undefined>();
+
+  const datarooms = useDatarooms(authenticated);
+  const dataroomTree = useDataroomTree(screen === 'dataroom' ? openDataroomId : null);
+  const openModule = useModule(moduleSlug);
+
+  // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
+  // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
+  // est déjà appliqué depuis main.tsx).
+  const { syncFromServer } = useTenantTheme();
+  useEffect(() => {
+    if (authenticated) void syncFromServer();
+  }, [authenticated, syncFromServer]);
+
+  const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
+
+  // Les modules réellement activés viennent de /api/tenant-config/ ; le
+  // catalogue (libellés, icônes, « à venir ») reste côté front faute de
+  // description exposée par l'API.
+  //
+  // L'état affiché est CELUI DU SERVEUR, sans repli sur la valeur du catalogue :
+  // afficher un module comme activé alors que l'office n'y a pas droit ferait
+  // mentir l'écran qui sert justement à prouver l'activation par office.
+  const modulesWithServerState = useMemo(() => {
+    const enabled = new Set(session.tenant?.enabled_modules ?? []);
+    return MODULE_CATALOG.map(m => (m.comingSoon ? m : { ...m, enabled: enabled.has(m.slug) }));
+  }, [session.tenant]);
+
+  /**
+   * Section « Modules » du menu, construite à partir des modules réellement
+   * activés pour l'office. C'est l'étape 3 du scénario de démo : désactiver le
+   * Coffre-fort dans l'admin Django et rafraîchir fait disparaître l'entrée,
+   * sans redéploiement.
+   */
+  const navSections = useMemo(() => {
+    const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
+    if (!active.length) return NAV_SECTIONS;
+    return [
+      ...NAV_SECTIONS,
+      {
+        label: 'Modules',
+        items: active.map(m => ({
+          key: `${MODULE_PREFIX}${m.slug}`,
+          icon: m.icon,
+          label: m.name,
+        })),
+      },
+    ];
+  }, [modulesWithServerState]);
+
+  const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
+
+  const dataroomRows: DataroomRow[] = datarooms.items.map(d => ({
+    id: String(d.id),
+    icon: 'folder',
+    iconBg: 'var(--info-bg)',
+    iconColor: 'var(--info)',
+    name: d.name,
+    tags: [],
+    members: [],
+    storage: '—',
+    activity: formatDate(d.created_at),
+    status: { kind: 'success', label: 'Actif' },
+  }));
+
+  // La racine (documents sans dossier) est un nœud synthétique — ROOT_NODE_ID —
+  // dont les enfants sont les vrais dossiers de premier niveau ; voir
+  // toTreeNodes/ROOT_NODE_ID. La visibilité de chemin est déjà tranchée côté
+  // serveur à chaque niveau (folders_view) : cet arbre ne montre jamais plus
+  // qu'un utilisateur ne verrait en cliquant de niveau en niveau.
+  const tree: TreeNodeData[] = [
+    {
+      id: ROOT_NODE_ID,
+      label: 'Documents',
+      count: dataroomTree.rootDocuments.length,
+      children: toTreeNodes(dataroomTree.tree),
     },
-    body: JSON.stringify({ target: subdomain }),
-  });
-  if (!res.ok) {
-    alert("Impossible de changer d'office");
-    return;
-  }
-  const { ticket } = await res.json();
-  window.location.href =
-    `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
-}
+  ];
 
-function MfaChallenge({
-  stage,
-  qrCode,
-  secret,
-  onSubmit,
-}: {
-  stage: 'enroll' | 'verify';
-  qrCode: string | null;
-  secret: string | null;
-  onSubmit: (token: string) => void;
-}) {
-  const [token, setToken] = useState('');
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    onSubmit(token);
+  const documentsByFolder: Record<string, DataroomDocument[]> = {
+    [ROOT_NODE_ID]: dataroomTree.rootDocuments.map(doc => toDataroomDocument(doc, username)),
+  };
+  for (const [folderId, docs] of Object.entries(dataroomTree.documentsByFolderId)) {
+    documentsByFolder[folderId] = docs.map(doc => toDataroomDocument(doc, username));
   }
 
-  return (
-    <form onSubmit={handleSubmit}>
-      {stage === 'enroll' ? (
-        <>
-          <p>Scannez ce QR code avec votre application d'authentification (Google
-             Authenticator, etc.), puis saisissez le code à 6 chiffres généré :</p>
-          {qrCode && <img src={qrCode} alt="QR code TOTP" width={200} height={200} />}
-          {secret && <p>Secret (saisie manuelle) : <code>{secret}</code></p>}
-        </>
-      ) : (
-        <p>Saisissez le code à 6 chiffres de votre application d'authentification :</p>
-      )}
-      <input value={token} onChange={e => setToken(e.target.value)} placeholder="Code TOTP" />
-      <button type="submit">Valider</button>
-    </form>
-  );
-}
+  const totalDocumentCount = dataroomTree.rootDocuments.length + countAllDocuments(dataroomTree.tree);
 
-function OfficePicker({ offices, title }: { offices: OfficeMembership[]; title: string }) {
-  return (
-    <div>
-      <p>{title}</p>
-      <ul>
-        {offices.map(o => (
-          <li key={o.subdomain}>
-            <button onClick={() => switchOffice(o.subdomain)}>{o.name} ({o.role})</button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Header({
-  config,
-  otherOffices,
-  currentUser,
-  isOfficeManager,
-  view,
-  setView,
-}: {
-  config: TenantConfig;
-  otherOffices: OfficeMembership[];
-  currentUser: string | null;
-  isOfficeManager: boolean;
-  view: View;
-  setView: (v: View) => void;
-}) {
-  return (
-    <header>
-      <h1 style={{ color: 'var(--primary-color)' }}>{config.name}</h1>
-      <p>Connecté(e) : {currentUser ?? '...'}</p>
-      <nav>
-        <button disabled={view.kind === 'home'} onClick={() => setView({ kind: 'home' })}>Accueil</button>
-        <button disabled={view.kind === 'datarooms'} onClick={() => setView({ kind: 'datarooms' })}>Datarooms</button>
-        {config.enabled_modules.map(slug => (
-          <button
-            key={slug}
-            disabled={view.kind === 'module' && view.slug === slug}
-            onClick={() => setView({ kind: 'module', slug, label: MODULE_LABELS[slug] ?? slug })}
-          >
-            {MODULE_LABELS[slug] ?? slug}
-          </button>
-        ))}
-        {isOfficeManager && (
-          <button disabled={view.kind === 'users'} onClick={() => setView({ kind: 'users' })}>Utilisateurs</button>
-        )}
-      </nav>
-      {otherOffices.length > 0 && <OfficePicker offices={otherOffices} title="Changer d'office :" />}
-    </header>
-  );
-}
-
-function HomePage({ config }: { config: TenantConfig }) {
-  return <p>Bienvenue sur l'espace de {config.name}.</p>;
-}
-
-function ModulePage({ slug, label }: { slug: string; label: string }) {
-  const [message, setMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (slug !== 'coffre-fort') return;
-    fetch(`${apiOrigin}/api/modules/coffre-fort/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => setMessage(data.message ?? data.error ?? null));
-  }, [slug]);
-
-  return (
-    <section>
-      <h2>{label}</h2>
-      {slug === 'coffre-fort'
-        ? <p>{message ?? 'Chargement...'}</p>
-        : <p>Module « {label} » activé — pas de contenu de démonstration implémenté.</p>}
-    </section>
-  );
-}
-
-function DataroomsPage({ onOpen }: { onOpen: (d: { id: number; name: string }) => void }) {
-  const [datarooms, setDatarooms] = useState<DataroomSummary[]>([]);
-  const [name, setName] = useState('');
-
-  function loadDatarooms() {
-    fetch(`${apiOrigin}/api/datarooms/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setDatarooms);
+  async function switchOffice(subdomain: string) {
+    const { ticket } = await api.issueSsoTicket(subdomain);
+    window.location.href = `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
   }
 
-  useEffect(loadDatarooms, []);
-
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const res = await fetch(`${apiOrigin}/api/datarooms/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ name: trimmed }),
-    });
-    if (!res.ok) {
-      alert('Impossible de créer la dataroom');
-      return;
-    }
-    setName('');
-    loadDatarooms();
+  function navigate(key: string) {
+    const slug = moduleSlugOf(key);
+    setModuleSlug(slug);
+    // Un écran de module n'est pas un ScreenKey : `screen` reste sur sa dernière
+    // valeur pendant qu'un module est ouvert, et c'est `moduleSlug` qui décide
+    // de ce qui s'affiche (voir le rendu plus bas).
+    if (!slug) setScreen(key as ScreenKey);
+    setOpenDataroomId(null);
   }
 
-  return (
-    <section>
-      <h2>Datarooms</h2>
-      <ul>
-        {datarooms.map(d => (
-          <li key={d.id}>
-            <button onClick={() => onOpen({ id: d.id, name: d.name })}>{d.name}</button>
-          </li>
-        ))}
-      </ul>
-      <form onSubmit={handleCreate}>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Nom de la dataroom" />
-        <button type="submit">Créer</button>
-      </form>
-    </section>
-  );
-}
-
-function DataroomDetailPage({
-  dataroom,
-  onBack,
-  isOfficeManager,
-}: {
-  dataroom: { id: number; name: string };
-  onBack: () => void;
-  isOfficeManager: boolean;
-}) {
-  const [folderPath, setFolderPath] = useState<{ id: number; name: string }[]>([]);
-  const [folders, setFolders] = useState<FolderSummary[]>([]);
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [officeUsers, setOfficeUsers] = useState<OfficeUserRow[]>([]);
-  const [accessPanel, setAccessPanel] = useState<
-    { kind: 'dataroom' | 'folder' | 'document'; id: number; label: string } | null
-  >(null);
-  const [accessUserIds, setAccessUserIds] = useState<number[]>([]);
-
-  const currentFolderId = folderPath.length > 0 ? folderPath[folderPath.length - 1].id : null;
-
-  useEffect(() => {
-    if (!isOfficeManager) return;
-    fetch(`${apiOrigin}/api/office-users/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setOfficeUsers);
-  }, [isOfficeManager]);
-
-  function loadLevel() {
-    const url = currentFolderId
-      ? `${apiOrigin}/api/datarooms/${dataroom.id}/folders/?parent=${currentFolderId}`
-      : `${apiOrigin}/api/datarooms/${dataroom.id}/folders/`;
-    fetch(url, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        setFolders(data.folders ?? []);
-        setDocuments(data.documents ?? []);
-      });
+  if (session.status === 'loading') {
+    return <CenteredMessage>Chargement de votre espace…</CenteredMessage>;
   }
 
-  useEffect(loadLevel, [dataroom.id, currentFolderId]);
-
-  async function uploadFile(file: File) {
-    const body = new FormData();
-    body.append('file', file);
-    if (currentFolderId != null) body.append('folder', String(currentFolderId));
-    const res = await fetch(`${apiOrigin}/api/datarooms/${dataroom.id}/documents/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-CSRFToken': getCookie('csrftoken') ?? '' },
-      body,
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? "Échec de l'upload");
-      return;
-    }
-    loadLevel();
-  }
-
-  function handleDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
-  }
-
-  async function handleCreateFolder(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = newFolderName.trim();
-    if (!trimmed) return;
-    const res = await fetch(`${apiOrigin}/api/datarooms/${dataroom.id}/folders/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ name: trimmed, parent: currentFolderId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? 'Impossible de créer le dossier');
-      return;
-    }
-    setNewFolderName('');
-    loadLevel();
-  }
-
-  function openFolder(folder: FolderSummary) {
-    setFolderPath([...folderPath, { id: folder.id, name: folder.name }]);
-  }
-
-  function goToLevel(index: number) {
-    setFolderPath(prev => prev.slice(0, index + 1));
-  }
-
-  async function openAccessPanel(kind: 'dataroom' | 'folder' | 'document', id: number, label: string) {
-    const res = await fetch(accessEndpoint(kind, dataroom.id, id), { credentials: 'include' });
-    const data = await res.json();
-    setAccessPanel({ kind, id, label });
-    setAccessUserIds(data.user_ids ?? []);
-  }
-
-  function toggleAccessUser(userId: number) {
-    setAccessUserIds(prev =>
-      prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+  if (session.status === 'error') {
+    return (
+      <CenteredMessage>
+        Backend injoignable — {session.error}
+        <div className="tiny dim" style={{ marginTop: 8 }}>
+          Vérifiez que le serveur Django tourne (voir SETUP.md).
+        </div>
+      </CenteredMessage>
     );
   }
 
-  async function saveAccessPanel() {
-    if (!accessPanel) return;
-    const res = await fetch(accessEndpoint(accessPanel.kind, dataroom.id, accessPanel.id), {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ user_ids: accessUserIds }),
-    });
-    if (!res.ok) {
-      alert("Impossible d'enregistrer la restriction");
-      return;
-    }
-    setAccessPanel(null);
-    loadLevel();
+  if (session.status === 'mfa-enroll' || session.status === 'mfa-verify') {
+    return (
+      <MfaScreen
+        mode={session.status === 'mfa-enroll' ? 'enroll' : 'verify'}
+        qrCode={session.mfaQrCode}
+        secret={session.mfaSecret}
+        error={mfaError}
+        onSubmit={token => {
+          setMfaError(undefined);
+          session.submitMfa(token).catch((err: Error) => setMfaError(err.message));
+        }}
+      />
+    );
   }
 
+  if (!authenticated) {
+    return (
+      <LoginScreen
+        officeName={session.tenant?.name ?? 'Espace Notarial'}
+        officeDomain={window.location.host}
+        error={loginError}
+        onSubmit={(identifier, password) => {
+          setLoginError(undefined);
+          session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
+        }}
+      />
+    );
+  }
+
+  const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
+
   return (
-    <section>
-      <button onClick={onBack}>← Retour aux datarooms</button>
-      <h2>{dataroom.name}</h2>
-      {isOfficeManager && (
-        <button onClick={() => openAccessPanel('dataroom', dataroom.id, dataroom.name)}>
-          Restreindre l'accès à cette dataroom
-        </button>
-      )}
-      <nav>
-        <button onClick={() => goToLevel(-1)} disabled={folderPath.length === 0}>Racine</button>
-        {folderPath.map((f, i) => (
-          <span key={f.id}>
-            {' / '}
-            <button onClick={() => goToLevel(i)} disabled={i === folderPath.length - 1}>{f.name}</button>
-          </span>
-        ))}
-      </nav>
-      <ul>
-        {folders.map(f => (
-          <li key={`folder-${f.id}`}>
-            📁 <button onClick={() => openFolder(f)}>{f.name}</button>
-            {isOfficeManager && (
-              <button onClick={() => openAccessPanel('folder', f.id, f.name)}>Accès</button>
-            )}
-          </li>
-        ))}
-        {documents.map(d => (
-          <li key={`doc-${d.id}`}>
-            <a href={d.file} target="_blank" rel="noreferrer">{d.name}</a>
-            {isOfficeManager && (
-              <button onClick={() => openAccessPanel('document', d.id, d.name)}>Accès</button>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {accessPanel && (
-        <div style={{ border: '1px solid #999', padding: '8px', marginBottom: '16px' }}>
-          <p>
-            Restreindre l'accès de « {accessPanel.label} » — aucune case cochée =
-            accès ouvert à tout l'office (comportement par défaut) :
-          </p>
-          {officeUsers.map(u => (
-            <label key={u.user_id} style={{ display: 'block' }}>
-              <input
-                type="checkbox"
-                checked={accessUserIds.includes(u.user_id)}
-                onChange={() => toggleAccessUser(u.user_id)}
-              />
-              {u.username}
-            </label>
-          ))}
-          <button onClick={saveAccessPanel}>Enregistrer</button>
-          <button onClick={() => setAccessPanel(null)}>Annuler</button>
-        </div>
-      )}
-
-      <form onSubmit={handleCreateFolder}>
-        <input
-          value={newFolderName}
-          onChange={e => setNewFolderName(e.target.value)}
-          placeholder="Nom du dossier"
+    <AppShell
+      officeName={session.tenant?.name ?? 'Office'}
+      officeRole={currentOffice?.role ?? '—'}
+      logoUrl={session.tenant?.logo_url || undefined}
+      navSections={navSections}
+      activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
+      onNavigate={navigate}
+      onSwitchOffice={
+        session.offices.length > 1
+          ? () => {
+              const next = session.offices.find(o => o.subdomain !== currentOffice?.subdomain);
+              if (next) void switchOffice(next.subdomain);
+            }
+          : undefined
+      }
+      userInitials={initialsOf(username)}
+      userName={username}
+      userRole={currentOffice?.role ?? 'Membre'}
+      breadcrumbRoot={session.tenant?.name}
+      breadcrumbCurrent={
+        openModuleEntry?.name ?? (openDataroom ? openDataroom.name : CRUMB_LABELS[screen])
+      }
+      noticeLabel="Données partiellement simulées"
+    >
+      {openModuleEntry && (
+        <ModuleScreen
+          name={openModuleEntry.name}
+          desc={openModuleEntry.desc}
+          icon={openModuleEntry.icon}
+          iconBg={openModuleEntry.iconBg}
+          iconColor={openModuleEntry.iconColor}
+          status={openModule.status}
+          message={openModule.message}
+          error={openModule.error}
+          onRetry={() => void openModule.refresh()}
         />
-        <button type="submit">Créer un dossier</button>
-      </form>
-      <div
-        onDragOver={e => e.preventDefault()}
-        onDrop={handleDrop}
-        style={{ border: '1px dashed #999', padding: '16px' }}
-      >
-        <p>Glisser-déposer un fichier ici, ou :</p>
-        <label>
-          Parcourir…
-          <input
-            type="file"
-            style={{ display: 'block' }}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) uploadFile(file);
-              e.target.value = '';
+      )}
+
+      {!openModuleEntry && screen === 'dashboard' && (
+        <HomeScreen
+          officeName={session.tenant?.name ?? 'votre office'}
+          userFirstName={username.split(/[.@]/)[0]}
+          // Seul le nombre de dossiers est réel ; les autres compteurs n'ont pas
+          // encore de source côté backend.
+          stats={{ ...DEMO_HOME_STATS, activeDatarooms: datarooms.items.length }}
+          recentPortfolios={PORTFOLIOS.map(p => ({
+            id: p.id,
+            icon: p.icon,
+            iconBg: p.iconBg,
+            iconColor: p.iconColor,
+            name: p.name,
+            desc: p.desc,
+            status: p.status,
+          }))}
+          recentActivity={RECENT_ACTIVITY}
+          onOpenPortfolio={() => setScreen('datarooms')}
+          onSeeAllPortfolios={() => setScreen('portfolios')}
+          onSeeFullHistory={() => setScreen('stats')}
+        />
+      )}
+
+      {!openModuleEntry && screen === 'portfolios' && (
+        <PortfoliosScreen
+          portfolios={PORTFOLIOS}
+          onCreate={() => {}}
+          onFilter={() => {}}
+          onOpen={() => setScreen('datarooms')}
+        />
+      )}
+
+      {!openModuleEntry && screen === 'datarooms' && (
+        <>
+          <DataroomsListScreen
+            totalCount={datarooms.items.length}
+            rows={dataroomRows}
+            onOpen={id => {
+              setOpenDataroomId(Number(id));
+              setScreen('dataroom');
+            }}
+            onCreate={() => setModalOpen(true)}
+            displayRange={
+              datarooms.loading
+                ? 'Chargement…'
+                : datarooms.error
+                  ? datarooms.error
+                  : `${datarooms.items.length} dossier${datarooms.items.length > 1 ? 's' : ''}`
+            }
+          />
+          <NewDataroomModal
+            open={modalOpen}
+            onClose={() => setModalOpen(false)}
+            onCreate={({ name }) => {
+              void datarooms.create(name).then(() => setModalOpen(false));
+            }}
+            portfolioOptions={PORTFOLIO_OPTIONS}
+            clientSpaceOptions={CLIENT_SPACE_OPTIONS}
+            templates={NEW_DATAROOM_TEMPLATES}
+          />
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'dataroom' && openDataroom && (
+        <>
+          <DataroomDetailScreen
+            dataroomName={openDataroom.name}
+            tags={[]}
+            status={{ kind: 'success', label: 'Actif' }}
+            meta={[
+              { label: 'Créé le', value: formatDate(openDataroom.created_at) },
+              { label: 'Documents', value: `${totalDocumentCount} fichier(s)` },
+            ]}
+            tree={tree}
+            documentsByFolder={documentsByFolder}
+            // Non modélisés côté backend — jeux de démonstration assumés.
+            qaEntries={QA_ENTRIES}
+            members={MEMBERS}
+            history={HISTORY}
+            onBackToList={() => navigate('datarooms')}
+            onAddDocuments={(activeFolderId, files) => {
+              const parentId = toParentId(activeFolderId);
+              if (files?.length) {
+                void dataroomTree.upload(files[0], parentId);
+              } else {
+                pickFileAndUpload(file => dataroomTree.upload(file, parentId));
+              }
+            }}
+            onCreateFolder={activeFolderId => setNewFolderModal({ parentId: activeFolderId })}
+          />
+          <NewFolderModal
+            open={newFolderModal !== null}
+            onClose={() => setNewFolderModal(null)}
+            parentLabel={
+              newFolderModal && newFolderModal.parentId && newFolderModal.parentId !== ROOT_NODE_ID
+                ? findFolderLabel(tree, newFolderModal.parentId)
+                : 'Racine de la dataroom'
+            }
+            onCreate={name => {
+              const parentId = toParentId(newFolderModal?.parentId);
+              void dataroomTree.createFolder(name, parentId).then(() => setNewFolderModal(null));
             }}
           />
-        </label>
-      </div>
-    </section>
-  );
-}
-
-function UsersPage({ callerRole }: { callerRole: string }) {
-  const [users, setUsers] = useState<OfficeUserRow[]>([]);
-  const [mode, setMode] = useState<'create' | 'attach'>('create');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-
-  const allowedRoles = rolesAtOrBelow(callerRole);
-  const [role, setRole] = useState(allowedRoles[allowedRoles.length - 1] ?? 'membre');
-
-  function loadUsers() {
-    fetch(`${apiOrigin}/api/office-users/`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setUsers);
-  }
-
-  useEffect(loadUsers, []);
-
-  function resetForm() {
-    setUsername('');
-    setPassword('');
-    setRole(allowedRoles[allowedRoles.length - 1] ?? 'membre');
-  }
-
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = username.trim();
-    if (!trimmed || !password) return;
-    const res = await fetch(`${apiOrigin}/api/office-users/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ username: trimmed, password, role }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? 'Impossible de créer cet utilisateur');
-      return;
-    }
-    resetForm();
-    loadUsers();
-  }
-
-  async function handleAttach(e: FormEvent) {
-    e.preventDefault();
-    const trimmed = username.trim();
-    if (!trimmed) return;
-    const res = await fetch(`${apiOrigin}/api/office-users/attach/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ username: trimmed, role }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? 'Impossible de rattacher cet utilisateur');
-      return;
-    }
-    resetForm();
-    loadUsers();
-  }
-
-  async function handleRoleChange(membershipId: number, newRole: string) {
-    const res = await fetch(`${apiOrigin}/api/office-users/${membershipId}/`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ role: newRole }),
-    });
-    if (!res.ok) {
-      alert('Impossible de modifier le rôle');
-      return;
-    }
-    loadUsers();
-  }
-
-  const [restrictionsPanelUser, setRestrictionsPanelUser] = useState<OfficeUserRow | null>(null);
-  const [restrictions, setRestrictions] = useState<AccessRestrictionSummary[]>([]);
-
-  async function loadRestrictions() {
-    const res = await fetch(`${apiOrigin}/api/access-restrictions/`, { credentials: 'include' });
-    setRestrictions(await res.json());
-  }
-
-  async function openRestrictionsPanel(u: OfficeUserRow) {
-    setRestrictionsPanelUser(u);
-    await loadRestrictions();
-  }
-
-  async function toggleUserInRestriction(r: AccessRestrictionSummary) {
-    if (!restrictionsPanelUser) return;
-    const included = r.user_ids.includes(restrictionsPanelUser.user_id);
-    const newIds = included
-      ? r.user_ids.filter(id => id !== restrictionsPanelUser.user_id)
-      : [...r.user_ids, restrictionsPanelUser.user_id];
-    const res = await fetch(accessEndpoint(r.kind, r.dataroom_id, r.target_id), {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken') ?? '',
-      },
-      body: JSON.stringify({ user_ids: newIds }),
-    });
-    if (!res.ok) {
-      alert('Impossible de modifier la restriction');
-      return;
-    }
-    loadRestrictions();
-  }
-
-  return (
-    <section>
-      <h2>Utilisateurs de l'office</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Utilisateur</th>
-            <th>Rôle</th>
-            <th>Restrictions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u.membership_id}>
-              <td>{u.username}</td>
-              <td>
-                <select value={u.role} onChange={e => handleRoleChange(u.membership_id, e.target.value)}>
-                  {rolesAtOrBelow(callerRole).map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <button onClick={() => openRestrictionsPanel(u)}>Restrictions</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {restrictionsPanelUser && (
-        <div style={{ border: '1px solid #999', padding: '8px', marginBottom: '16px' }}>
-          <p>Restrictions concernant {restrictionsPanelUser.username} :</p>
-          {restrictions.length === 0 ? (
-            <p>Aucune restriction définie dans cet office pour le moment.</p>
-          ) : (
-            restrictions.map(r => (
-              <label key={r.id} style={{ display: 'block' }}>
-                <input
-                  type="checkbox"
-                  checked={r.user_ids.includes(restrictionsPanelUser.user_id)}
-                  onChange={() => toggleUserInRestriction(r)}
-                />
-                {r.label} ({r.kind})
-              </label>
-            ))
-          )}
-          <button onClick={() => setRestrictionsPanelUser(null)}>Fermer</button>
-        </div>
+        </>
       )}
 
-      <nav>
-        <button disabled={mode === 'create'} onClick={() => setMode('create')}>
-          Créer un nouvel utilisateur
-        </button>
-        <button disabled={mode === 'attach'} onClick={() => setMode('attach')}>
-          Ajouter un utilisateur existant
-        </button>
-      </nav>
-
-      {mode === 'create' ? (
-        <form onSubmit={handleCreate}>
-          <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Nom d'utilisateur" />
-          <input
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            type="password"
-            placeholder="Mot de passe"
-          />
-          <select value={role} onChange={e => setRole(e.target.value)}>
-            {allowedRoles.map(r => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
-          <button type="submit">Créer</button>
-        </form>
-      ) : (
-        <form onSubmit={handleAttach}>
-          <input
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="Nom d'utilisateur exact"
-          />
-          <select value={role} onChange={e => setRole(e.target.value)}>
-            {allowedRoles.map(r => (
-              <option key={r} value={r}>{r}</option>
-            ))}
-          </select>
-          <button type="submit">Ajouter</button>
-        </form>
+      {!openModuleEntry && screen === 'stats' && (
+        <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
       )}
-    </section>
-  );
-}
 
-function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null); // null = en cours de vérification
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-  const [offices, setOffices] = useState<OfficeMembership[]>([]);
-  const [config, setConfig] = useState<TenantConfig | null>(null);
-  const [configResolved, setConfigResolved] = useState(false);
-  const [view, setView] = useState<View>({ kind: 'home' });
-  const [mfaStage, setMfaStage] = useState<'enroll' | 'verify' | null>(null);
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [mfaSecret, setMfaSecret] = useState<string | null>(null);
-
-  async function loadOffices() {
-    const res = await fetch(`${apiOrigin}/api/my-offices/`, { credentials: 'include' });
-    if (res.ok) {
-      setAuthed(true);
-      setOffices(await res.json());
-      fetch(`${apiOrigin}/api/whoami/`, { credentials: 'include' })
-        .then(res => res.json())
-        .then(data => setCurrentUser(data.username));
-    } else {
-      setAuthed(false);
-    }
-  }
-
-  useEffect(() => {
-    loadOffices();
-  }, []);
-
-  async function handleLogin(e: FormEvent) {
-    e.preventDefault();
-    const res = await fetch(`${apiOrigin}/api/login/`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-    });
-    if (!res.ok) {
-      alert('Identifiants incorrects');
-      return;
-    }
-    const data = await res.json();
-    if (data.enrollment) {
-      setMfaStage('enroll');
-      const setupRes = await fetch(`${apiOrigin}/api/mfa/setup/`, { credentials: 'include' });
-      const setupData = await setupRes.json();
-      setQrCode(setupData.qr_code);
-      setMfaSecret(setupData.secret);
-    } else {
-      setMfaStage('verify');
-    }
-  }
-
-  async function handleMfaSubmit(token: string) {
-    const url = mfaStage === 'enroll' ? '/api/mfa/setup/' : '/api/mfa/verify/';
-    const res = await fetch(`${apiOrigin}${url}`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.error ?? 'Code invalide');
-      return;
-    }
-    setCurrentUser(data.username);
-    setMfaStage(null);
-    setQrCode(null);
-    setMfaSecret(null);
-    await loadOffices();
-  }
-
-  useEffect(() => {
-    if (!authed) return;
-    fetch(`${apiOrigin}/api/tenant-config/`, { credentials: 'include' })
-      .then(res => {
-        setConfigResolved(true);
-        if (!res.ok) return null;
-        return res.json();
-      })
-      .then(data => {
-        if (data) {
-          setConfig(data);
-          document.documentElement.style.setProperty('--primary-color', data.primary_color);
-        }
-      });
-  }, [authed]);
-
-  if (authed === null) return <p>Chargement...</p>;
-
-  if (mfaStage) {
-    return <MfaChallenge stage={mfaStage} qrCode={qrCode} secret={mfaSecret} onSubmit={handleMfaSubmit} />;
-  }
-
-  if (!authed) {
-    return (
-      <form onSubmit={handleLogin}>
-        <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)} placeholder="Utilisateur" />
-        <input value={loginPassword} onChange={e => setLoginPassword(e.target.value)} type="password" placeholder="Mot de passe" />
-        <button type="submit">Connexion</button>
-      </form>
-    );
-  }
-
-  if (!configResolved) return <p>Chargement...</p>;
-
-  if (!config) {
-    return <OfficePicker offices={offices} title="Choisis un office :" />;
-  }
-
-  const otherOffices = offices.filter(o => `${o.subdomain}.localhost` !== window.location.hostname);
-  const currentOffice = offices.find(o => `${o.subdomain}.localhost` === window.location.hostname);
-  const isOfficeManager = currentOffice != null && ['admin', 'superadmin'].includes(currentOffice.role);
-
-  return (
-    <div>
-      <Header
-        config={config}
-        otherOffices={otherOffices}
-        currentUser={currentUser}
-        isOfficeManager={isOfficeManager}
-        view={view}
-        setView={setView}
-      />
-      {view.kind === 'home' && <HomePage config={config} />}
-      {view.kind === 'datarooms' && (
-        <DataroomsPage onOpen={d => setView({ kind: 'dataroom', dataroom: d })} />
-      )}
-      {view.kind === 'dataroom' && (
-        <DataroomDetailPage
-          dataroom={view.dataroom}
-          onBack={() => setView({ kind: 'datarooms' })}
-          isOfficeManager={isOfficeManager}
+      {!openModuleEntry && screen === 'settings' && (
+        <SettingsScreen
+          identity={{
+            identity: {
+              displayName: session.tenant?.name ?? '',
+              subdomain: window.location.host,
+              logoUrl: session.tenant?.logo_url,
+            },
+            // Aucun endpoint d'écriture sur Office pour l'instant : l'onglet
+            // édite localement et le dit, plutôt que de simuler un succès.
+            error: "L'enregistrement de l'identité n'est pas encore exposé par l'API.",
+          }}
+          modules={{
+            modules: modulesWithServerState,
+            templates: DATAROOM_TEMPLATES,
+            // Aucun endpoint d'activation : les interrupteurs montrent l'état
+            // réel de l'office et ne prétendent pas agir. Un interrupteur qui
+            // bascule sans rien changer côté serveur est pire que pas
+            // d'interrupteur du tout — il fait croire la démo faite.
+            readOnly: true,
+            readOnlyNote:
+              "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
+          }}
         />
       )}
-      {view.kind === 'module' && <ModulePage slug={view.slug} label={view.label} />}
-      {view.kind === 'users' && isOfficeManager && <UsersPage callerRole={currentOffice!.role} />}
+    </AppShell>
+  );
+}
+
+function pickFileAndUpload(upload: (file: File) => Promise<void>) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (file) void upload(file);
+  };
+  input.click();
+}
+
+function CenteredMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 24 }}>
+      <Card padded style={{ maxWidth: 420, textAlign: 'center' }}>
+        {children}
+      </Card>
     </div>
   );
 }
-
-export default App;

@@ -865,6 +865,97 @@ session si le code a bougé.
   l'`AddField` identique. `makemigrations --check --dry-run` confirme « No changes
   detected » après coup. 22 tests reprise tels quels (`ThemeValidatorTests`,
   `TenantThemeApiTests`) — suite complète repassée : 64 tests, tous verts.
+- **✅ Fait le 28/08/2026 — fusion frontend complète : adoption de la structure du
+  collègue (design system par composants) comme base, réalignée sur le backend réel** :
+  suite directe de l'entrée précédente (fusion backend-only du thème). L'ancien
+  `App.tsx` monolithique de `back_evolution` (nav locale `useState`, composants
+  inline `Header`/`HomePage`/`DataroomsPage`/`DataroomDetailPage`/`UsersPage`,
+  décrits dans les entrées "Frontend" précédentes de cette section) est **entièrement
+  remplacé**, pas fusionné littéralement — devenu sans objet face à l'architecture du
+  collègue (atomic design `atoms/molecules/organisms/templates/pages`, `AppShell` +
+  `ThemeProvider`, 92 composants réutilisables). Mécanisme : `git checkout
+  origin/front/design-system-components -- frontend/ .claude/skills/design-system/
+  docs/design-system/ docs/espace-notarial-v1.md` (récupère tout son arbre sans
+  rejouer son historique de commits) puis `git rm` des fichiers `back_evolution`-only
+  devenus orphelins (`App.css`, `index.css`, `assets/{hero.png,react.svg,vite.svg}`).
+  `package.json`/`vite.config.ts` déjà identiques entre les deux branches (React
+  19/Vite 8), aucun `npm install` nécessaire.
+  - **MFA portée dans le nouveau flux (prérequis bloquant, pas une extension)** : le
+    `hooks/useSession.ts` du collègue et son flux de connexion n'avaient **aucune**
+    notion de MFA — son `login()` s'attendait à ce que `/api/login/` authentifie
+    directement, alors que cet endpoint répond toujours `{mfa_required, enrollment}`
+    et n'ouvre jamais de session à lui seul (voir entrée MFA du 27/08/2026). Sans ce
+    portage, adopter sa structure telle quelle aurait cassé la connexion entièrement.
+    `SessionState.status` étendu (`'mfa-enroll' | 'mfa-verify'` en plus des états
+    existants), nouvelle fonction `submitMfa(token)`. Nouvel écran présentationnel
+    `components/pages/MfaScreen.tsx` (props `{mode, qrCode?, secret?, onSubmit,
+    error?}`), composé à partir des mêmes atomes que `LoginScreen` (`Field`/
+    `TextInput`/`Button`), même layout deux panneaux (`login-shell`). Vérifié en
+    Chrome réel avec `alice` (enrôlement, QR code) et `carla` (dispositif déjà
+    confirmé, code seul).
+  - **`api/endpoints.ts` étendu aux 9 patterns confirmés absents** (vérifiés un par
+    un par `git grep` sur la branche du collègue avant d'écrire, pas supposés
+    couverts) : `listFolderLevel`/`createFolder` (dossiers imbriqués),
+    `get`/`setDataroomAccess`, `get`/`setFolderAccess`, `get`/`setDocumentAccess`,
+    `listAccessRestrictions` (droits d'accès), `listOfficeUsers`/`createOfficeUser`/
+    `attachOfficeUser`/`updateOfficeUserRole` (gestion des utilisateurs). `login()`
+    et `uploadDocument()` (nouveau paramètre `folderId?`) adaptés au contrat réel.
+    `listDocuments` (sans notion de dossier) supprimé — devenu mort et redondant
+    avec `listFolderLevel(id).documents` (le `GET` sans `?folder=` ne renvoie déjà
+    que la racine côté backend, voir entrée `Folder` du 27/08/2026).
+  - **Nouveaux hooks, un fichier par domaine** (convention déjà en place) :
+    `useDataroomTree(dataroomId)` (`hooks/useDatarooms.ts`, remplace l'ancien
+    `useDocuments`, supprimé — devenu mort), `useAccessRestrictions.ts`,
+    `useOfficeUsers.ts` (ces deux derniers **sans écran consommateur** — demande
+    explicite : hooks prêts, UI de gestion des utilisateurs/restrictions d'accès
+    reportée à un chantier séparé, voir juste en dessous).
+  - **⚠️ Régression assumée — UI de gestion des utilisateurs et de contrôle d'accès
+    disparue** : l'ancien `App.tsx` avait une `UsersPage` complète (liste/rôles/
+    création/rattachement) et un panneau "Accès" par dossier/document/dataroom
+    (entrées du 27/08/2026 et 28/08/2026 ci-dessus). Ces écrans n'existent **plus**
+    dans le nouveau frontend — remplacés par du code du collègue qui ne les avait
+    jamais eus. Le backend est intact (endpoints inchangés, testés), et les hooks
+    (`useAccessRestrictions`, `useOfficeUsers`) sont prêts côté front, mais il n'y a
+    aujourd'hui aucun écran pour les consommer. À reconstruire dans un chantier
+    séparé sur le modèle de ce qui a été fait ici pour Datarooms/dossiers (composer
+    depuis les organismes existants, pas réinventer).
+  - **Décision de conception clé — arbre de dossiers assemblé en amont, pas de
+    chargement paresseux** : `organisms/Explorer.tsx` (composant du collègue,
+    volontairement non modifié) attend un `tree: TreeNodeData[]` déjà complet, sans
+    aucun mécanisme de fetch différé par nœud. `useDataroomTree` parcourt donc
+    récursivement `GET /api/datarooms/<id>/folders/?parent=<id>` (racine puis chaque
+    sous-dossier trouvé) pour assembler `tree`/`rootDocuments`/`documentsByFolderId`
+    avant de les passer à `DataroomDetailScreen`. La visibilité de chemin déjà
+    calculée côté serveur à chaque niveau (voir entrée du 28/08/2026 ci-dessus) fait
+    que cet assemblage ne montre jamais plus qu'un utilisateur ne verrait en
+    naviguant niveau par niveau — aucun filtrage supplémentaire côté client.
+  - `DataroomDetailScreen.tsx` (fichier du collègue) étendu a minima : `onAddDocuments`
+    et le nouveau `onCreateFolder` reçoivent désormais `activeFolderId` (état interne
+    du composant, remonté au moment où l'action se déclenche plutôt que rendu
+    contrôlé) ; bouton "Nouveau sous-dossier" (jusque-là sans handler) relié à un
+    nouveau `organisms/NewFolderModal.tsx` (même patron que `NewDataroomModal`) ;
+    `molecules/Dropzone.tsx` (déjà existant côté collègue, glisser-déposer + bouton
+    "parcourir" dans le même composant) branché sous la liste de documents — upload
+    réellement câblé pour la première fois dans cette UI.
+  - **Vérifié de bout en bout en Chrome réel** (pas seulement `curl`/build) : liste
+    des datarooms réelle (pas les données de démo du collègue), ouverture d'une
+    dataroom réelle avec arbre à 2 niveaux de profondeur (`Contrats > Signes`,
+    dossiers de test de sessions précédentes), navigation dans chaque niveau avec
+    comptages de documents exacts, création d'un dossier au niveau affiché (modale
+    correctement titrée "Dans : Signes", fermeture + rafraîchissement automatiques
+    après création), upload par le `Dropzone` dans ce nouveau dossier (comptage total
+    incrémenté, fichier listé au bon niveau, `uploaded_by` correct) — données de test
+    nettoyées après vérification. `npm run check:ds` (0 écart nouveau sur 140
+    fichiers), `npm run build` (`tsc -b && vite build` sans erreur), `npm run lint`
+    (0 erreur, seul l'avertissement `react/only-export-components` préexistant sur
+    `IconSprite.tsx` subsiste) — tous relancés après le chantier complet.
+  - **Piège d'automatisation rencontré** : les clics `computer.left_click` de
+    `claude-in-chrome` (coordonnées et refs d'éléments) ne déclenchaient pas de
+    façon fiable les gestionnaires React synthétiques dans cette session de
+    navigateur (aucune erreur, aucun changement d'état). Contourné en dispatchant de
+    vrais `.click()` DOM via `javascript_tool` — fiable à chaque tentative,
+    à privilégier pour toute vérification par clic dans ce projet si le problème
+    se reproduit.
 
 ## État actuel du POC
 
@@ -877,12 +968,14 @@ session si le code a bougé.
 - [x] **MFA (TOTP, django-otp)** sur la connexion initiale — fait le 27/08/2026,
       enrôlement (QR code) si pas de dispositif, code TOTP sinon ; ne se déclenche
       jamais sur la bascule d'office via ticket SSO (voir "État réel du code")
-- [x] Frontend : formulaire de connexion, sélecteur d'office filtré par accès réel,
-      affichage conditionnel de module, couleur appliquée dynamiquement via variable CSS.
-      Nav minimale ajoutée le 26/08/2026 (Accueil/Datarooms/boutons de module, nom
-      d'utilisateur affiché via nouvel endpoint `GET /api/whoami/`) — état de vue local
-      (`useState`), pas de React Router. Toujours pas de styling poussé (volontaire,
-      attend les maquettes).
+- [x] Frontend : **remplacé le 28/08/2026** par la structure du collègue
+      (`front/design-system-components`) — `AppShell` + `pages/*Screen.tsx` +
+      `hooks/`, design system par composants (atoms/molecules/organisms/templates),
+      `ThemeProvider` pour la personnalisation visuelle. L'ancien `App.tsx`
+      monolithique (nav locale `useState`, composants inline) décrit dans les
+      entrées précédentes de cette liste est obsolète — voir "État réel du code"
+      pour le détail de la fusion et de ce qui a été porté (MFA, dossiers imbriqués)
+      vs. régressé (UI utilisateurs/accès, voir plus bas).
 - [x] Migrations + seed de démo (base `default`) — fait le 26/08/2026
 - [x] **Migration vers une base SQLite par office** (routeur de base de données) — fait le
       26/08/2026 (`datarooms/tenancy/`) ; isolation physique prouvée avec de vraies
@@ -892,55 +985,51 @@ session si le code a bougé.
       de domaine partagé (rejeté par les navigateurs — voir "État réel du code")
 - [ ] Logo dynamique par office (la couleur est câblée, pas encore le logo)
 - [x] Arborescence de dataroom minimale (créer / uploader / naviguer) — API backend
-      faite le 26/08/2026, **UI faite le 26/08/2026** : écran « Datarooms » (liste +
-      création par nom), écran détail (liste des documents + dépôt par glisser-déposer
-      ou bouton « Parcourir », les deux passent par la même fonction d'upload). Vérifié
-      de bout en bout via l'automatisation Chrome (pas seulement `curl`) : création
-      d'une dataroom, upload d'un fichier accepté, bascule d'office via le ticket SSO
-      avec la nouvelle UI, toggle d'un module depuis `/admin/` répercuté en direct dans
-      la nav sans redémarrage. Hiérarchie de dossiers ajoutée côté **API** le
-      27/08/2026 (modèle `Folder`, voir "État réel du code" et "Modèle de données
-      clé"), puis côté **UI** le 27/08/2026 également (`DataroomDetailPage`) :
-      sous-dossiers du niveau courant affichés à côté des documents, clic sur un
-      dossier pour y naviguer, fil d'Ariane simple (liste de boutons, un par niveau,
-      le dernier désactivé — même patron que les onglets de `Header`) pour remonter,
-      bouton de création de dossier au niveau affiché, upload (glisser-déposer ou
-      bouton) qui dépose désormais dans le dossier affiché plutôt que toujours à la
-      racine (`folder` ajouté au `FormData` seulement si un dossier est ouvert).
-      Vérifié de bout en bout en Chrome réel : création d'un dossier à la racine,
-      navigation dedans, upload d'un fichier dedans, retour à la racine — le fichier
-      n'y apparaît pas — puis navigation sur 2 niveaux (`Contrats` > `Signes`,
-      dossiers de test créés lors du chantier API) et remontée partielle via un clic
-      sur un niveau intermédiaire du fil d'Ariane (pas seulement la racine).
-- [x] Gestion des utilisateurs d'un office par ses admins/superadmins — fait le
-      27/08/2026 : `GET`/`POST`/`PATCH /api/office-users/`, page « Utilisateurs »
-      (liste + rôle modifiable + formulaire de création), isolation stricte par office
-      même pour une identité partagée type carla (voir "État réel du code"). Pas de
-      réinitialisation de mot de passe ni d'invitation par email (hors périmètre
-      explicite de ce chantier). Étendu le 28/08/2026 : rattachement d'un utilisateur
-      existant (`POST /api/office-users/attach/`, recherche par nom exact, pas
-      d'annuaire/autocomplete — cf. §4.1 du document de vision) + visibilité
-      hiérarchique des rôles (`OfficeMembership.ROLE_RANK`, un admin ne voit/ne gère/ne
-      crée jamais de superadmin sur son office, un superadmin voit tout).
+      faite le 26/08/2026, hiérarchie de dossiers ajoutée côté **API** le 27/08/2026
+      (modèle `Folder`, voir "État réel du code" et "Modèle de données clé").
+      **UI reconstruite le 28/08/2026** sur le design system du collègue
+      (`DataroomDetailScreen` + `organisms/Explorer`) après remplacement complet du
+      frontend — arbre de dossiers assemblé en amont (`useDataroomTree`, parcours
+      récursif de `GET /folders/?parent=`), navigation multi-niveaux via `Explorer`,
+      création de dossier (`NewFolderModal`), upload par `molecules/Dropzone`
+      (glisser-déposer + bouton "parcourir"). Vérifié de bout en bout en Chrome réel
+      sur des données réelles à 3 niveaux de profondeur (`Contrats > Signes >
+      Sous-dossier E2E`) : navigation, création de dossier, upload — voir "État réel
+      du code" pour le détail. (Les versions UI antérieures au 26/08 et 27/08,
+      construites sur l'ancien `App.tsx`, sont obsolètes depuis ce remplacement.)
+- [x] Gestion des utilisateurs d'un office par ses admins/superadmins — **backend
+      fait le 27/08/2026**, étendu le 28/08/2026 (rattachement d'un utilisateur
+      existant, visibilité hiérarchique des rôles) : `GET`/`POST`/`PATCH
+      /api/office-users/`, `POST /api/office-users/attach/`, isolation stricte par
+      office même pour une identité partagée type carla (voir "État réel du code").
+      **⚠️ UI absente depuis le 28/08/2026** : la page « Utilisateurs » existait dans
+      l'ancien `App.tsx` (liste + rôle modifiable + formulaire de création/
+      rattachement) mais a disparu avec le remplacement du frontend par la structure
+      du collègue, qui ne l'avait pas. Le hook `hooks/useOfficeUsers.ts` est prêt
+      côté front (liste/création/rattachement/changement de rôle) mais n'a aucun
+      écran consommateur — à reconstruire dans un chantier séparé.
 - [x] Contrôle d'accès par utilisateur sur Dataroom/Folder/Document, avec héritage —
-      fait le 28/08/2026 : modèle `AccessRestriction` (base tenant, quatrième modèle
-      métier après Dataroom/Folder/Document), accès ouvert par défaut à tout l'office,
-      restriction ponctuelle par admin/superadmin à un niveau précis, héritée par le
-      contenu imbriqué (la restriction la plus proche dans la hiérarchie l'emporte,
-      pas de fusion). Étendu le 28/08/2026 : visibilité de chemin
-      (`_subtree_has_accessible_content`/`_level_visible`) — un `Dataroom`/`Folder`
-      redevient visible, même par ailleurs restreint, s'il mène vers un élément
-      accordé plus profond (calculée à chaque requête, ne mute jamais aucune
-      restriction) ; lecture seulement, la création/l'upload restent gatés par
-      l'accès direct seul. UI en deux points d'entrée : bouton « Accès » par
-      dossier/document/dataroom (`DataroomDetailPage`) et onglet « Restrictions » par
-      utilisateur (`UsersPage`) — voir "État réel du code" pour le détail.
+      **backend fait le 28/08/2026** : modèle `AccessRestriction` (base tenant,
+      quatrième modèle métier après Dataroom/Folder/Document), accès ouvert par
+      défaut à tout l'office, restriction ponctuelle par admin/superadmin à un
+      niveau précis, héritée par le contenu imbriqué (la restriction la plus proche
+      dans la hiérarchie l'emporte, pas de fusion), visibilité de chemin
+      (`_subtree_has_accessible_content`/`_level_visible`) calculée à chaque requête,
+      lecture seulement (la création/l'upload restent gatés par l'accès direct
+      seul). **⚠️ UI absente depuis le 28/08/2026** : le panneau « Accès » par
+      dossier/document/dataroom et l'onglet « Restrictions » par utilisateur
+      existaient dans l'ancien `App.tsx` mais ont disparu avec le remplacement du
+      frontend, même cause que pour la gestion des utilisateurs ci-dessus. Le hook
+      `hooks/useAccessRestrictions.ts` est prêt côté front mais n'a aucun écran
+      consommateur — à reconstruire dans un chantier séparé.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
-- [x] Personnalisation visuelle par office (`Office.theme`) — **backend seulement**,
-      fait le 28/08/2026 par fusion ciblée depuis `front/design-system-components` (le
-      design system et son application côté écran restent sur cette branche, pas
-      encore fusionnés — voir "État réel du code" et `FUSION_BACKEND_THEME.md`).
+- [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le
+      28/08/2026, **frontend (design system + `ThemeProvider`) fusionné le
+      28/08/2026 également**, en même temps que le remplacement complet du frontend
+      par la structure du collègue — voir "État réel du code" et
+      `FUSION_BACKEND_THEME.md` (qui ne documente que la partie backend, antérieure
+      d'un cran à ce remplacement complet).
 
 ## Backlog « si le temps le permet » (hors engagement ferme du POC)
 

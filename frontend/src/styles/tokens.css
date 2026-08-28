@@ -1,0 +1,229 @@
+/* ===========================================================================
+   Espace Notarial Next — Design tokens
+   Extraits verbatim du prototype (artefact « Espace Notarial Next »).
+   Thème clair par défaut ; thème sombre via prefers-color-scheme OU
+   attribut data-theme="dark"/"light" posé sur <html> (le second l'emporte).
+   Mis à jour le 26/08/2026 : fond de #app-main et fond des cartes (.card/
+   .stat-card) sont désormais eux aussi des tokens (app-grad-*, card-bg,
+   card-border) — voir DESIGN_SYSTEM.md §9.
+   =========================================================================== */
+
+/* ============ TOKENS ============ */
+:root{
+  --bg:#fafafd;
+  --surface:#ffffff;
+  --surface-alt:#f5f4fb;
+  --border:#e5e2f0;
+  --border-soft:#eeecf7;
+  --ink-900:#211c3d;
+  --ink-800:#342f52;
+  --ink-700:#5b5773;
+  --ink-500:#7d7896;
+  --ink-400:#8783a0;
+  --brand-ink:#1a1258;
+  --brand-ink-hover:#241a63;
+  --shell-bg:#1a1258;
+  --shell-bg-2:#2c2170;
+  --shell-text:#ffffff;
+  --shell-text-dim:#b6acdb;
+  --shell-active:#342a7a;
+  --shell-border:rgba(255,255,255,.10);
+  --brass-700:#6b3fd4;
+  --brass-600:#7d52dc;
+  --brass-500:#9668f4;
+  --brass-400:#ab84f7;
+  --brass-100:#f0e9fc;
+  --success:#2f8f5b;
+  --success-bg:#e4f5ec;
+  --warning:#b9820f;
+  --warning-bg:#fbf0d6;
+  --critical:#c13f3f;
+  --critical-bg:#fbe6e6;
+  --info:#5b7bfb;
+  --info-bg:#e9edfe;
+  --shadow-sm:0 1px 2px rgba(26,18,88,.06);
+  --shadow-md:0 8px 24px rgba(26,18,88,.10);
+  --shadow-lg:0 24px 56px rgba(26,18,88,.16);
+  --radius-sm:6px;
+  --radius-md:10px;
+  --radius-lg:16px;
+  --font-display:'Poppins', 'Segoe UI', sans-serif;
+  --font-ui:'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+
+  /* Navigation : dimensions et densité. Ces valeurs sont RÉÉCRITES par le
+     <style id="tenant-theme-vars"> dès qu'un office personnalise sa navigation
+     (theme/engine.ts, buildLayoutBody). Elles restent ici pour que l'app
+     s'affiche correctement sans moteur de thème — UI kit, tests, rendu avant
+     le premier effet React — et elles reproduisent exactement le réglage
+     « Large / Confortable », c'est-à-dire la navigation d'avant l'ajout du
+     bloc. Le placement, lui, ne passe pas par une variable : voir les
+     sélecteurs [data-nav-placement] dans components.css. */
+  --nav-w:236px;
+  --nav-h:62px;
+  --nav-item-pad-y:8px;
+  --nav-item-pad-x:10px;
+  --nav-item-gap:10px;
+  --nav-item-spacing:1px;
+  --nav-icon-size:16px;
+  --nav-font-size:13.3px;
+  /* Écart entre le bord de la navigation et le contenu. */
+  --nav-gutter:14px;
+
+  /* Barres de défilement — dérivées des tokens de texte plutôt que définies
+     par thème : color-mix résout var() au moment du calcul, donc elles suivent
+     automatiquement le thème clair, le thème sombre ET toute couleur choisie
+     dans Personnalisation → Apparence, sans entrée supplémentaire à éditer.
+     La variante "on-shell" sert aux zones posées sur le fond foncé de la
+     sidebar, où un pouce sombre serait invisible. */
+  --scrollbar-thumb:color-mix(in srgb, var(--ink-400) 38%, transparent);
+  --scrollbar-thumb-hover:color-mix(in srgb, var(--ink-400) 68%, transparent);
+  --scrollbar-thumb-on-shell:color-mix(in srgb, var(--shell-text) 26%, transparent);
+  --scrollbar-thumb-on-shell-hover:color-mix(in srgb, var(--shell-text) 45%, transparent);
+  --login-grad-1:rgba(150,104,244,.14);
+  --login-grad-2:rgba(80,208,253,.24);
+  --login-grad-3:rgba(91,123,251,.13);
+  --login-grad-4:rgba(107,63,212,.17);
+  --login-glass-bg:rgba(255,255,255,.72);
+  --login-glass-border:rgba(255,255,255,.85);
+  --login-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.95), rgba(255,255,255,.05));
+  --login-badge-bg:rgba(255,255,255,.08);
+  --login-badge-border:rgba(255,255,255,.16);
+  --app-grad-base-from:#f2eeff;
+  --app-grad-base-to:#ecf1ff;
+  --app-grad-1:#ede4ff;
+  --app-grad-2:#b8cdff;
+  --app-grad-3:rgba(166,140,255,0.369);
+  --app-grad-4:#c8e2f2;
+  --card-bg:rgba(255,255,255,0.5);
+  --card-border:rgba(255,255,255,0.65);
+  --card-glass-bg:rgb(255 255 255 / 85%);
+  --card-glass-border:rgba(255,255,255,.7);
+  --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), rgba(255,255,255,.04));
+  --nav-dim:#2f206f;
+  --nav-label-c:#372979;
+  --brand-strong:#2a1c66;
+  --brand-soft:#4e3f96;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#100d1f;
+    --surface:#171330;
+    --surface-alt:#1c1740;
+    --border:#332a5e;
+    --border-soft:#2a2350;
+    --ink-900:#efedf7;
+    --ink-800:#ddd9ec;
+    --ink-700:#b3aecb;
+    --ink-500:#9d97ba;
+    --ink-400:#8983a8;
+    --brand-ink:#1a1258;
+    --brand-ink-hover:#241a63;
+    --shell-bg:#140d42;
+    --shell-bg-2:#1c1558;
+    --shell-text:#ffffff;
+    --shell-text-dim:#a89ed4;
+    --shell-active:#2c2170;
+    --shell-border:rgba(255,255,255,.08);
+    --brass-700:#b99cf7;
+    --brass-600:#ab8ff5;
+    --brass-500:#9668f4;
+    --brass-400:#8656d9;
+    --brass-100:rgba(150,104,244,.16);
+    --success:#7fbf9c;
+    --success-bg:rgba(47,143,91,.18);
+    --warning:#e3b25b;
+    --warning-bg:rgba(185,130,15,.20);
+    --critical:#e08a8a;
+    --critical-bg:rgba(193,63,63,.20);
+    --info:#8fa8ff;
+    --info-bg:rgba(91,123,251,.20);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 8px 24px rgba(0,0,0,.45);
+    --shadow-lg:0 24px 56px rgba(0,0,0,.6);
+    --login-grad-1:rgba(150,104,244,.18);
+    --login-grad-2:rgba(80,208,253,.26);
+    --login-grad-3:rgba(91,123,251,.15);
+    --login-grad-4:rgba(171,143,245,.16);
+    --login-glass-bg:rgba(28,23,64,.62);
+    --login-glass-border:rgba(255,255,255,.14);
+    --login-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.20), rgba(255,255,255,.02));
+    --login-badge-bg:rgba(255,255,255,.06);
+    --login-badge-border:rgba(255,255,255,.14);
+    --app-grad-base-from:#100d1f;
+    --app-grad-base-to:#1c1740;
+    --app-grad-1:rgba(150,104,244,.16);
+    --app-grad-2:rgba(91,123,251,.14);
+    --app-grad-3:rgba(150,104,244,.10);
+    --app-grad-4:rgba(80,208,253,.08);
+    --card-bg:rgba(23,19,48,.55);
+    --card-border:rgba(255,255,255,.08);
+    --card-glass-bg:rgba(28,23,64,.75);
+    --card-glass-border:rgba(255,255,255,.12);
+    --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.02));
+    --nav-dim:#a89ed4;
+    --nav-label-c:#a89ed4;
+    --brand-strong:#ffffff;
+    --brand-soft:#a89ed4;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#100d1f;
+  --surface:#171330;
+  --surface-alt:#1c1740;
+  --border:#332a5e;
+  --border-soft:#2a2350;
+  --ink-900:#efedf7;
+  --ink-800:#ddd9ec;
+  --ink-700:#b3aecb;
+  --ink-500:#9d97ba;
+  --ink-400:#8983a8;
+  --brand-ink:#1a1258;
+  --brand-ink-hover:#241a63;
+  --shell-bg:#140d42;
+  --shell-bg-2:#1c1558;
+  --shell-text:#ffffff;
+  --shell-text-dim:#a89ed4;
+  --shell-active:#2c2170;
+  --shell-border:rgba(255,255,255,.08);
+  --brass-700:#b99cf7;
+  --brass-600:#ab8ff5;
+  --brass-500:#9668f4;
+  --brass-400:#8656d9;
+  --brass-100:rgba(150,104,244,.16);
+  --success:#7fbf9c;
+  --success-bg:rgba(47,143,91,.18);
+  --warning:#e3b25b;
+  --warning-bg:rgba(185,130,15,.20);
+  --critical:#e08a8a;
+  --critical-bg:rgba(193,63,63,.20);
+  --info:#8fa8ff;
+  --info-bg:rgba(91,123,251,.20);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 8px 24px rgba(0,0,0,.45);
+  --shadow-lg:0 24px 56px rgba(0,0,0,.6);
+  --login-grad-1:rgba(150,104,244,.18);
+  --login-grad-2:rgba(80,208,253,.26);
+  --login-grad-3:rgba(91,123,251,.15);
+  --login-grad-4:rgba(171,143,245,.16);
+  --login-glass-bg:rgba(28,23,64,.62);
+  --login-glass-border:rgba(255,255,255,.14);
+  --login-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.20), rgba(255,255,255,.02));
+  --login-badge-bg:rgba(255,255,255,.06);
+  --login-badge-border:rgba(255,255,255,.14);
+  --app-grad-base-from:#100d1f;
+  --app-grad-base-to:#1c1740;
+  --app-grad-1:rgba(150,104,244,.16);
+  --app-grad-2:rgba(91,123,251,.14);
+  --app-grad-3:rgba(150,104,244,.10);
+  --app-grad-4:rgba(80,208,253,.08);
+  --card-bg:rgba(23,19,48,.55);
+  --card-border:rgba(255,255,255,.08);
+  --card-glass-bg:rgba(28,23,64,.75);
+  --card-glass-border:rgba(255,255,255,.12);
+  --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.02));
+  --nav-dim:#a89ed4;
+  --nav-label-c:#a89ed4;
+  --brand-strong:#ffffff;
+  --brand-soft:#a89ed4;
+}

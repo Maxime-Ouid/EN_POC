@@ -1,0 +1,1092 @@
+/* ===========================================================================
+   Espace Notarial Next — Composants & layout
+   Consomme exclusivement les custom properties de tokens.css — aucune valeur
+   de couleur/rayon/ombre codée en dur ne doit être ajoutée ici (voir DESIGN_SYSTEM.md §Gouvernance).
+   Mise à jour 26/08/2026 (matin) : fond #app-main et fond des cartes .card/
+   .stat-card corrigés pour le thème sombre (ils étaient codés en dur, non
+   adaptés).
+   Mise à jour 26/08/2026 (après-midi) : #app-main et .card/.stat-card
+   utilisent maintenant les tokens --app-grad-…, --card-bg et --card-border au
+   lieu de valeurs codées en dur, pour être éditables depuis Personnalisation
+   → Apparence — plus aucun bloc @media/[data-theme] dédié à ces règles,
+   les tokens portent déjà la variation par thème (voir DESIGN_SYSTEM.md §9).
+   Les classes .theme-edit-… et .token-… de l'écran Apparence remplacent les
+   anciennes .color-field et .locked-swatch (design à 2 couleurs ancres,
+   abandonné le même jour à la demande explicite de l'utilisateur en faveur
+   d'un contrôle complet, variable par variable).
+
+   ATTENTION, piège déjà rencontré : ne jamais accoler un astérisque et une
+   barre oblique dans ces commentaires. Écrire un joker suivi d'une barre pour
+   énumérer des tokens ferme le commentaire par surprise, et tout le reste du
+   bloc devient du CSS invalide. Le serveur de dev ne le voit pas ; c'est la
+   minification de `vite build` (lightningcss) qui échoue, sur un message
+   « Unexpected end of input » pointant la toute fin du fichier.
+   =========================================================================== */
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--ink-900);
+  font-family:var(--font-ui);
+  font-size:14.5px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;color:var(--ink-900);margin:0;text-wrap:balance;}
+button{font-family:inherit;}
+a{color:inherit;}
+svg.icon{width:16px;height:16px;flex:none;display:block;}
+::selection{background:var(--brass-100);}
+:focus-visible{outline:2px solid var(--brass-500);outline-offset:2px;}
+button, [role="button"], .clickable{cursor:pointer;}
+
+/* ============ SCROLLBARS ============ */
+/* Fines et discrètes, jamais de piste visible. Deux syntaxes sont nécessaires
+   et ne se remplacent pas : la propriété normalisée (Firefox, Chrome récent)
+   ne permet ni pouce arrondi ni état de survol ; les pseudo-éléments WebKit,
+   eux, sont ignorés par Firefox. */
+*{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-corner{background:transparent;}
+::-webkit-scrollbar-thumb{
+  /* La bordure transparente + background-clip donne un pouce de 6px entouré
+     d'air : c'est ce qui le fait paraître fin sans devenir difficile à viser. */
+  background:var(--scrollbar-thumb);background-clip:content-box;
+  border:2px solid transparent;border-radius:99px;
+}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);background-clip:content-box;}
+/* Zones posées sur le fond foncé de la sidebar : pouce clair. */
+.sidebar,.sidebar *{scrollbar-color:var(--scrollbar-thumb-on-shell) transparent;}
+.sidebar ::-webkit-scrollbar-thumb,.sidebar::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb-on-shell);background-clip:content-box;
+}
+.sidebar ::-webkit-scrollbar-thumb:hover,.sidebar::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-on-shell-hover);background-clip:content-box;
+}
+
+/* ============ APP SHELL ============ */
+/* L'app occupe toute la fenêtre : c'est .content qui défile, jamais le body.
+   Sans hauteur explicite sur #root, le 100vh de .app crée une seconde barre
+   de défilement au niveau du document. */
+html,body,#root{height:100%;}
+.app{display:none;height:100vh;width:100%;}
+.app.is-active{display:flex;}
+/* La navigation reste FIXE et TRANSPARENTE, et le contenu se décale d'autant :
+   c'est ce qui laisse le dégradé de #app-main courir sous elle d'un bord à
+   l'autre de la fenêtre. Un rail en flux normal, opaque, casserait ce fond.
+   Le décalage passe donc par --nav-w et non par une largeur recopiée dans
+   .main — c'était un 236px/250px codé en dur de part et d'autre, impossible à
+   personnaliser sans les désynchroniser. */
+.sidebar{
+  width:var(--nav-w);flex:none;background:transparent;color:var(--shell-text);
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--shell-border);
+  height:100%;
+  position:fixed;
+  top:0;left:0;
+  z-index:99;
+}
+.brand{
+  display:flex;align-items:center;gap:10px;padding:18px 16px 14px;
+  border-bottom:1px solid var(--shell-border);
+}
+.brand .mark{
+  width:32px;height:32px;
+  display:flex;align-items:center;justify-content:center;flex:none;
+}
+.brand .mark img{width:100%;height:100%;object-fit:contain;}
+.brand-name{font-family:var(--font-display);font-size:16.5px;font-weight:600;color:#fff;letter-spacing:.2px;}
+.brand-sub{font-size:10.5px;color:var(--shell-text-dim);text-transform:uppercase;letter-spacing:.09em;margin-top:1px;}
+.sidebar .brand-name{color:var(--brand-strong);}
+.sidebar .brand-sub{color:var(--brand-soft);}
+
+.tenant-switcher{
+  margin:12px 14px 6px;padding:9px 10px;border-radius:var(--radius-md);
+  background:var(--shell-bg-2);border:1px solid var(--shell-border);
+  display:flex;align-items:center;gap:9px;
+}
+.tenant-switcher .tsicon{width:26px;height:26px;border-radius:6px;background:var(--brass-100);color:var(--brass-700);display:flex;align-items:center;justify-content:center;flex:none;}
+.tenant-switcher .tsicon svg{width:14px;height:14px;}
+.tenant-name{font-size:12.5px;font-weight:600;color:#fff;line-height:1.2;}
+.tenant-role{font-size:10.5px;color:var(--shell-text-dim);}
+.tenant-switcher svg.chev{margin-left:auto;color:var(--shell-text-dim);width:14px;height:14px;}
+
+.nav{flex:1;overflow-y:auto;padding:10px 10px;}
+.nav-group{margin-bottom:14px;}
+.nav-label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--nav-label-c);padding:6px 10px 6px;font-weight:600;}
+/* .nav-item et .nav-subitem sont des <button> depuis le 28/08/2026 (avant :
+   des <div> cliquables — sans curseur de pointeur, sans focus clavier, sans
+   sémantique). Ces trois lignes neutralisent les défauts du <button> ; le
+   curseur et le focus viennent de la règle générale `button` en tête de
+   fichier. */
+.nav-item,.nav-subitem{
+  width:100%;text-align:left;font-family:inherit;background:none;
+}
+.nav-item{
+  position:relative;
+  display:flex;align-items:center;gap:var(--nav-item-gap);
+  padding:var(--nav-item-pad-y) var(--nav-item-pad-x);border-radius:var(--radius-sm);
+  color:var(--nav-dim);font-size:var(--nav-font-size);font-weight:500;
+  margin-bottom:var(--nav-item-spacing);
+  border:1px solid transparent;
+}
+.nav-item:hover{background:var(--shell-bg-2);color:var(--shell-text);}
+.nav-item.active{background:var(--shell-active);color:var(--shell-text);border-color:var(--shell-border);}
+.nav-item svg{color:inherit;opacity:.9;}
+.nav-item .icon{width:var(--nav-icon-size);height:var(--nav-icon-size);flex:none;}
+/* Le libellé est isolé dans son propre élément pour pouvoir disparaître en mode
+   « icônes seules » sans emporter l'icône, le compteur ni le chevron. */
+.nav-item-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nav-item .badge{margin-left:auto;font-size:10.5px;font-family:var(--font-mono);background:var(--brass-100);color:var(--brass-700);border-radius:99px;padding:1px 6px;}
+
+.sidebar-foot{padding:12px 14px;border-top:1px solid var(--shell-border);}
+.foot-user{display:flex;align-items:center;gap:9px;}
+.avatar{
+  width:30px;height:30px;border-radius:50%;background:var(--brass-500);color:#ffffff;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex:none;
+}
+.foot-name{font-size:12.5px;font-weight:600;color:var(--brand-strong);}
+.foot-role{font-size:10.5px;color:var(--brand-soft);}
+.foot-user svg{margin-left:auto;color:var(--shell-text-dim);width:15px;height:15px;}
+.notantis-mark{margin-top:10px;font-size:10px;color:var(--brand-soft);display:flex;align-items:center;gap:5px;letter-spacing:.03em;}
+
+.main{
+  position:relative; z-index:0; overflow:hidden;
+  flex:1;display:flex;flex-direction:column;min-width:0;
+  background:none;
+  padding-left:calc(var(--nav-w) + var(--nav-gutter));
+}
+/* Le dégradé de #app-main passe entièrement par --app-grad-base-from/to et
+   --app-grad-1..4 (au lieu de couleurs codées en dur) depuis le 26/08/2026 :
+   ces tokens sont redéfinis par thème (clair ci-dessus, sombre plus bas) exactement
+   comme les autres tokens de couleur, donc une seule règle suffit pour les deux
+   thèmes — plus besoin de bloc @media/[data-theme] dédié ici. C'est ce qui rend ce
+   fond enfin éditable depuis Personnalisation → Apparence — voir DESIGN_SYSTEM.md §9. */
+#app-main{
+  background:
+    radial-gradient(circle at 20% 20%, var(--app-grad-1) 0%, transparent 55%),
+    radial-gradient(circle at 80% 10%, var(--app-grad-2) 0%, transparent 55%),
+    radial-gradient(circle at 85% 80%, var(--app-grad-3) 0%, transparent 55%),
+    radial-gradient(circle at 15% 85%, var(--app-grad-4) 0%, transparent 50%),
+    linear-gradient(135deg, var(--app-grad-base-from) 0%, var(--app-grad-base-to) 100%);
+}
+.app-orb{ position:absolute; z-index:-1; border-radius:26%; background:var(--app-orb); animation:loginFloat 12s ease-in-out infinite; pointer-events:none; filter:blur(1px); }
+.ao1{ width:16rem; height:16rem; top:-5%; right:-4%; }
+.ao2{ width:10rem; height:10rem; bottom:-6%; left:-3%; animation-delay:-4s; animation-duration:14s; }
+.ao3{ width:4.5rem; height:4.5rem; top:58%; right:2%; animation-delay:-2s; animation-duration:9s; border-radius:22%;
+      background:radial-gradient(circle at 30% 30%, rgba(143,227,248,.4), rgba(80,208,253,.06)); }
+.accent-sq{ position:absolute; z-index:-1; border-radius:18%; pointer-events:none; animation:loginFloat 9s ease-in-out infinite; box-shadow:0 2px 10px -2px rgba(20,23,26,.18); }
+.accent-sq--cyan{ background:rgba(80,208,253,.85); }
+.accent-sq--purple{ background:rgba(150,104,244,.85); }
+.accent-sq--blue{ background:rgba(91,123,251,.85); }
+.accent-sq--white{ background:rgb(255 255 255 / 14%); border:1px solid rgb(255 255 255 / 52%); box-shadow:0 4px 18px -4px rgba(20,23,26,.14); }
+.asq1{ width:14px; height:14px; top:14%; right:16%; }
+.asq2{ width:18px; height:18px; bottom:18%; left:11%; animation-delay:-3s; animation-duration:10s; }
+.asq3{ width:9px; height:9px; top:9%; right:34%; animation-delay:-5s; animation-duration:8s; }
+.asq4{ width:26px; height:26px; top:40%; right:-1%; animation-delay:-1.5s; animation-duration:13s; }
+.asq5{ width:12px; height:12px; bottom:6%; right:22%; animation-delay:-6.5s; animation-duration:9.5s; }
+.asq6{ width:20px; height:20px; top:76%; left:20%; animation-delay:-2s; animation-duration:11s; }
+.asq7{ width:8px; height:8px; top:30%; left:6%; animation-delay:-4.5s; animation-duration:7.5s; }
+.asq8{ width:60px; height:60px; top:20%; right:8%; animation-delay:-7s; animation-duration:15s; }
+.asq9{ width:392px; height:392px; bottom:-13%; left:50%; animation-delay:-3.2s; animation-duration:12.5s; opacity:.5; }
+.dot-grid{
+  position:absolute; z-index:-1; pointer-events:none;
+  background-image:radial-gradient(circle, var(--dot-grid-c) 1.4px, transparent 1.4px);
+  background-size:11px 11px;
+  animation:loginFloat 11s ease-in-out infinite;
+}
+.dot-grid--purple{ --dot-grid-c:rgba(150,104,244,.55); }
+.dot-grid--cyan{ --dot-grid-c:rgba(80,208,253,.55); }
+.dot-grid--white{ --dot-grid-c:rgba(255,255,255,.5); }
+.dot-grid--blue{ --dot-grid-c:rgba(91,123,251,.55); }
+.adg1{ width:400px; height:400px; top:15%; left:44%; animation-delay:-5.5s; animation-duration:14s; }
+.adg2{ width:45px; height:45px; bottom:24%; right:14%; animation-delay:-2.6s; animation-duration:10.5s; }
+.adg3{ width:23px; height:23px; top:64%; right:26%; animation-delay:-7.2s; animation-duration:9s; }
+.adg4{ width:80px; height:24px; top:4%; left:18%; animation-delay:-3.8s; animation-duration:16s; }
+.adg5{ width:34px; height:57px; bottom:12%; left:6%; animation-delay:-1.4s; animation-duration:11.5s; }
+@media (prefers-reduced-motion:reduce){ .dot-grid{ animation:none !important; } }
+@media (prefers-reduced-motion:reduce){ .app-orb,.accent-sq{ animation:none !important; } }
+.topbar{
+  height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
+  border-bottom:1px solid var(--border);
+  max-width:1500px;margin:18px auto;width:100%;border-radius:9px;
+  background:var(--card-glass-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--card-glass-border);
+  box-shadow:0 8px 30px rgba(20,23,26,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-500);white-space:nowrap;}
+.breadcrumb b{color:var(--ink-900);font-weight:600;}
+.breadcrumb svg{width:13px;height:13px;color:var(--ink-400);}
+.topbar-search{
+  flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--surface-alt);
+  border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--ink-500);margin-left:8px;
+}
+.topbar-search input{border:none;background:transparent;outline:none;font-size:13px;flex:1;color:var(--ink-900);font-family:inherit;}
+.topbar-search kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-400);}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+.icon-btn{
+  width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface);
+  display:flex;align-items:center;justify-content:center;color:var(--ink-700);position:relative;
+}
+.icon-btn:hover{background:var(--surface-alt);}
+.dot-flag{position:absolute;top:5px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--critical);border:1.5px solid var(--surface);}
+.proto-pill{
+  font-size:11px;font-weight:600;color:var(--brass-700);background:var(--brass-100);border:1px solid var(--brass-400);
+  padding:3px 9px;border-radius:99px;display:flex;align-items:center;gap:5px;
+}
+.proto-pill svg{width:11px;height:11px;}
+
+.content{flex:1;overflow-y:auto;padding:26px 30px 60px;}
+.content-inner{max-width:1500px;margin:0 auto;}
+.screen{display:none;}
+.screen.is-active{display:block;}
+
+/* ============ TYPE HELPERS ============ */
+.page-title{font-size:23px;}
+.page-sub{color:var(--ink-500);font-size:13.5px;margin-top:4px;}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--brass-600);font-weight:700;margin-bottom:6px;}
+.section-title{font-size:15.5px;font-weight:600;font-family:var(--font-ui);color:var(--ink-900);}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+.dim{color:var(--ink-500);}
+.tiny{font-size:11.5px;}
+
+/* ============ BUTTONS ============ */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;border-radius:999px;font-size:13px;font-weight:600;
+  padding:8px 16px;border:1px solid var(--border);background:var(--surface);color:var(--ink-800);
+  font-family:inherit;white-space:nowrap;
+}
+.btn svg{width:14px;height:14px;}
+.btn:hover{background:var(--surface-alt);}
+.btn-primary{background:var(--brand-ink);border-color:var(--brand-ink);color:#ffffff;}
+.btn-primary:hover{background:var(--brand-ink-hover);}
+.btn-accent{background:var(--brass-600);border-color:var(--brass-600);color:#ffffff;}
+.btn-accent:hover{background:var(--brass-700);}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-500);}
+.btn-ghost:hover{background:var(--surface-alt);color:var(--ink-800);}
+.btn-sm{padding:5px 10px;font-size:12px;}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+
+/* ============ CARDS / GRID ============ */
+/* .card et .stat-card passent par --card-bg/--card-border (plutôt que des rgba() en
+   dur) depuis le 26/08/2026, précisément pour que ce fond "verre" soit éditable
+   depuis Personnalisation → Apparence comme le reste — voir DESIGN_SYSTEM.md §9. */
+.card{
+  border-radius:var(--radius-lg);
+  background:var(--card-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--card-border);
+  box-shadow:0 8px 30px rgba(20,23,26,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+.card-pad{padding:18px 20px;}
+.grid{display:grid;gap:16px;}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+.grid-3{grid-template-columns:repeat(3,1fr);}
+.grid-2{grid-template-columns:1.5fr 1fr;}
+@media (max-width:980px){.grid-4{grid-template-columns:repeat(2,1fr);} .grid-3{grid-template-columns:repeat(2,1fr);} .grid-2{grid-template-columns:1fr;}}
+
+.stat-card{
+  padding:16px 18px;
+  border-radius:var(--radius-lg);
+  background:var(--card-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--card-border);
+  box-shadow:0 8px 30px rgba(20,23,26,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .stat-card{
+    box-shadow:0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+}
+:root[data-theme="dark"] .card, :root[data-theme="dark"] .stat-card{
+  box-shadow:0 8px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.stat-top{display:flex;align-items:center;justify-content:space-between;}
+.stat-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.stat-icon svg{width:16px;height:16px;}
+.stat-value{font-family:var(--font-display);font-size:27px;font-weight:600;margin-top:12px;}
+.stat-label{font-size:12.5px;color:var(--ink-500);margin-top:2px;}
+.stat-delta{font-size:11.5px;font-weight:600;margin-top:8px;display:inline-flex;gap:4px;align-items:center;}
+.up{color:var(--success);}
+.warn-delta{color:var(--warning);}
+
+/* progress / gauge */
+.bar-track{height:7px;border-radius:99px;background:#bdbfc36e;overflow:hidden;}
+.bar-fill{height:100%;border-radius:99px;background:var(--brass-500);}
+.bar-fill.success{background:var(--success);}
+.bar-fill.warn{background:var(--warning);}
+
+/* pills / chips / tags */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;}
+.pill.success{background:var(--success-bg);color:var(--success);}
+.pill.warning{background:var(--warning-bg);color:var(--warning);}
+.pill.critical{background:var(--critical-bg);color:var(--critical);}
+.pill.info{background:var(--info-bg);color:var(--info);}
+.pill.neutral{background:var(--surface-alt);color:var(--ink-500);border:1px solid var(--border);}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 8px 3px 6px;border-radius:6px;background:var(--brass-100);color:var(--brass-700);}
+.tag svg{width:10px;height:10px;}
+.tag.plain{background:var(--surface-alt);color:var(--ink-700);border:1px solid var(--border);}
+
+/* avatars row */
+.avatar-stack{display:flex;}
+.avatar-stack .avatar{width:24px;height:24px;font-size:10px;border:2px solid var(--surface);margin-left:-7px;}
+.avatar-stack .avatar:first-child{margin-left:0;}
+.avatar.sm{width:24px;height:24px;font-size:10px;}
+.avatar.gray{background:var(--surface-alt);color:var(--ink-500);border:1px solid var(--border);}
+
+/* table */
+table{width:100%;border-collapse:collapse;font-size:13px;}
+.table-wrap{overflow-x:auto;}
+th{
+  text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-400);
+  font-weight:600;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap;
+}
+td{padding:11px 12px;border-bottom:1px solid var(--border-soft);vertical-align:middle;}
+tbody tr{transition:background .1s;}
+tbody tr:hover{background:var(--surface-alt);}
+tbody tr:last-child td{border-bottom:none;}
+.row-name{display:flex;align-items:center;gap:9px;font-weight:600;color:var(--ink-900);}
+.row-icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none;}
+.row-icon svg{width:14px;height:14px;}
+
+/* tabs (inline) */
+.tabstrip{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:20px;}
+.tab{
+  padding:10px 4px;margin-right:22px;font-size:13.5px;font-weight:600;color:var(--ink-500);
+  border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px;
+}
+.tab svg{width:14px;height:14px;}
+.tab:hover{color:var(--ink-800);}
+.tab.active{color:var(--ink-900);border-color:var(--brass-500);}
+.tab .badge{background:var(--surface-alt);border:1px solid var(--border);border-radius:99px;font-size:10.5px;padding:0 6px;color:var(--ink-500);}
+.subscreen{display:none;}
+.subscreen.is-active{display:block;}
+.subscreen2{display:none;}
+.subscreen2.is-active{display:block;}
+
+/* tree */
+.explorer{display:grid;grid-template-columns:250px 1fr;gap:0;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface);}
+.tree{border-right:1px solid var(--border);padding:14px 8px;background:var(--surface-alt);max-height:560px;overflow-y:auto;}
+.tree-node{}
+.tree-row{
+  display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;font-size:12.8px;color:var(--ink-700);white-space:nowrap;
+}
+.tree-row:hover{background:var(--border-soft);}
+.tree-row.active{background:var(--brand-ink);color:#ffffff;}
+.tree-row svg.chev{width:11px;height:11px;flex:none;transition:transform .12s;color:var(--ink-400);}
+.tree-row.active svg.chev{color:#ffffff;}
+.tree-row.open > svg.chev{transform:rotate(90deg);}
+.tree-row svg.fic{width:14px;height:14px;flex:none;color:var(--brass-600);}
+.tree-row.active svg.fic{color:var(--brass-400);}
+.tree-children{margin-left:16px;display:none;}
+.tree-children.open{display:block;}
+.tree-count{margin-left:auto;font-size:10.5px;color:var(--ink-400);font-family:var(--font-mono);}
+
+.doc-panel{padding:16px 20px;}
+.doc-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.doc-panel-head h3{font-size:15px;}
+
+/* meta banner */
+.meta-banner{display:flex;gap:26px;flex-wrap:wrap;padding:14px 20px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);margin-bottom:18px;}
+.meta-item{}
+.meta-item .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-400);margin-bottom:3px;}
+.meta-item .v{font-size:13.5px;font-weight:600;color:var(--ink-900);}
+
+/* activity feed */
+.feed-item{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-soft);}
+.feed-item:last-child{border-bottom:none;}
+.feed-icon{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;}
+.feed-icon svg{width:14px;height:14px;}
+.feed-text{font-size:13px;color:var(--ink-800);}
+.feed-time{font-size:11.5px;color:var(--ink-400);margin-top:2px;}
+
+/* Q&A */
+.qa-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:15px 17px;margin-bottom:12px;background:var(--surface);}
+.qa-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.qa-obj{font-weight:600;font-size:13.5px;}
+.qa-meta{font-size:11.5px;color:var(--ink-400);margin-left:auto;white-space:nowrap;}
+.qa-body{font-size:13px;color:var(--ink-700);margin:6px 0 10px;padding-left:2px;}
+.qa-answer{background:var(--surface-alt);border-left:2px solid var(--brass-500);border-radius:0 8px 8px 0;padding:9px 12px;font-size:12.8px;color:var(--ink-800);margin-top:8px;}
+.qa-reply{display:flex;gap:8px;margin-top:10px;}
+.qa-reply textarea{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:12.8px;resize:none;height:36px;background:var(--surface);color:var(--ink-900);}
+.qa-reply textarea:focus{outline:none;border-color:var(--brass-500);}
+
+/* toggle */
+.toggle{width:36px;height:20px;border-radius:99px;background:var(--border);position:relative;flex:none;border:none;padding:0;}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--shadow-sm);transition:transform .15s;}
+.toggle.on{background:var(--brass-600);}
+.toggle.on::after{transform:translateX(16px);}
+/* Interrupteur consultable mais non modifiable (état servi par le backend, sans
+   endpoint d'écriture) : il doit se voir comme tel, sinon on clique en boucle. */
+.toggle:disabled{opacity:.55;cursor:not-allowed;}
+
+/* form-ish */
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--ink-700);margin-bottom:6px;}
+.field input, .field select{
+  width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);
+  font-family:inherit;font-size:13px;color:var(--ink-900);
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--brass-500);}
+.field-row{display:flex;gap:14px;}
+.field-row .field{flex:1;}
+.help{font-size:11.5px;color:var(--ink-400);margin-top:5px;}
+
+/* modal overlay */
+.overlay{position:fixed;inset:0;background:rgba(20,20,15,.42);display:none;align-items:center;justify-content:center;z-index:50;}
+.overlay.is-active{display:flex;}
+.modal{background:var(--surface);border-radius:var(--radius-lg);width:560px;max-width:92vw;max-height:86vh;overflow-y:auto;box-shadow:var(--shadow-lg);}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
+.modal-body{padding:18px 20px;}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);}
+.tpl-option{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:9px;}
+.tpl-option:hover{border-color:var(--brass-400);background:var(--surface-alt);}
+.tpl-option .row-icon{background:var(--brass-100);color:var(--brass-700);}
+.tpl-name{font-weight:600;font-size:13px;}
+.tpl-desc{font-size:11.5px;color:var(--ink-500);}
+
+/* slide-over */
+.slideover{position:fixed;top:0;right:0;height:100%;width:340px;background:var(--surface);border-left:1px solid var(--border);
+  box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .18s ease;z-index:40;overflow-y:auto;}
+.slideover.is-active{transform:translateX(0);}
+.slideover-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border);}
+.slideover-body{padding:16px 18px;}
+.so-field{margin-bottom:14px;}
+.so-field .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-400);margin-bottom:3px;}
+.so-field .v{font-size:13px;color:var(--ink-900);font-weight:500;}
+
+/* login screen */
+.login-shell{display:flex;min-height:100vh;background:var(--bg);}
+.login-story{
+  flex:1.1;background:var(--shell-bg);color:var(--shell-text);padding:56px 60px;display:flex;flex-direction:column;
+  justify-content:space-between;position:relative;z-index:0;overflow:hidden;
+}
+.login-story .story-top{position:relative;z-index:1;display:flex;align-items:center;gap:11px;}
+.login-story h1{position:relative;z-index:1;color:#fff;font-size:34px;max-width:420px;line-height:1.18;}
+.login-story p{position:relative;z-index:1;color:var(--shell-text-dim);font-size:14px;max-width:400px;line-height:1.6;margin-top:14px;}
+.story-badges{position:relative;z-index:1;display:flex;gap:10px;margin-top:26px;flex-wrap:wrap;}
+.story-badge{position:relative;z-index:1;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--shell-text-dim);background:var(--login-badge-bg);border:1px solid var(--login-badge-border);border-radius:99px;padding:6px 12px;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
+.story-badge svg{width:13px;height:13px;color:var(--brass-500);}
+.login-panel{flex:1;position:relative;z-index:0;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:40px;background:var(--bg);}
+.login-panel .accent-sq, .login-panel .dot-grid{ z-index:0; }
+
+/* glassmorphic treatment — animated gradient wash + floating glass orbs behind the login card */
+.login-bg-anim{
+  position:absolute; inset:-20%; z-index:0;
+  background:
+    radial-gradient(circle at 86% 8%, var(--login-grad-2) 0%, transparent 44%),
+    radial-gradient(circle at 18% 18%, var(--login-grad-1) 0%, transparent 46%),
+    radial-gradient(circle at 84% 88%, var(--login-grad-4) 0%, transparent 46%),
+    radial-gradient(circle at 10% 90%, var(--login-grad-3) 0%, transparent 44%),
+    linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%);
+  background-size:220% 220%;
+  animation:loginDrift 26s ease-in-out infinite;
+}
+@keyframes loginDrift{
+  0%{ background-position:12% 22%; }
+  50%{ background-position:88% 78%; }
+  100%{ background-position:12% 22%; }
+}
+@keyframes loginFloat{
+  0%,100%{ transform:translate(0,0) rotate(0deg); }
+  50%{ transform:translate(0,-16px) rotate(3deg); }
+}
+.login-orb{ position:absolute; z-index:0; border-radius:26%; background:var(--login-orb); animation:loginFloat 10s ease-in-out infinite; }
+.lo1{ width:8.5rem; height:8.5rem; top:6%; right:10%; }
+.lo2{ width:5rem; height:5rem; bottom:12%; left:8%; animation-delay:-3s; animation-duration:12s; }
+.lo3{ width:3.2rem; height:3.2rem; top:46%; left:2%; animation-delay:-1.5s; animation-duration:8s; border-radius:22%;
+      background:radial-gradient(circle at 30% 30%, #8fe3f8, rgba(80,208,253,.15)); }
+.lsq1{ width:12px; height:12px; top:22%; right:24%; }
+.lsq2{ width:16px; height:16px; bottom:28%; left:22%; animation-delay:-2.5s; animation-duration:8.5s; }
+.lsq3{ width:8px; height:8px; top:38%; right:8%; animation-delay:-5s; animation-duration:7s; }
+.lsq4{ width:20px; height:20px; top:10%; left:14%; animation-delay:-1.2s; animation-duration:11.5s; }
+.lsq5{ width:50px; height:50px; bottom:4%; left:4%; animation-delay:-6.4s; animation-duration:14s; }
+.ldg1{ width:50px; height:32px; top:60%; right:10%; animation-delay:-4.4s; animation-duration:13s; }
+.ldg2{ width:24px; height:24px; top:8%; right:30%; animation-delay:-6.8s; animation-duration:10s; }
+.ldg3{ width:70px; height:20px; bottom:36%; left:6%; animation-delay:-2.2s; animation-duration:15s; }
+.login-story .story-orb{ position:absolute; z-index:0; border-radius:26%; background:radial-gradient(circle at 30% 30%, rgba(255,255,255,.10), rgba(255,255,255,0)); animation:loginFloat 13s ease-in-out infinite; }
+.login-story .so1{ width:16rem; height:16rem; right:-4rem; top:-4rem; }
+.login-story .so2{ width:9rem; height:9rem; left:6%; bottom:14%; animation-delay:-4s; animation-duration:10s; }
+.ssq1{ width:12px; height:12px; top:16%; right:22%; }
+.ssq2{ width:16px; height:16px; bottom:32%; left:16%; animation-delay:-3.5s; animation-duration:9.5s; }
+.ssq3{ width:9px; height:9px; top:44%; right:6%; animation-delay:-6s; animation-duration:8.5s; }
+.ssq4{ width:24px; height:24px; top:6%; left:32%; animation-delay:-2.2s; animation-duration:12s; }
+.ssq5{ width:10px; height:10px; bottom:10%; right:38%; animation-delay:-4.8s; animation-duration:9s; }
+.ssq6{ width:56px; height:56px; top:60%; left:42%; animation-delay:-8s; animation-duration:16s; }
+.sdg1{ width:56px; height:34px; top:30%; right:6%; animation-delay:-1.8s; animation-duration:9.5s; }
+.sdg2{ width:22px; height:22px; bottom:22%; right:34%; animation-delay:-5.6s; animation-duration:12s; }
+.sdg3{ width:78px; height:26px; top:64%; left:4%; animation-delay:-3.4s; animation-duration:14.5s; }
+@media (prefers-reduced-motion:reduce){ .login-bg-anim,.login-orb,.login-story .story-orb,.accent-sq{ animation:none !important; } }
+
+.login-card{
+  position:relative; z-index:1; width:380px; padding:30px 32px;
+  background:var(--login-glass-bg); border:1px solid var(--login-glass-border); border-radius:var(--radius-lg);
+  -webkit-backdrop-filter:blur(20px) saturate(160%); backdrop-filter:blur(20px) saturate(160%);
+  box-shadow:var(--shadow-lg), inset 0 1px 0 rgba(255,255,255,.5);
+}
+.login-card .lc-logo{display:flex;align-items:center;gap:9px;margin-bottom:26px;}
+.login-card h2{font-size:20px;margin-bottom:4px;}
+.login-domain{font-family:var(--font-mono);font-size:12px;color:var(--ink-500);background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:3px 8px;display:inline-block;margin-top:8px;}
+.sso-btn{width:100%;justify-content:center;margin-top:18px;}
+.divider{display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--ink-400);font-size:11.5px;}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border);}
+.login-foot{margin-top:22px;font-size:11.5px;color:var(--ink-400);display:flex;justify-content:space-between;}
+
+hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
+
+/* ============ PERSONNALISATION — Apparence (design system éditable) ============ */
+.subscreen3{display:none;}
+.subscreen3.is-active{display:block;}
+.appearance-block{margin-bottom:26px;}
+.appearance-block:last-child{margin-bottom:0;}
+.appearance-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:3px;}
+.appearance-block-title{font-size:13.5px;font-weight:600;color:var(--ink-900);}
+.appearance-block-desc{font-size:11.5px;color:var(--ink-500);margin-bottom:12px;max-width:480px;}
+.theme-edit-toggle{display:inline-flex;gap:3px;background:var(--surface-alt);border:1px solid var(--border);border-radius:999px;padding:3px;margin-bottom:16px;}
+.theme-edit-btn{border:none;background:transparent;font-size:12px;font-weight:600;color:var(--ink-500);padding:6px 14px;border-radius:999px;cursor:pointer;font-family:inherit;}
+.theme-edit-btn.active{background:var(--surface);color:var(--ink-900);box-shadow:var(--shadow-sm);}
+.token-groups-scroll{max-height:560px;overflow-y:auto;padding-right:6px;margin-right:-6px;}
+.token-group{margin-bottom:20px;}
+.token-group:last-child{margin-bottom:0;}
+.token-group-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-500);margin-bottom:9px;}
+.token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:8px;}
+.token-item{display:flex;align-items:center;gap:8px;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:7px 9px;}
+.token-item input[type="color"]{
+  width:26px;height:26px;border-radius:6px;border:1px solid var(--border);padding:0;background:none;cursor:pointer;flex:none;
+}
+.token-item input[type="color"]::-webkit-color-swatch-wrapper{padding:2px;}
+.token-item input[type="color"]::-webkit-color-swatch{border-radius:4px;border:none;}
+.token-item-meta{min-width:0;flex:1;}
+.token-item-label{font-size:10.5px;font-weight:600;color:var(--ink-800);line-height:1.25;}
+.token-item-sub{display:flex;align-items:center;gap:6px;margin-top:2px;}
+.token-item-hex{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-400);}
+.token-item-opacity{width:44px;accent-color:var(--brass-500);}
+.preset-row{display:flex;gap:10px;flex-wrap:wrap;}
+.preset-card{
+  border:1.5px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;cursor:pointer;
+  background:var(--surface);min-width:140px;transition:border-color .12s;
+}
+.preset-card:hover{border-color:var(--brass-400);}
+.preset-card.active{border-color:var(--brass-500);background:var(--brass-100);}
+.preset-card .pc-sample{font-size:16px;margin-bottom:5px;color:var(--ink-900);}
+.preset-card .pc-name{font-size:11.5px;font-weight:600;color:var(--ink-800);}
+.preset-card .pc-desc{font-size:10.5px;color:var(--ink-500);margin-top:1px;}
+.shape-swatch{border:1px solid var(--ink-400);background:transparent;width:26px;height:26px;margin-bottom:8px;}
+.appearance-preview{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:16px;border-radius:var(--radius-lg);
+  background:var(--surface-alt);border:1px solid var(--border);
+}
+.save-flash{font-size:11px;color:var(--success);font-weight:600;opacity:0;transition:opacity .25s;display:inline-flex;align-items:center;gap:4px;}
+.save-flash.show{opacity:1;}
+/* Pendant d'échec de .save-flash : l'enregistrement serveur a échoué, ce qui est
+   affiché n'est pas ce qui est enregistré pour l'office. */
+.save-error{font-size:11px;color:var(--warning);font-weight:600;display:inline-flex;align-items:center;gap:4px;}
+
+/* ============ ESPACE NOTARIAL V1 — navigation à sous-menus et écrans iso ============
+   Reconstruction de l'interface administrateur actuelle (admin.espacenotarial.com)
+   avec les composants et les tokens du design system V2. Aucune couleur littérale :
+   ces écrans doivent se repeindre comme les autres quand une étude personnalise. */
+
+/* Le sous-menu est TOUJOURS rendu quand la rubrique en a (AppShell) ; c'est le
+   CSS qui l'affiche — replié en mode large, en panneau volant au survol en mode
+   « icônes seules ». Sans ça, les sous-entrées seraient inaccessibles dès qu'on
+   réduit le rail. */
+.nav-entry{position:relative;}
+.nav-sub{
+  display:none;
+  margin:1px 0 6px 12px;padding-left:10px;border-left:1px solid var(--shell-border);
+}
+.nav-sub.is-open{display:block;}
+/* Le titre ne sert qu'au panneau volant : replié sous son entrée, la rubrique
+   est déjà nommée juste au-dessus. */
+.nav-sub-title{display:none;}
+.nav-subitem{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;
+  color:var(--shell-text-dim);font-size:12.4px;font-weight:500;margin-bottom:1px;
+  border:1px solid transparent;
+}
+.nav-subitem:hover{background:var(--shell-bg-2);color:var(--shell-text);}
+.nav-subitem.active{background:var(--shell-active);color:var(--shell-text);border-color:var(--shell-border);}
+.nav-subitem .badge{margin-left:auto;font-size:10.5px;font-family:var(--font-mono);background:var(--brass-100);color:var(--brass-700);border-radius:99px;padding:1px 6px;}
+.nav-chev{margin-left:auto;width:11px;height:11px;flex:none;transition:transform .12s;}
+.nav-chev.open{transform:rotate(90deg);}
+
+/* ===========================================================================
+   NAVIGATION : PLACEMENT ET STYLE (personnalisation par office)
+
+   Piloté par trois attributs posés sur <html> depuis theme/engine.ts :
+     data-nav-placement = left | right | top | bottom
+     data-nav-size      = large | compact | rail
+     data-nav-active    = plein | barre | point | contour | texte
+
+   Absents (rendu hors moteur de thème, page statique), rien ne s'applique et
+   la navigation reste celle d'origine : rail à gauche, fond plein sur l'entrée
+   active. C'est volontaire — aucun de ces sélecteurs n'est nécessaire pour que
+   l'app s'affiche.
+   =========================================================================== */
+
+/* --- Placement : rail à droite ------------------------------------------- */
+[data-nav-placement="right"] .sidebar{
+  left:auto;right:0;
+  border-right:0;border-left:1px solid var(--shell-border);
+}
+[data-nav-placement="right"] .main{
+  padding-left:0;
+  padding-right:calc(var(--nav-w) + var(--nav-gutter));
+}
+
+/* --- Placement : barre d'onglets horizontale ------------------------------
+   La barre remplace le rail ; le contenu se décale en haut ou en bas au lieu
+   de sur le côté. AppShell monte alors <NavBar> et pas <Sidebar> : ces règles
+   ne font que la position, pas la substitution. */
+[data-nav-placement="top"] .main,
+[data-nav-placement="bottom"] .main{padding-left:0;padding-right:0;}
+[data-nav-placement="top"] .main{padding-top:var(--nav-h);}
+[data-nav-placement="bottom"] .main{padding-bottom:var(--nav-h);}
+
+.navbar{
+  position:fixed;left:0;right:0;z-index:99;
+  height:var(--nav-h);
+  display:flex;align-items:center;gap:10px;
+  padding:0 16px;
+  background:var(--card-glass-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  backdrop-filter:blur(18px) saturate(160%);
+}
+[data-nav-placement="top"] .navbar{top:0;border-bottom:1px solid var(--card-glass-border);}
+[data-nav-placement="bottom"] .navbar{bottom:0;border-top:1px solid var(--card-glass-border);}
+
+/* Le rail portait la marque, l'office et l'utilisateur. En barre d'onglets il
+   n'y a pas la place : la marque reste à gauche de la barre, le reste remonte
+   dans la topbar (voir AppShell). */
+.navbar-brand{display:flex;align-items:center;gap:8px;flex:none;}
+.navbar-brand img{width:22px;height:22px;object-fit:contain;display:block;}
+.navbar-brand-name{
+  font-family:var(--font-display);font-size:13.5px;font-weight:600;
+  color:var(--ink-900);white-space:nowrap;
+}
+.navbar-tabs{
+  flex:1;min-width:0;
+  display:flex;align-items:center;justify-content:center;
+  gap:var(--nav-item-spacing);
+}
+.navbar-tab{
+  position:relative;
+  display:flex;align-items:center;gap:var(--nav-item-gap);
+  padding:var(--nav-item-pad-y) calc(var(--nav-item-pad-x) + 2px);
+  border:1px solid transparent;border-radius:var(--radius-sm);
+  color:var(--ink-500);font-size:var(--nav-font-size);font-weight:500;
+  font-family:inherit;background:none;
+  white-space:nowrap;
+}
+.navbar-tab .icon{width:var(--nav-icon-size);height:var(--nav-icon-size);flex:none;}
+.navbar-tab:hover{background:var(--surface-alt);color:var(--ink-900);}
+.navbar-tab.active{background:var(--brass-100);color:var(--brass-700);border-color:var(--brass-400);}
+.navbar-tab-label{max-width:11ch;overflow:hidden;text-overflow:ellipsis;}
+
+/* Débordement : le modèle « barre d'onglets » suppose 5 à 7 entrées, la
+   navigation de l'étude peut en avoir plus. Plutôt que de les perdre, le reste
+   passe dans un menu — une entrée invisible est un écran inaccessible. */
+.navbar-overflow{position:relative;flex:none;}
+.navbar-menu{
+  position:absolute;z-index:120;min-width:210px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-md);
+  padding:6px;
+}
+[data-nav-placement="top"] .navbar-menu{top:calc(100% + 6px);right:0;}
+[data-nav-placement="bottom"] .navbar-menu{bottom:calc(100% + 6px);right:0;}
+.navbar-menu-item{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:7px 9px;border:0;border-radius:var(--radius-sm);
+  background:none;font-family:inherit;font-size:12.8px;color:var(--ink-800);
+  text-align:left;
+}
+.navbar-menu-item .icon{width:15px;height:15px;flex:none;color:var(--ink-400);}
+.navbar-menu-item:hover{background:var(--surface-alt);}
+.navbar-menu-item.active{background:var(--brass-100);color:var(--brass-700);}
+.navbar-menu-label{
+  font-size:10px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--ink-400);padding:6px 9px 3px;font-weight:600;
+}
+.navbar-menu-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+
+/* Le sélecteur d'office est dessiné pour le fond sombre du rail. Remonté dans
+   la topbar (navigation horizontale), il doit prendre les couleurs de surface,
+   sinon il y apparaît comme un bloc violet sans rapport avec ce qui l'entoure. */
+.topbar-right .tenant-switcher{
+  margin:0;padding:5px 9px;
+  background:var(--surface-alt);border-color:var(--border);
+}
+.topbar-right .tenant-name{color:var(--ink-900);}
+.topbar-right .tenant-role{color:var(--ink-500);}
+.topbar-right .tenant-switcher .chev{color:var(--ink-400);}
+
+/* --- Mode réduit : icônes seules ------------------------------------------
+   Le rail se réduit à une colonne de pastilles carrées ; chaque entrée révèle
+   son libellé au survol, dans une infobulle. Le libellé n'est jamais retiré du
+   DOM — il change de présentation, il reste lu par les lecteurs d'écran. */
+
+/* Les éléments qui n'ont pas d'infobulle (marque, office, utilisateur) sont
+   simplement masqués : l'icône qui reste est déjà parlante, et le sélecteur
+   d'office comme le pied de rail gardent leur `title` natif. */
+[data-nav-size="rail"] .brand-text,
+[data-nav-size="rail"] .tenant-text,
+[data-nav-size="rail"] .foot-text,
+[data-nav-size="rail"] .navbar-brand-name{
+  position:absolute;width:1px;height:1px;overflow:hidden;
+  clip-path:inset(50%);white-space:nowrap;
+}
+[data-nav-size="rail"] .brand,
+[data-nav-size="rail"] .tenant-switcher,
+[data-nav-size="rail"] .foot-user{justify-content:center;}
+[data-nav-size="rail"] .brand{padding:16px 0 12px;}
+/* La marque prend la forme d'une tuile, comme les entrées en dessous : sans
+   libellé, un logo nu au sommet d'une colonne de pastilles flotte. */
+[data-nav-size="rail"] .brand .mark{
+  width:38px;height:38px;padding:7px;
+  border:1px solid var(--shell-border);border-radius:var(--radius-md);
+  background:var(--shell-bg-2);
+}
+[data-nav-size="rail"] .tenant-switcher{padding:9px 0;margin-left:8px;margin-right:8px;}
+/* Chevron et intitulés de section n'ont plus de sens sans libellé : il n'y a
+   plus rien à côté de quoi les afficher. Le sous-menu, lui, NE disparaît PAS —
+   il devient un panneau volant, plus bas. */
+[data-nav-size="rail"] .nav-chev,
+[data-nav-size="rail"] .nav-label,
+[data-nav-size="rail"] .tenant-switcher .chev,
+[data-nav-size="rail"] .foot-user .icon,
+[data-nav-size="rail"] .notantis-mark{display:none;}
+
+/* Pastille carrée centrée, plutôt qu'une entrée pleine largeur dont seul le
+   milieu porterait quelque chose. */
+[data-nav-size="rail"] .nav-item,
+[data-nav-size="rail"] .navbar-tab{
+  width:38px;height:38px;padding:0;
+  justify-content:center;
+  border-radius:var(--radius-md);
+  margin-left:auto;margin-right:auto;
+  transition:background .12s, color .12s;
+}
+[data-nav-size="rail"] .nav-group{margin-bottom:8px;}
+[data-nav-size="rail"] .nav-item .badge,
+[data-nav-size="rail"] .navbar-tab .badge{
+  position:absolute;top:-3px;right:-3px;margin-left:0;
+  min-width:15px;padding:0 4px;font-size:9.5px;line-height:15px;text-align:center;
+  background:var(--brass-500);color:var(--shell-text);
+}
+
+/* L'infobulle, commune aux deux dispositions. */
+[data-nav-size="rail"] .nav-item-label,
+[data-nav-size="rail"] .navbar-tab-label{
+  z-index:200;
+  max-width:none;padding:6px 10px;
+  border-radius:var(--radius-sm);
+  background:var(--brass-500);color:var(--shell-text);
+  font-size:12.5px;font-weight:600;white-space:nowrap;
+  box-shadow:var(--shadow-md);
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .12s, transform .12s, visibility .12s;
+}
+
+/* Rail vertical : `position:fixed`, pas `absolute`, parce que .nav porte
+   `overflow-y:auto` pour faire défiler les rubriques — une infobulle en
+   `absolute` y serait rognée à la largeur du rail. Le JS ne fournit que la
+   géométrie de l'entrée survolée (--tip-*), le CSS choisit le bord.
+   Voir le commentaire d'en-tête de atoms/navTooltip.ts. */
+[data-nav-placement="left"][data-nav-size="rail"] .nav-item-label,
+[data-nav-placement="right"][data-nav-size="rail"] .nav-item-label{
+  position:fixed;top:var(--tip-cy);
+}
+[data-nav-placement="left"][data-nav-size="rail"] .nav-item-label{
+  left:calc(var(--tip-after-x) + 10px);transform:translate(-4px,-50%);
+}
+[data-nav-placement="right"][data-nav-size="rail"] .nav-item-label{
+  right:calc(var(--tip-before-x) + 10px);transform:translate(4px,-50%);
+}
+
+/* Barre horizontale : `position:absolute` suffit — .navbar ne défile pas, et
+   son `backdrop-filter` ferait de toute façon d'elle le bloc conteneur d'un
+   descendant `fixed`, ce qui rendrait des coordonnées de fenêtre fausses. */
+[data-nav-placement="top"][data-nav-size="rail"] .navbar-tab-label,
+[data-nav-placement="bottom"][data-nav-size="rail"] .navbar-tab-label{
+  position:absolute;left:50%;
+}
+[data-nav-placement="top"][data-nav-size="rail"] .navbar-tab-label{
+  top:calc(100% + 10px);transform:translate(-50%,-4px);
+}
+[data-nav-placement="bottom"][data-nav-size="rail"] .navbar-tab-label{
+  bottom:calc(100% + 10px);transform:translate(-50%,4px);
+}
+[data-nav-size="rail"] .nav-item:hover .nav-item-label,
+[data-nav-size="rail"] .nav-item:focus-visible .nav-item-label,
+[data-nav-size="rail"] .navbar-tab:hover .navbar-tab-label,
+[data-nav-size="rail"] .navbar-tab:focus-visible .navbar-tab-label{
+  opacity:1;visibility:visible;
+}
+[data-nav-placement="left"][data-nav-size="rail"] .nav-item:hover .nav-item-label,
+[data-nav-placement="left"][data-nav-size="rail"] .nav-item:focus-visible .nav-item-label,
+[data-nav-placement="right"][data-nav-size="rail"] .nav-item:hover .nav-item-label,
+[data-nav-placement="right"][data-nav-size="rail"] .nav-item:focus-visible .nav-item-label{
+  transform:translate(0,-50%);
+}
+[data-nav-placement="top"][data-nav-size="rail"] .navbar-tab:hover .navbar-tab-label,
+[data-nav-placement="top"][data-nav-size="rail"] .navbar-tab:focus-visible .navbar-tab-label,
+[data-nav-placement="bottom"][data-nav-size="rail"] .navbar-tab:hover .navbar-tab-label,
+[data-nav-placement="bottom"][data-nav-size="rail"] .navbar-tab:focus-visible .navbar-tab-label{
+  transform:translate(-50%,0);
+}
+@media (prefers-reduced-motion:reduce){
+  [data-nav-size="rail"] .nav-item-label,
+  [data-nav-size="rail"] .navbar-tab-label,
+  [data-nav-size="rail"] .nav-item,
+  [data-nav-size="rail"] .navbar-tab{transition:none;}
+}
+
+/* --- Sous-menus en mode « icônes seules » ---------------------------------
+   Une rubrique à sous-entrées ne peut pas les déplier dans un rail de 62 px :
+   elles deviennent un panneau volant au survol. Ce panneau est le SEUL accès à
+   ces écrans dans ce mode — le masquer reviendrait à supprimer des pages. */
+[data-nav-placement="left"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub,
+[data-nav-placement="right"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub{
+  display:block;
+  position:fixed;z-index:200;
+  top:var(--tip-top-y);
+  margin:0;padding:6px;
+  min-width:184px;max-height:60vh;overflow-y:auto;
+  border:1px solid var(--shell-border);border-radius:var(--radius-md);
+  background:var(--shell-bg);box-shadow:var(--shadow-lg);
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .12s, transform .12s, visibility .12s;
+}
+[data-nav-placement="left"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub{
+  left:calc(var(--tip-after-x) + 10px);transform:translateX(-4px);
+}
+[data-nav-placement="right"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub{
+  right:calc(var(--tip-before-x) + 10px);transform:translateX(4px);
+}
+/* Le panneau reste ouvert tant que la souris est sur l'entrée OU sur lui : sans
+   le second cas, il se referme dès qu'on quitte l'icône pour aller cliquer
+   dedans. */
+[data-nav-size="rail"] .nav-entry.has-sub:hover .nav-sub,
+[data-nav-size="rail"] .nav-entry.has-sub:focus-within .nav-sub{
+  opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);
+}
+/* Pont invisible par-dessus les 10 px de vide entre l'icône et le panneau :
+   sinon la souris « sort » dans l'intervalle et le panneau se referme. */
+[data-nav-size="rail"] .nav-entry.has-sub .nav-sub::before{
+  content:'';position:absolute;top:0;bottom:0;width:12px;
+}
+[data-nav-placement="left"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub::before{left:-12px;}
+[data-nav-placement="right"][data-nav-size="rail"] .nav-entry.has-sub .nav-sub::before{right:-12px;}
+/* Le panneau porte le nom de la rubrique : l'infobulle ferait doublon. */
+[data-nav-size="rail"] .nav-entry.has-sub .nav-item-label{display:none;}
+[data-nav-size="rail"] .nav-sub-title{
+  display:block;padding:5px 9px 7px;margin-bottom:3px;
+  border-bottom:1px solid var(--shell-border);
+  font-size:12.5px;font-weight:600;color:var(--shell-text);white-space:nowrap;
+}
+[data-nav-size="rail"] .nav-entry.has-sub .nav-subitem{white-space:nowrap;}
+@media (prefers-reduced-motion:reduce){
+  [data-nav-size="rail"] .nav-entry.has-sub .nav-sub{transition:none;}
+}
+
+/* --- Indicateur d'entrée active -------------------------------------------
+   Chaque variante remet à zéro le fond plein par défaut avant de poser sa
+   marque, pour qu'elles ne s'additionnent jamais. */
+[data-nav-active="barre"] .nav-item.active,
+[data-nav-active="point"] .nav-item.active,
+[data-nav-active="contour"] .nav-item.active,
+[data-nav-active="texte"] .nav-item.active,
+[data-nav-active="barre"] .navbar-tab.active,
+[data-nav-active="point"] .navbar-tab.active,
+[data-nav-active="contour"] .navbar-tab.active,
+[data-nav-active="texte"] .navbar-tab.active{
+  background:none;border-color:transparent;
+}
+
+.nav-item.active{color:var(--shell-text);}
+[data-nav-active="barre"] .nav-item.active,
+[data-nav-active="point"] .nav-item.active,
+[data-nav-active="contour"] .nav-item.active,
+[data-nav-active="texte"] .nav-item.active{color:var(--shell-text);font-weight:600;}
+[data-nav-active="barre"] .navbar-tab.active,
+[data-nav-active="point"] .navbar-tab.active,
+[data-nav-active="contour"] .navbar-tab.active,
+[data-nav-active="texte"] .navbar-tab.active{color:var(--brass-700);font-weight:600;}
+
+/* Barre : trait d'accent sur le bord intérieur (le bord opposé à la fenêtre),
+   donc à gauche pour un rail à gauche, à droite pour un rail à droite, en bas
+   pour une barre en haut, et inversement. */
+.nav-item.active::before,
+.navbar-tab.active::before{content:none;}
+[data-nav-active="barre"] .nav-item.active::before,
+[data-nav-active="barre"] .navbar-tab.active::before{
+  content:'';position:absolute;background:var(--brass-500);border-radius:99px;
+}
+[data-nav-active="barre"] .nav-item.active::before{
+  top:15%;bottom:15%;width:3px;left:-1px;
+}
+[data-nav-placement="right"][data-nav-active="barre"] .nav-item.active::before{
+  left:auto;right:-1px;
+}
+[data-nav-active="barre"] .navbar-tab.active::before{
+  left:12%;right:12%;height:3px;bottom:-1px;
+}
+[data-nav-placement="bottom"][data-nav-active="barre"] .navbar-tab.active::before{
+  bottom:auto;top:-1px;
+}
+
+/* Point : pastille d'accent devant l'entrée. Utilise ::after pour laisser
+   ::before à la variante barre — les deux ne coexistent jamais, mais un
+   sélecteur mal recopié le ferait un jour. */
+[data-nav-active="point"] .nav-item.active::after,
+[data-nav-active="point"] .navbar-tab.active::after{
+  content:'';position:absolute;left:2px;top:50%;transform:translateY(-50%);
+  width:4px;height:4px;border-radius:50%;background:var(--brass-500);
+}
+[data-nav-placement="right"][data-nav-active="point"] .nav-item.active::after{
+  left:auto;right:2px;
+}
+
+/* Contour : bordure d'accent, fond transparent. */
+[data-nav-active="contour"] .nav-item.active{border-color:var(--brass-400);}
+[data-nav-active="contour"] .navbar-tab.active{border-color:var(--brass-400);}
+
+/* Texte accentué : rien d'autre que la couleur et la graisse — l'icône suit. */
+[data-nav-active="texte"] .nav-item.active .icon{color:var(--brass-400);opacity:1;}
+[data-nav-active="texte"] .navbar-tab.active .icon{color:var(--brass-700);opacity:1;}
+
+/* --- Vignette de choix (écran Apparence) ---------------------------------
+   Miniature schématique de la coquille : cadre + bande de navigation sur un
+   bord + trois entrées. Sans rapport avec le rendu réel de l'app — c'est un
+   pictogramme, pas un aperçu. */
+.nav-swatch{
+  width:58px;height:40px;display:flex;overflow:hidden;
+  border:1px solid var(--border);border-radius:5px;
+  background:var(--surface-alt);margin-bottom:6px;
+}
+.nav-swatch.is-left{flex-direction:row;}
+.nav-swatch.is-right{flex-direction:row-reverse;}
+.nav-swatch.is-top{flex-direction:column;}
+.nav-swatch.is-bottom{flex-direction:column-reverse;}
+.nav-swatch-bar{
+  flex:none;display:flex;gap:3px;padding:4px;
+  background:var(--shell-bg);
+}
+.nav-swatch.is-left .nav-swatch-bar,
+.nav-swatch.is-right .nav-swatch-bar{width:17px;flex-direction:column;}
+.nav-swatch.is-top .nav-swatch-bar,
+.nav-swatch.is-bottom .nav-swatch-bar{height:13px;flex-direction:row;align-items:center;}
+.nav-swatch.is-thin.is-left .nav-swatch-bar,
+.nav-swatch.is-thin.is-right .nav-swatch-bar{width:9px;}
+.nav-swatch.is-thin.is-top .nav-swatch-bar,
+.nav-swatch.is-thin.is-bottom .nav-swatch-bar{height:9px;}
+.nav-swatch.is-dense .nav-swatch-bar{gap:2px;}
+.nav-swatch.is-aere .nav-swatch-bar{gap:5px;}
+.nav-swatch-body{flex:1;}
+.nav-swatch-item{
+  flex:1;border-radius:2px;border:1px solid transparent;
+  background:var(--shell-bg-2);position:relative;
+}
+.nav-swatch-item.is-active.ind-plein{background:var(--brass-500);}
+.nav-swatch-item.is-active.ind-contour{background:none;border-color:var(--brass-400);}
+.nav-swatch-item.is-active.ind-texte{background:var(--brass-400);opacity:.45;}
+.nav-swatch-item.is-active.ind-barre{background:var(--shell-bg-2);}
+.nav-swatch-item.is-active.ind-barre::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+  border-radius:99px;background:var(--brass-500);
+}
+.nav-swatch-item.is-active.ind-point{background:var(--shell-bg-2);}
+.nav-swatch-item.is-active.ind-point::before{
+  content:'';position:absolute;left:2px;top:50%;transform:translateY(-50%);
+  width:3px;height:3px;border-radius:50%;background:var(--brass-500);
+}
+
+/* --- Réglages de navigation : rangée d'interrupteurs --------------------- */
+.nav-toggle-row{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--border-soft);
+}
+.nav-toggle-row:last-child{border-bottom:0;}
+.nav-toggle-text{flex:1;min-width:0;}
+.nav-toggle-label{font-size:12.5px;font-weight:600;color:var(--ink-800);}
+.nav-toggle-desc{font-size:11px;color:var(--ink-500);margin-top:1px;}
+
+.v1-toolbar{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  padding:10px 12px;margin-bottom:16px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);
+}
+.v1-toolbar-sep{width:1px;align-self:stretch;background:var(--border);margin:0 4px;}
+
+.v1-list-controls{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-bottom:12px;
+}
+.v1-list-controls .field{margin:0;}
+
+.v1-pager{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-top:12px;
+}
+.v1-pager-info{font-size:12px;color:var(--ink-500);}
+.v1-pager-pages{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+
+.v1-info-block{
+  display:flex;gap:12px;padding:14px 16px;margin-bottom:18px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);
+  font-size:12.5px;color:var(--ink-700);line-height:1.55;
+}
+.v1-info-block svg{width:16px;height:16px;flex:none;color:var(--info);margin-top:2px;}
+.v1-info-block p{margin:0 0 8px;}
+.v1-info-block p:last-child{margin-bottom:0;}
+.v1-warn-text{font-size:12px;color:var(--critical);margin-top:10px;line-height:1.5;}
+
+.v1-tile-grid{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+.v1-tile{
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:16px 22px;min-width:150px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);
+  font-size:12.5px;font-weight:600;color:var(--ink-800);text-align:center;
+}
+.v1-tile:hover{border-color:var(--brass-400);background:var(--surface-alt);}
+.v1-tile svg{width:20px;height:20px;color:var(--brass-600);}
+
+.v1-tool-row{
+  display:flex;align-items:flex-start;gap:14px;padding:12px 0;
+  border-bottom:1px solid var(--border-soft);
+}
+.v1-tool-row:last-child{border-bottom:none;}
+.v1-tool-row-name{font-size:13px;font-weight:600;color:var(--ink-900);}
+.v1-tool-row-desc{font-size:11.8px;color:var(--ink-500);margin-top:2px;line-height:1.5;}
+
+.v1-empty{
+  border:1px dashed var(--border);border-radius:var(--radius-lg);
+  background:var(--surface-alt);padding:22px 24px;
+}
+.v1-empty-title{font-size:13.5px;font-weight:600;color:var(--ink-900);margin-bottom:6px;}
+.v1-empty-desc{font-size:12.5px;color:var(--ink-500);line-height:1.6;max-width:640px;}
+.v1-known{margin:16px 0 0;padding:0;list-style:none;}
+.v1-known li{
+  font-size:12.5px;color:var(--ink-700);padding:7px 0;
+  border-bottom:1px solid var(--border-soft);display:flex;gap:10px;
+}
+.v1-known li:last-child{border-bottom:none;}
+.v1-known .k{min-width:150px;color:var(--ink-400);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;}
+
+.v1-editorial{font-size:13px;color:var(--ink-700);line-height:1.7;max-width:760px;}
+.v1-editorial h3{font-size:14px;color:var(--ink-900);margin:18px 0 8px;}
+.v1-editorial p{margin:0 0 10px;}
+.v1-editorial ol,.v1-editorial ul{margin:0 0 10px;padding-left:20px;}
+.v1-editorial li{margin-bottom:4px;}
+
+button.v1-tile,button.v1-tool-row-name{font-family:inherit;cursor:pointer;}
+button.v1-tool-row-name{background:none;border:none;padding:0;text-align:left;color:var(--ink-900);font-size:13px;font-weight:600;}
+button.v1-tool-row-name:hover{color:var(--brass-700);}

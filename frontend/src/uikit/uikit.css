@@ -1,0 +1,100 @@
+/* ===========================================================================
+   Habillage du UI kit uniquement (src/uikit/). Volontairement séparé de
+   components.css : rien ici ne fait partie du design system livré, et le
+   fichier n'est chargé que par la page ?view=ui-kit.
+   =========================================================================== */
+
+.uikit {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink-900);
+  display: grid;
+  grid-template-columns: 250px 1fr;
+}
+
+/* ---- colonne de navigation ---- */
+.uikit-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 20px 14px 40px;
+}
+.uikit-nav-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+.uikit-nav-sub { font-size: 11.5px; color: var(--ink-500); margin-bottom: 16px; }
+.uikit-nav-group {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--brass-600); margin: 18px 0 6px;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.uikit-nav-group span { color: var(--ink-400); font-weight: 600; letter-spacing: 0; text-transform: none; }
+.uikit-nav a {
+  display: block; text-decoration: none; font-size: 12.5px; color: var(--ink-700);
+  padding: 4px 8px; border-radius: var(--radius-sm);
+}
+.uikit-nav a:hover { background: var(--surface-alt); color: var(--ink-900); }
+
+/* ---- colonne de contenu ---- */
+.uikit-main { padding: 28px 34px 120px; max-width: 1180px; overflow-x: hidden; }
+.uikit-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 6px; }
+.uikit-tools { display: flex; align-items: center; gap: 10px; }
+.uikit-search {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+  padding: 8px 14px; font: inherit; font-size: 13px; color: var(--ink-900); width: 240px;
+}
+.uikit-section-title {
+  font-family: var(--font-display); font-size: 20px; font-weight: 600;
+  margin: 42px 0 4px; padding-top: 14px; border-top: 1px solid var(--border-soft);
+}
+.uikit-section-desc { font-size: 13px; color: var(--ink-500); margin-bottom: 20px; max-width: 720px; }
+
+/* ---- fiche d'un composant ---- */
+.uikit-item { margin-bottom: 26px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+.uikit-item-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); flex-wrap: wrap; }
+.uikit-item-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 600; color: var(--ink-900); }
+.uikit-item-path { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-400); margin-left: auto; }
+.uikit-item-desc { padding: 12px 16px 0; font-size: 12.5px; color: var(--ink-500); max-width: 760px; }
+
+.uikit-stage { padding: 20px 16px; background: var(--surface-alt); border-top: 1px solid var(--border-soft); margin-top: 14px; }
+.uikit-variant + .uikit-variant { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--border); }
+.uikit-variant-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-400); margin-bottom: 8px; }
+.uikit-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Crée un bloc conteneur pour les descendants en position:fixed (modale,
+   volet latéral) : sans lui, ils s'échapperaient de leur fiche et se
+   colleraient à la fenêtre. */
+.uikit-contained { position: relative; transform: translateZ(0); overflow: hidden; border-radius: var(--radius-md); }
+
+/* ---- table des props ---- */
+.uikit-props { width: 100%; border-collapse: collapse; font-size: 12px; }
+.uikit-props th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-400); font-weight: 700; padding: 8px 16px; border-bottom: 1px solid var(--border-soft);
+}
+.uikit-props td { padding: 8px 16px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.uikit-props tr:last-child td { border-bottom: none; }
+.uikit-props .n { font-family: var(--font-mono); font-weight: 600; color: var(--ink-900); white-space: nowrap; }
+.uikit-props .t { font-family: var(--font-mono); color: var(--brass-700); font-size: 11px; }
+.uikit-props .d { color: var(--ink-500); }
+.uikit-req { font-size: 9.5px; font-weight: 700; color: var(--critical); margin-left: 6px; vertical-align: super; }
+.uikit-empty { padding: 12px 16px; font-size: 12px; color: var(--ink-400); }
+
+/* ---- aperçu réduit d'un écran ---- */
+.uikit-frame {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--bg); position: relative;
+}
+.uikit-viewport { transform-origin: top left; }
+/* La coquille est calée sur 100vh : dans un aperçu, la hauteur est celle du
+   cadre, sinon l'écran déborderait de sa vignette. */
+.uikit-viewport .app { height: 100%; }
+.uikit-viewport .app,
+.uikit-viewport .app.is-active { display: flex; }
