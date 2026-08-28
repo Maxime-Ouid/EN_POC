@@ -468,6 +468,172 @@ En l'absence de dérivation, rien n'empêche techniquement une étude de choisir
 
 ---
 
+### 9.5 Disposition et style de la navigation (28/08/2026)
+
+La personnalisation ne portait que sur les **couleurs**, la typographie et les rayons : la
+navigation restait un rail vertical de 236 px à gauche, pour toutes les études. Ce
+paragraphe documente l'extension à sa **disposition** et à son **style**.
+
+#### Ce qui bloquait
+
+`.sidebar` fixait `width:236px` et `.main` compensait avec `padding-left:250px` — deux
+constantes séparées, à tenir synchronisées à la main, dans deux règles qui ne se
+regardent pas. Aucune personnalisation n'était possible sans les désynchroniser. Elles
+sont remplacées par `--nav-w` et `calc(var(--nav-w) + var(--nav-gutter))` : une seule
+valeur, un seul endroit.
+
+À noter, car ce n'est pas évident à la lecture : **le rail est `position:fixed` et
+`background:transparent`**. Ce n'est pas un reliquat — c'est ce qui laisse le dégradé de
+`#app-main` courir sous lui d'un bord à l'autre de la fenêtre. Un rail en flux normal et
+opaque casserait ce fond. Toute reprise du layout doit préserver ces deux propriétés.
+
+#### Deux natures de réglage
+
+| Nature | Véhicule | Exemples |
+|---|---|---|
+| Valeur | custom properties `--nav-*` (générées par `buildLayoutBody`) | largeur, hauteur de barre, paddings, taille d'icône |
+| Structure | attributs `data-nav-*` sur `<html>` (posés par `applyLayoutAttributes`) | `data-nav-placement`, `data-nav-size`, `data-nav-active` |
+
+Une custom property ne déplace pas un élément fixe d'un bord à l'autre et ne transforme
+pas une pastille de fond en trait latéral : il faut un sélecteur. Les attributs servent
+aussi à `AppShell`, qui doit savoir **ce qu'il monte** — un rail vertical ou une barre
+d'onglets sont deux composants, pas deux feuilles de style.
+
+Les variables `--nav-*` sont émises **uniquement dans le bloc `:root`**, jamais dans les
+blocs sombres : une largeur de rail n'a pas de raison de changer avec le thème, et les y
+répéter ferait croire le contraire au prochain lecteur.
+
+#### Le référentiel
+
+`frontend/src/theme/schema.ts` porte `NAV_PLACEMENT`, `NAV_SIZE`, `NAV_DENSITY`,
+`NAV_ACTIVE`, `NAV_TOGGLES` et `LAYOUT_DEFAULTS`. L'écran Apparence est **généré** depuis
+ces tables : ajouter un placement ou un style d'indicateur ne demande de toucher ni à
+l'écran ni au CSS des composants — seulement d'écrire la règle correspondante.
+
+`LAYOUT_DEFAULTS` reproduit exactement la navigation d'avant (rail à gauche, large,
+confortable, fond plein, sans intitulés de section, avec compteurs et mention Notantis).
+
+#### Haut et bas : barre d'onglets, pas rail couché
+
+Le modèle retenu pour les dispositions horizontales est celui d'une **barre d'onglets**
+(icône + libellé court, une seule profondeur visible), pas le rail vertical basculé. Trois
+conséquences assumées, portées par `organisms/NavBar.tsx` :
+
+1. **Le nombre d'onglets est borné** (`MAX_VISIBLE_TABS = 6`). Au-delà, le reste part dans
+   un menu « Plus ». L'entrée active est toujours ramenée dans la partie visible, même si
+   son rang la reléguait au menu — sinon la barre n'indique plus où l'on est.
+2. **Les sous-entrées ne sont pas dépliées** dans la barre : elles s'ouvrent en menu sous
+   leur onglet. Le clic sur une rubrique à sous-menu ouvre ce menu **et** navigue vers sa
+   première sous-entrée, comme le rail.
+3. **Le sélecteur d'office et la déconnexion remontent dans la topbar** : sans rail, il n'y
+   a plus de pied de sidebar où les loger. Le CSS `.topbar-right .tenant-switcher` les
+   repeint aux couleurs de surface — dessinés pour le fond sombre du rail, ils y
+   apparaîtraient sinon comme un bloc violet sans rapport avec ce qui les entoure.
+
+#### Mode « icônes seules »
+
+Le rail se réduit à une colonne de pastilles de 38 px (62 px de large au total), la marque
+prise dans une tuile de même forme au sommet. Chaque entrée **révèle son libellé au
+survol**, dans une infobulle posée à côté de son icône, aux couleurs d'accent de l'étude
+(`--brass-500`) — donc elle aussi personnalisée.
+
+Le libellé n'est **jamais retiré du DOM** : il change de présentation, il reste lu par les
+lecteurs d'écran. L'infobulle apparaît aussi au `:focus-visible`, pas seulement au survol.
+
+L'attribut `title` natif a été essayé d'abord et retiré : il n'a ni le délai, ni l'aspect,
+ni les couleurs de l'étude, et il ferait doublon avec l'infobulle.
+
+Deux techniques de positionnement, pour une raison précise à chaque fois :
+
+- **Rail vertical** — `position:fixed`, coordonnées fournies par
+  `atoms/navTooltip.ts` sur `onMouseEnter`/`onFocus`. Nécessaire parce que `.nav` porte
+  `overflow-y:auto` pour faire défiler les rubriques : un navigateur ne sait pas faire
+  `overflow-y:auto` avec `overflow-x:visible` — il ramène le second à `auto`, et une
+  infobulle en `position:absolute` serait rognée à 62 px, c'est-à-dire invisible. Le JS ne
+  fournit que la géométrie ; le CSS choisit le bord depuis `[data-nav-placement]`.
+- **Barre horizontale** — `position:absolute` tout simplement : `.navbar` ne défile pas.
+  Et son `backdrop-filter` ferait d'elle le bloc conteneur d'un descendant `fixed`, ce qui
+  rendrait des coordonnées de fenêtre fausses — piège à connaître avant d'uniformiser les
+  deux cas.
+
+Chevrons, sous-menus et intitulés de section disparaissent pour de bon dans ce mode : sans
+libellé, il n'y a plus rien à côté de quoi les afficher. Les compteurs, eux, se replient en
+pastille sur le coin de l'icône.
+
+#### Sous-menus en mode réduit : panneau volant, pas suppression
+
+Premier réflexe, et première erreur : masquer `.nav-sub` en mode « icônes seules ».
+Une rubrique à sous-entrées reste cliquable et ouvre sa **première** sous-entrée — les
+autres deviennent purement inaccessibles. « Dossiers » perd « Exports multiples » et
+« Espaces clients », « Personnalisation » perd cinq de ses six sections.
+
+Le sous-menu est donc **toujours rendu** dès que la rubrique en a (`AppShell`), et c'est le
+CSS qui décide de sa forme : replié sous l'entrée en mode large (`.nav-sub.is-open`),
+panneau volant au survol en mode réduit. Le panneau porte le nom de la rubrique en
+en-tête — auquel cas l'infobulle ferait doublon et est supprimée.
+
+Deux détails qui ne se voient qu'à l'usage, et qui cassent la fonctionnalité s'ils
+manquent :
+
+- le panneau reste ouvert sur `:hover` **et** `:focus-within` de son conteneur, pas
+  seulement de l'icône : sans ça il se referme dès qu'on quitte l'icône pour aller
+  cliquer dedans ;
+- un pseudo-élément fait le **pont** par-dessus les 10 px de vide entre l'icône et le
+  panneau, sinon la souris « sort » dans l'intervalle.
+
+#### Personnalisation : le sous-menu remplace la barre d'onglets
+
+Les six sections de Personnalisation (Coordonnées et logo, En-tête des emails, Apparence,
+Accueil & mentions, Espace client, Modules & modèles) existaient **deux fois** : dans le
+sous-menu « Personnalisation » de la navigation, et dans une `TabStrip` en haut de
+l'écran. Les mêmes six choix, à deux endroits, avec deux états à garder d'accord.
+
+La barre a été retirée le 28/08/2026 ; la navigation reste seule maîtresse de la section
+affichée. Le titre de page porte désormais le nom de la section et non plus
+« Personnalisation » — sans la barre, c'est le seul repère qui dit où l'on se trouve.
+
+`SettingsScreen` (l'écran Personnalisation de l'application V2, trois onglets : Identité,
+Apparence, Modules) **garde sa barre d'onglets** : sa navigation n'expose pas ces trois
+entrées en sous-menu, les retirer les rendrait inaccessibles. À aligner si la navigation V2
+adopte le même découpage.
+
+#### `.nav-item` et `.nav-subitem` sont des `<button>`
+
+Le prototype en faisait des `<div onClick>`. Conséquences constatées : **pas de curseur de
+pointeur au survol** (la règle `button, [role="button"], .clickable{cursor:pointer}` ne les
+atteignait pas), pas de focus clavier, pas de sémantique pour un lecteur d'écran. Corrigé
+le 28/08/2026, comme l'avait déjà été `PresetCard`. Les trois neutralisations habituelles
+du `<button>` (`width:100%`, `text-align:left`, `background:none`, `font-family:inherit`)
+sont regroupées dans une seule règle au-dessus de `.nav-item`. `aria-current="page"` marque
+l'entrée active, `aria-expanded` l'état du sous-menu.
+
+#### Persistance
+
+Le bloc `layout` voyage dans le même document que les couleurs (`Office.theme`,
+`PUT /api/tenant-theme/`). Côté Django, `validators._clean_layout` borne les quatre
+énumérations et les trois booléens : contrairement aux tokens de couleur, ce sont des
+ensembles **fermés et petits**, et laisser passer une valeur inconnue produirait un
+attribut `data-nav-*` qu'aucun sélecteur ne reconnaît — c'est-à-dire une navigation qui
+disparaît sans message d'erreur.
+
+**Un thème sans bloc `layout` est le cas normal, pas une anomalie** : tous ceux enregistrés
+avant le 28/08/2026 n'en ont pas. Le validateur les accepte tels quels et ne leur en ajoute
+pas ; `normalizeLayoutState` les complète clé par clé côté front avec les valeurs par
+défaut. Refuser ces thèmes aurait rendu toute étude déjà personnalisée incapable
+d'enregistrer quoi que ce soit.
+
+#### Divergence des miroirs, assumée
+
+Le §9 pose que `schema.ts`, `index_16.html` et `tokens.py` restent alignés. **Le bloc
+`layout` n'existe que dans `schema.ts`** (et son bornage dans `validators.py`) :
+
+- `index_16.html` est le prototype de référence figé ; y rétroporter une navigation
+  déplaçable reviendrait à réécrire sa coquille entière, sans bénéfice.
+- `tokens.py` sert la génération de PDF et d'emails, où il n'y a **pas de navigation** —
+  la parité numérique qu'il garantit porte sur les couleurs, elle n'est pas entamée.
+
+---
+
 ## 10. Pour un développeur Python
 
 Ce design system est volontairement **agnostique du framework** : ce sont des fichiers CSS/JSON/Python statiques, pas un paquet à installer.

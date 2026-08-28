@@ -12,10 +12,11 @@ import {
   loadThemeState,
   persistThemeState,
   withColor,
+  withLayout,
   type ThemeState,
   type ThemeTransport,
 } from './engine';
-import type { ShapeKey, ThemeMode, TypographyKey } from './schema';
+import type { LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
 import { TenantThemeContext, type TenantThemeContextValue } from './context';
 
 const SAVE_FLASH_MS = 1600;
@@ -139,6 +140,17 @@ export function ThemeProvider({
     [save],
   );
 
+  const setLayout = useCallback(
+    (patch: Partial<LayoutState>) => {
+      setState(prev => {
+        const next = withLayout(prev, patch);
+        save(next);
+        return next;
+      });
+    },
+    [save],
+  );
+
   const reset = useCallback(() => {
     if (persist) clearPersistedThemeState();
     const defaults = defaultThemeState();
@@ -185,6 +197,7 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setLayout,
       reset,
       justSaved,
       saveError,
@@ -198,6 +211,7 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setLayout,
       reset,
       justSaved,
       saveError,

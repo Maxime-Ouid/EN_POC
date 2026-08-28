@@ -21,6 +21,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `IconButton` | Bouton icône seul, rond (cloche, notifications…) — voir .icon-btn dans la topbar. |
 | `IconSprite` | — |
 | `Nav` | — |
+| `NavSwatch` | Miniature de la coquille de l'app : un cadre, une bande de navigation sur un bord, trois entrées dont la première est active. |
 | `Pill` | Statut sémantique — voir DESIGN_SYSTEM.md §6.3. |
 | `ProtoPill` | Bandeau "Aperçu — maquette visuelle" affiché dans le prototype — à retirer une fois l'app connectée à de vraies données… |
 | `RowIcon` | Carré arrondi coloré associé à un type de ligne (dossier, fichier…) — §6.5. |
@@ -50,10 +51,12 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `FeedItem` | Ligne de fil d'activité — §6.9. La couleur de `iconBg`/`iconColor` encode le type d'évènement (dépôt = info, question =… |
 | `Field` | Label + contrôle, empilés — §6.6. Enrober un <input>/<select> pour hériter du style de focus/bordure défini sur `.field input,… |
 | `FieldRow` | Deux (ou plus) `<Field>` côte à côte, répartis équitablement. |
+| `ListControls` | Ligne de contrôles des listes V1 : « afficher [25] dossiers » à gauche, « Rechercher… » à droite. |
 | `MetaBanner` | Bandeau de métadonnées clé/valeur en tête de fiche dataroom — §6.13. |
 | `ModuleRow` | Ligne « module activable » de Personnalisation → Modules. |
 | `NavGroup` | — |
-| `NavItem` | — |
+| `NavItem` | Entrée de navigation de premier niveau. |
+| `NavSubItem` | Entrée de sous-menu de la sidebar (V1 : « Dossiers » → « Exports multiples », « Espaces clients »…). |
 | `PageHeader` | En-tête d'écran : surtitre + titre + sous-titre, motif répété sur tous les écrans du prototype. |
 | `PresetCard` | Vignette sélectionnable (.preset-card). |
 | `PresetRow` | Rangée de vignettes de preset (typographie, formes) — §Personnalisation. |
@@ -62,9 +65,11 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `SidebarFoot` | Pied de sidebar : utilisateur connecté (clic = déconnexion) + mention "propulsé par Notantis" — les tokens… |
 | `StatCard` | Carte de statistique du dashboard — §6.2. |
 | `TabStrip` | Bandeau d'onglets — §6.7. `active` désigne la clé active ; le panneau correspondant est à afficher par l'appelant (voir… |
+| `TablePager` | Pied de tableau des listes V1 : compteur, export, puis « début / précédent / numéros / suivant / fin ». |
 | `TemplateOption` | Ligne « modèle de dataroom » (.tpl-option) — liste des modèles dans Personnalisation, et choix du modèle dans la modale de… |
 | `TenantSwitcher` | Sélecteur d'office cliquable — pattern de la V1 (voir §6.14 / mémoire de projet "personnalisation") : à brancher sur l'échange… |
 | `TokenItem` | Un champ de couleur : pastille + libellé + valeur hex (+ opacité si le token l'accepte). |
+| `Toolbar`, `ToolbarSeparator` | Barre d'outils horizontale des écrans de l'interface actuelle (V1) : une rangée de boutons d'action au-dessus du contenu («… |
 | `TopbarSearch` | — |
 
 ## Organismes — blocs autonomes
@@ -77,7 +82,9 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `IdentityTab` | Personnalisation → Identité (index_16.html #sub3-identite). |
 | `Modal` | Overlay + boîte modale — §6.11. `open` pilote `.overlay.is-active` (le prototype le faisait en JS via openModal()/closeModal()). |
 | `ModulesTab` | Personnalisation → Modules & modèles (index_16.html #sub3-modules). |
+| `NavBar` | Barre d'onglets horizontale — navigation « en haut » ou « en bas ». |
 | `NewDataroomModal` | Modale "Nouveau dossier" — index_16.html #modal-new. |
+| `OfficeContentTab` | — |
 | `QACard` | Carte question/réponse — §6.10. |
 | `Sidebar` | Conteneur latéral fixe, 236px — §6.14. Pas de repli mobile dans le design system d'origine (dette notée en §7 point 5) : à… |
 | `Slideover` | Panneau latéral (fiche document) — §6.12. `open` pilote `.slideover.is-active`. |

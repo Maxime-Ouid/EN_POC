@@ -51,6 +51,25 @@
   --font-ui:'Inter', -apple-system, 'Segoe UI', sans-serif;
   --font-mono:'IBM Plex Mono', 'SF Mono', Menlo, monospace;
 
+  /* Navigation : dimensions et densité. Ces valeurs sont RÉÉCRITES par le
+     <style id="tenant-theme-vars"> dès qu'un office personnalise sa navigation
+     (theme/engine.ts, buildLayoutBody). Elles restent ici pour que l'app
+     s'affiche correctement sans moteur de thème — UI kit, tests, rendu avant
+     le premier effet React — et elles reproduisent exactement le réglage
+     « Large / Confortable », c'est-à-dire la navigation d'avant l'ajout du
+     bloc. Le placement, lui, ne passe pas par une variable : voir les
+     sélecteurs [data-nav-placement] dans components.css. */
+  --nav-w:236px;
+  --nav-h:62px;
+  --nav-item-pad-y:8px;
+  --nav-item-pad-x:10px;
+  --nav-item-gap:10px;
+  --nav-item-spacing:1px;
+  --nav-icon-size:16px;
+  --nav-font-size:13.3px;
+  /* Écart entre le bord de la navigation et le contenu. */
+  --nav-gutter:14px;
+
   /* Barres de défilement — dérivées des tokens de texte plutôt que définies
      par thème : color-mix résout var() au moment du calcul, donc elles suivent
      automatiquement le thème clair, le thème sombre ET toute couleur choisie

@@ -176,6 +176,63 @@ class ThemeValidatorTests(TestCase):
         with self.assertRaises(ThemeValidationError):
             clean_theme_payload(payload)
 
+    # --- Disposition de la navigation (bloc `layout`) ----------------------
+
+    def test_accepts_a_full_layout_block(self):
+        cleaned = clean_theme_payload(
+            self._payload(
+                layout={
+                    "navPlacement": "bottom",
+                    "navSize": "rail",
+                    "navDensity": "aere",
+                    "navActive": "barre",
+                    "showSectionLabels": True,
+                    "showBadges": False,
+                    "showPoweredBy": False,
+                }
+            )
+        )
+        self.assertEqual(cleaned["layout"]["navPlacement"], "bottom")
+        self.assertEqual(cleaned["layout"]["navActive"], "barre")
+        self.assertIs(cleaned["layout"]["showBadges"], False)
+
+    def test_theme_without_layout_stays_without_layout(self):
+        # Cas des thèmes enregistrés AVANT l'existence du bloc : ils doivent
+        # continuer à s'enregistrer, et ne pas gagner une disposition au passage
+        # (le front applique ses défauts, qui sont la navigation d'origine).
+        cleaned = clean_theme_payload(self._payload())
+        self.assertNotIn("layout", cleaned)
+
+    def test_partial_layout_keeps_only_what_was_sent(self):
+        cleaned = clean_theme_payload(self._payload(layout={"navPlacement": "right"}))
+        self.assertEqual(cleaned["layout"], {"navPlacement": "right"})
+
+    def test_rejects_unknown_layout_values(self):
+        # Une valeur inconnue deviendrait un attribut data-nav-* qu'aucun
+        # sélecteur ne reconnaît : navigation invisible, sans message d'erreur.
+        for bad in (
+            {"navPlacement": "diagonale"},
+            {"navSize": "enorme"},
+            {"navDensity": "moyenne"},
+            {"navActive": "clignotant"},
+        ):
+            with self.assertRaises(ThemeValidationError):
+                clean_theme_payload(self._payload(layout=bad))
+
+    def test_rejects_non_boolean_layout_flags(self):
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(self._payload(layout={"showBadges": "oui"}))
+
+    def test_rejects_a_layout_that_is_not_an_object(self):
+        with self.assertRaises(ThemeValidationError):
+            clean_theme_payload(self._payload(layout="left"))
+
+    def test_drops_unknown_keys_inside_layout(self):
+        cleaned = clean_theme_payload(
+            self._payload(layout={"navPlacement": "top", "navRainbow": True})
+        )
+        self.assertNotIn("navRainbow", cleaned["layout"])
+
 
 class TenantThemeApiTests(TestCase):
     """GET/PUT /api/tenant-theme/ — persistance de la personnalisation par office."""
@@ -227,6 +284,30 @@ class TenantThemeApiTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["colors"]["light"]["bg"], "#eeeeee")
         self.assertEqual(res.json()["typography"], "moderne")
+
+    def test_navigation_layout_survives_the_round_trip(self):
+        # La disposition de la navigation est une personnalisation d'office au
+        # même titre que les couleurs : elle doit revenir telle quelle, sinon
+        # l'étude retrouve sa navigation à gauche au prochain chargement.
+        self.client.force_login(self.admin)
+        theme = self._theme()
+        theme["layout"] = {"navPlacement": "bottom", "navSize": "rail", "showPoweredBy": False}
+        self.assertEqual(self._put(theme).status_code, 200)
+
+        res = self.client.get("/api/tenant-theme/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.json()["layout"]["navPlacement"], "bottom")
+        self.assertEqual(res.json()["layout"]["navSize"], "rail")
+        self.assertIs(res.json()["layout"]["showPoweredBy"], False)
+
+    def test_an_invalid_layout_is_refused_without_touching_the_stored_theme(self):
+        self.client.force_login(self.admin)
+        self._put(self._theme("#eeeeee"))
+        bad = self._theme("#123456")
+        bad["layout"] = {"navPlacement": "diagonale"}
+
+        self.assertEqual(self._put(bad).status_code, 400)
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.theme["colors"]["light"]["bg"], "#eeeeee")
 
     def test_saved_theme_is_scoped_to_the_office(self):
         # Le point de toute l'opération : deux offices ne partagent pas leur thème.

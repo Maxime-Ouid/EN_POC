@@ -173,3 +173,145 @@ export const SHAPE: Record<ShapeKey, ShapePreset> = {
 
 export const TYPOGRAPHY_KEYS = Object.keys(TYPOGRAPHY) as TypographyKey[];
 export const SHAPE_KEYS = Object.keys(SHAPE) as ShapeKey[];
+
+/* ===========================================================================
+   Disposition et style de la navigation.
+
+   Même principe que les couleurs : ce fichier est LE référentiel. L'écran
+   Personnalisation → Apparence est généré depuis ces tables, le CSS est
+   généré depuis leurs valeurs (engine.ts), et rien n'est écrit en dur des
+   deux côtés.
+
+   Deux natures de réglage, à ne pas confondre :
+     - ce qui se traduit en VALEUR (largeur, hauteur, espacements) sort en
+       custom properties `--nav-*` ;
+     - ce qui change la STRUCTURE du rendu (placement, mode réduit, forme de
+       l'indicateur d'actif) sort en attributs `data-nav-*` sur <html>, parce
+       qu'une variable CSS ne peut pas déplacer un élément ni en changer la
+       nature. C'est aussi ce qui permet à AppShell de savoir, en React, s'il
+       doit monter un rail vertical ou une barre d'onglets.
+   =========================================================================== */
+
+export type NavPlacement = 'left' | 'right' | 'top' | 'bottom';
+export type NavSizeKey = 'large' | 'compact' | 'rail';
+export type NavDensityKey = 'dense' | 'confortable' | 'aere';
+export type NavActiveKey = 'plein' | 'barre' | 'point' | 'contour' | 'texte';
+
+export interface NavPlacementPreset {
+  label: string;
+  desc: string;
+  /** Vrai pour « en haut » et « en bas » : barre d'onglets, pas rail vertical. */
+  horizontal: boolean;
+}
+
+export const NAV_PLACEMENT: Record<NavPlacement, NavPlacementPreset> = {
+  left: { label: 'À gauche', desc: 'Rail vertical — disposition actuelle', horizontal: false },
+  right: { label: 'À droite', desc: 'Rail vertical, côté opposé', horizontal: false },
+  top: { label: 'En haut', desc: "Barre d'onglets au-dessus du contenu", horizontal: true },
+  bottom: { label: 'En bas', desc: "Barre d'onglets ancrée en bas de l'écran", horizontal: true },
+};
+
+export interface NavSizePreset {
+  label: string;
+  desc: string;
+  /** Largeur du rail. Sans effet quand la navigation est horizontale. */
+  width: string;
+  /** Hauteur de la barre d'onglets. Sans effet quand la navigation est verticale. */
+  barHeight: string;
+  /** Faux = icônes seules ; le libellé n'apparaît qu'au survol, en infobulle. */
+  labels: boolean;
+}
+
+export const NAV_SIZE: Record<NavSizeKey, NavSizePreset> = {
+  large: { label: 'Large', desc: 'Libellés visibles, 236 px', width: '236px', barHeight: '62px', labels: true },
+  compact: { label: 'Compact', desc: 'Libellés visibles, 192 px', width: '192px', barHeight: '54px', labels: true },
+  rail: { label: 'Icônes seules', desc: 'Libellé au survol, 62 px', width: '62px', barHeight: '52px', labels: false },
+};
+
+export interface NavDensityPreset {
+  label: string;
+  desc: string;
+  padY: string;
+  padX: string;
+  /** Écart icône ↔ libellé. */
+  gap: string;
+  /** Écart vertical entre deux entrées. */
+  itemGap: string;
+  iconSize: string;
+  fontSize: string;
+}
+
+export const NAV_DENSITY: Record<NavDensityKey, NavDensityPreset> = {
+  dense: { label: 'Dense', desc: 'Plus de rubriques sans défilement', padY: '5px', padX: '9px', gap: '8px', itemGap: '0px', iconSize: '15px', fontSize: '12.6px' },
+  confortable: { label: 'Confortable', desc: 'Réglage actuel', padY: '8px', padX: '10px', gap: '10px', itemGap: '1px', iconSize: '16px', fontSize: '13.3px' },
+  aere: { label: 'Aéré', desc: 'Cibles plus grandes, écrans tactiles', padY: '11px', padX: '12px', gap: '12px', itemGap: '4px', iconSize: '18px', fontSize: '14px' },
+};
+
+export interface NavActivePreset {
+  label: string;
+  desc: string;
+}
+
+export const NAV_ACTIVE: Record<NavActiveKey, NavActivePreset> = {
+  plein: { label: 'Fond plein', desc: 'Pastille de fond — réglage actuel' },
+  barre: { label: 'Barre', desc: "Trait d'accent sur le bord de l'entrée" },
+  point: { label: 'Point', desc: "Point d'accent devant le libellé" },
+  contour: { label: 'Contour', desc: "Bordure d'accent, fond transparent" },
+  texte: { label: 'Texte accentué', desc: 'Icône et libellé colorés, rien de plus' },
+};
+
+/** Interrupteurs binaires de la navigation, générés dans l'écran Apparence. */
+export interface NavToggleDef {
+  key: 'showSectionLabels' | 'showBadges' | 'showPoweredBy';
+  label: string;
+  desc: string;
+}
+
+export const NAV_TOGGLES: readonly NavToggleDef[] = [
+  {
+    key: 'showSectionLabels',
+    label: 'Intitulés de section',
+    desc: 'Affiche « GÉNÉRAL », « GESTION »… au-dessus de chaque groupe.',
+  },
+  {
+    key: 'showBadges',
+    label: 'Compteurs',
+    desc: 'Pastilles chiffrées sur les rubriques (dossiers en cours, messages non lus…).',
+  },
+  {
+    key: 'showPoweredBy',
+    label: 'Mention « propulsé par Notantis »',
+    desc: "Au pied de la navigation. Sa suppression relève du contrat de marque grise, pas du goût.",
+  },
+] as const;
+
+export interface LayoutState {
+  navPlacement: NavPlacement;
+  navSize: NavSizeKey;
+  navDensity: NavDensityKey;
+  navActive: NavActiveKey;
+  showSectionLabels: boolean;
+  showBadges: boolean;
+  showPoweredBy: boolean;
+}
+
+/** Valeurs par défaut = comportement d'avant l'ajout de ce bloc, à l'identique. */
+export const LAYOUT_DEFAULTS: LayoutState = {
+  navPlacement: 'left',
+  navSize: 'large',
+  navDensity: 'confortable',
+  navActive: 'plein',
+  showSectionLabels: false,
+  showBadges: true,
+  showPoweredBy: true,
+};
+
+export const NAV_PLACEMENT_KEYS = Object.keys(NAV_PLACEMENT) as NavPlacement[];
+export const NAV_SIZE_KEYS = Object.keys(NAV_SIZE) as NavSizeKey[];
+export const NAV_DENSITY_KEYS = Object.keys(NAV_DENSITY) as NavDensityKey[];
+export const NAV_ACTIVE_KEYS = Object.keys(NAV_ACTIVE) as NavActiveKey[];
+
+/** Vrai si le placement demandé est une barre d'onglets horizontale. */
+export function isHorizontalNav(placement: NavPlacement): boolean {
+  return NAV_PLACEMENT[placement]?.horizontal ?? false;
+}

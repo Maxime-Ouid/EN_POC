@@ -11,9 +11,19 @@
 
 import { composeColor, hexToRgb, parseColor } from './color';
 import {
+  LAYOUT_DEFAULTS,
+  NAV_ACTIVE,
+  NAV_DENSITY,
+  NAV_PLACEMENT,
+  NAV_SIZE,
   SHAPE,
   TOKEN_SCHEMA,
   TYPOGRAPHY,
+  type LayoutState,
+  type NavActiveKey,
+  type NavDensityKey,
+  type NavPlacement,
+  type NavSizeKey,
   type ShapeKey,
   type ThemeMode,
   type TokenDef,
@@ -24,6 +34,8 @@ export interface ThemeState {
   colors: Record<ThemeMode, Record<string, string>>;
   typography: TypographyKey;
   shape: ShapeKey;
+  /** Disposition et style de la navigation (voir LayoutState dans schema.ts). */
+  layout: LayoutState;
 }
 
 /**
@@ -74,7 +86,7 @@ export function defaultThemeState(): ThemeState {
     colors.light[t.key] = t.light;
     colors.dark[t.key] = t.dark;
   }
-  return { colors, typography: 'classique', shape: 'equilibre' };
+  return { colors, typography: 'classique', shape: 'equilibre', layout: { ...LAYOUT_DEFAULTS } };
 }
 
 export const THEME_DEFAULTS = defaultThemeState();
@@ -104,12 +116,35 @@ function buildRuleBody(state: ThemeState, mode: ThemeMode): string {
 }
 
 /**
+ * Variables de disposition de la navigation.
+ *
+ * Émises UNIQUEMENT dans le bloc :root, pas dans les blocs sombres : une
+ * largeur de rail n'a aucune raison de changer avec le thème, et les répéter
+ * ferait croire le contraire au prochain lecteur. Les blocs sombres ne
+ * redéclarent que ce qu'ils changent ; le reste est hérité de :root.
+ */
+function buildLayoutBody(layout: LayoutState): string {
+  const size = NAV_SIZE[layout.navSize] ?? NAV_SIZE.large;
+  const density = NAV_DENSITY[layout.navDensity] ?? NAV_DENSITY.confortable;
+  return [
+    `  --nav-w: ${size.width};`,
+    `  --nav-h: ${size.barHeight};`,
+    `  --nav-item-pad-y: ${density.padY};`,
+    `  --nav-item-pad-x: ${density.padX};`,
+    `  --nav-item-gap: ${density.gap};`,
+    `  --nav-item-spacing: ${density.itemGap};`,
+    `  --nav-icon-size: ${density.iconSize};`,
+    `  --nav-font-size: ${density.fontSize};`,
+  ].join('\n');
+}
+
+/**
  * Feuille de style complète : :root (clair), variante sombre par
  * prefers-color-scheme (sauf si data-theme="light" force le clair), et
  * :root[data-theme="dark"] qui l'emporte dans les deux sens.
  */
 export function buildThemeCss(state: ThemeState): string {
-  const lightCss = buildRuleBody(state, 'light');
+  const lightCss = `${buildRuleBody(state, 'light')}\n${buildLayoutBody(state.layout)}`;
   const darkCss = buildRuleBody(state, 'dark');
   const darkIndented = darkCss
     .split('\n')
@@ -122,6 +157,20 @@ export function buildThemeCss(state: ThemeState): string {
   );
 }
 
+/**
+ * Pose sur <html> ce qui ne peut PAS passer par une variable CSS : le placement
+ * de la navigation, le mode réduit et la forme de l'indicateur d'actif. Une
+ * custom property ne déplace pas un élément fixe d'un bord à l'autre et ne
+ * transforme pas une pastille de fond en trait latéral — il faut un sélecteur.
+ */
+export function applyLayoutAttributes(layout: LayoutState): void {
+  if (typeof document === 'undefined') return;
+  const el = document.documentElement;
+  el.setAttribute('data-nav-placement', layout.navPlacement);
+  el.setAttribute('data-nav-size', layout.navSize);
+  el.setAttribute('data-nav-active', layout.navActive);
+}
+
 /** Écrit (ou crée) le <style id="tenant-theme-vars"> dans le <head>. */
 export function applyTheme(state: ThemeState): void {
   if (typeof document === 'undefined') return;
@@ -132,6 +181,7 @@ export function applyTheme(state: ThemeState): void {
     document.head.appendChild(tag);
   }
   tag.textContent = buildThemeCss(state);
+  applyLayoutAttributes(state.layout);
 }
 
 /** Complète/valide un état venant du stockage ou de l'API — jamais confiance brute. */
@@ -156,7 +206,34 @@ export function normalizeThemeState(raw: unknown): ThemeState {
   if (candidate.shape && candidate.shape in SHAPE) {
     state.shape = candidate.shape;
   }
+  state.layout = normalizeLayoutState(candidate.layout);
   return state;
+}
+
+/**
+ * Complète un bloc `layout` partiel ou absent.
+ *
+ * Absent est le cas NORMAL, pas une anomalie : tous les thèmes enregistrés
+ * avant l'ajout de ce bloc n'en ont pas. Ils doivent continuer à s'afficher
+ * exactement comme avant, d'où le retour aux valeurs par défaut clé par clé
+ * plutôt qu'un rejet de l'objet entier.
+ */
+export function normalizeLayoutState(raw: unknown): LayoutState {
+  const layout: LayoutState = { ...LAYOUT_DEFAULTS };
+  if (!raw || typeof raw !== 'object') return layout;
+  const c = raw as Partial<LayoutState>;
+
+  if (c.navPlacement && c.navPlacement in NAV_PLACEMENT) {
+    layout.navPlacement = c.navPlacement as NavPlacement;
+  }
+  if (c.navSize && c.navSize in NAV_SIZE) layout.navSize = c.navSize as NavSizeKey;
+  if (c.navDensity && c.navDensity in NAV_DENSITY) layout.navDensity = c.navDensity as NavDensityKey;
+  if (c.navActive && c.navActive in NAV_ACTIVE) layout.navActive = c.navActive as NavActiveKey;
+
+  for (const key of ['showSectionLabels', 'showBadges', 'showPoweredBy'] as const) {
+    if (typeof c[key] === 'boolean') layout[key] = c[key];
+  }
+  return layout;
 }
 
 /** Lit le cache local de CET office. Renvoie null si rien n'y est enregistré. */
@@ -206,6 +283,11 @@ export function withColor(
       [mode]: { ...state.colors[mode], [key]: composeColor(hex, alpha) },
     },
   };
+}
+
+/** Écrit un réglage de disposition (renvoie une COPIE — état React immuable). */
+export function withLayout(state: ThemeState, patch: Partial<LayoutState>): ThemeState {
+  return { ...state, layout: { ...state.layout, ...patch } };
 }
 
 /**

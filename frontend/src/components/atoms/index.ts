@@ -9,6 +9,7 @@ export * from './Icon';
 export * from './IconButton';
 export * from './IconSprite';
 export * from './Nav';
+export * from './NavSwatch';
 export * from './Pill';
 export * from './ProtoPill';
 export * from './RowIcon';

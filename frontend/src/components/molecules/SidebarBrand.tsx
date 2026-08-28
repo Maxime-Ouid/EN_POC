@@ -20,7 +20,9 @@ export function SidebarBrand({ logoUrl = notantisLogo, name, sub }: SidebarBrand
           </svg>
         )}
       </div>
-      <div>
+      {/* .brand-text est le crochet du mode « icônes seules » : seul le bloc
+          textuel est masqué, la marque reste visible. */}
+      <div className="brand-text">
         <div className="brand-name">{name}</div>
         <div className="brand-sub">{sub}</div>
       </div>

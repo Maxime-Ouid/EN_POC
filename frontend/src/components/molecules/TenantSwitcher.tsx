@@ -9,13 +9,13 @@ export interface TenantSwitcherProps {
 // place côté backend (voir switchOffice() dans App.tsx).
 export function TenantSwitcher({ name, role, onClick }: TenantSwitcherProps) {
   return (
-    <div className="tenant-switcher clickable" onClick={onClick}>
+    <div className="tenant-switcher clickable" onClick={onClick} title={`${name} — ${role}`}>
       <div className="tsicon">
         <svg className="icon">
           <use href="#i-building" />
         </svg>
       </div>
-      <div>
+      <div className="tenant-text">
         <div className="tenant-name">{name}</div>
         <div className="tenant-role">{role}</div>
       </div>

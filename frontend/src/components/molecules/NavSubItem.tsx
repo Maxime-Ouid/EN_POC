@@ -14,9 +14,14 @@ export interface NavSubItemProps {
 // à marquer la subordination.
 export function NavSubItem({ active, count, onClick, children }: NavSubItemProps) {
   return (
-    <div className={active ? 'nav-subitem active' : 'nav-subitem'} onClick={onClick}>
+    <button
+      type="button"
+      className={active ? 'nav-subitem active' : 'nav-subitem'}
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+    >
       {children}
       {typeof count === 'number' && <Badge>{count}</Badge>}
-    </div>
+    </button>
   );
 }

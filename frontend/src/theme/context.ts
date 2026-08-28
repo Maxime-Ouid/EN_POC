@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 import type { ThemeState } from './engine';
-import type { ShapeKey, ThemeMode, TypographyKey } from './schema';
+import type { LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
 
 export interface TenantThemeContextValue {
   /** État courant du thème (couleurs par mode + presets typo/formes). */
@@ -14,6 +14,13 @@ export interface TenantThemeContextValue {
   commit: () => void;
   setTypography: (key: TypographyKey) => void;
   setShape: (key: ShapeKey) => void;
+  /**
+   * Modifie un ou plusieurs réglages de navigation et enregistre.
+   * Un patch partiel, pas un état complet : l'écran Apparence ne touche jamais
+   * qu'un réglage à la fois, et les autres ne doivent pas être réécrits par
+   * inadvertance avec les valeurs qu'ils avaient au rendu précédent.
+   */
+  setLayout: (patch: Partial<LayoutState>) => void;
   /** Revient aux valeurs Notantis d'origine et efface le thème enregistré. */
   reset: () => void;
   /** Vrai pendant ~1,6 s après un enregistrement — pilote le badge « Enregistré ». */

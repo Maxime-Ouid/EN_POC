@@ -1,4 +1,18 @@
-import { SHAPE, SHAPE_KEYS, TYPOGRAPHY, TYPOGRAPHY_KEYS } from '../../theme/schema';
+import {
+  NAV_ACTIVE,
+  NAV_ACTIVE_KEYS,
+  NAV_DENSITY,
+  NAV_DENSITY_KEYS,
+  NAV_PLACEMENT,
+  NAV_PLACEMENT_KEYS,
+  NAV_SIZE,
+  NAV_SIZE_KEYS,
+  NAV_TOGGLES,
+  SHAPE,
+  SHAPE_KEYS,
+  TYPOGRAPHY,
+  TYPOGRAPHY_KEYS,
+} from '../../theme/schema';
 import { useTenantTheme } from '../../theme/useTenantTheme';
 import { Avatar } from '../atoms/Avatar';
 import { BarTrack } from '../atoms/BarTrack';
@@ -6,9 +20,11 @@ import { Button } from '../atoms/Button';
 import { Card } from '../atoms/Card';
 import { Grid } from '../atoms/Grid';
 import { Icon } from '../atoms/Icon';
+import { NavSwatch } from '../atoms/NavSwatch';
 import { Pill } from '../atoms/Pill';
 import { ShapeSwatch } from '../atoms/ShapeSwatch';
 import { Tag } from '../atoms/Tag';
+import { Toggle } from '../atoms/Toggle';
 import { TypographySample } from '../atoms/TypographySample';
 import { PresetCard } from '../molecules/PresetCard';
 import { PresetRow } from '../molecules/PresetRow';
@@ -27,8 +43,18 @@ const EDIT_MODES: Array<{ key: ThemeMode; label: string }> = [
 // thème prévisualisé (data-theme sur <html>), pour que l'aperçu corresponde
 // toujours exactement à ce qu'on modifie.
 export function AppearanceTab() {
-  const { state, editMode, setEditMode, setTypography, setShape, reset, justSaved, saveError } =
-    useTenantTheme();
+  const {
+    state,
+    editMode,
+    setEditMode,
+    setTypography,
+    setShape,
+    setLayout,
+    reset,
+    justSaved,
+    saveError,
+  } = useTenantTheme();
+  const layout = state.layout;
 
   return (
     <Grid columns={2} style={{ alignItems: 'start' }}>
@@ -111,6 +137,113 @@ export function AppearanceTab() {
               );
             })}
           </PresetRow>
+        </div>
+
+        {/* --- Navigation ------------------------------------------------
+            Tout ce bloc est généré depuis les tables de theme/schema.ts :
+            ajouter un placement ou un style d'indicateur ne demande pas de
+            toucher à cet écran. Aucun aperçu séparé n'est proposé — le clic
+            réagence l'application entière, c'est le seul aperçu exact. */}
+        <div className="appearance-block">
+          <div className="appearance-block-title">Navigation</div>
+          <div className="appearance-block-desc">
+            Emplacement et style du menu principal. Le changement s'applique immédiatement à toute
+            l'application : c'est la navigation autour de cet écran qui se déplace.
+          </div>
+
+          <PresetRow label="Emplacement de la navigation">
+            {NAV_PLACEMENT_KEYS.map(key => (
+              <PresetCard
+                key={key}
+                active={layout.navPlacement === key}
+                onSelect={() => setLayout({ navPlacement: key })}
+                preview={<NavSwatch placement={key} indicator={layout.navActive} />}
+                name={NAV_PLACEMENT[key].label}
+                desc={NAV_PLACEMENT[key].desc}
+              />
+            ))}
+          </PresetRow>
+        </div>
+
+        <div className="appearance-block">
+          <div className="appearance-block-title">Largeur et libellés</div>
+          <div className="appearance-block-desc">
+            En « icônes seules », le rail se réduit à une colonne de pastilles et chaque libellé
+            apparaît au survol, à côté de son icône ; il reste lu par les lecteurs d'écran. Les
+            sous-menus et les intitulés de section, eux, disparaissent — ils n'ont plus de place où
+            s'afficher.
+          </div>
+          <PresetRow label="Largeur de la navigation">
+            {NAV_SIZE_KEYS.map(key => (
+              <PresetCard
+                key={key}
+                active={layout.navSize === key}
+                onSelect={() => setLayout({ navSize: key })}
+                preview={
+                  <NavSwatch
+                    placement={layout.navPlacement}
+                    thin={key === 'rail'}
+                    indicator={layout.navActive}
+                  />
+                }
+                name={NAV_SIZE[key].label}
+                desc={NAV_SIZE[key].desc}
+              />
+            ))}
+          </PresetRow>
+        </div>
+
+        <div className="appearance-block">
+          <div className="appearance-block-title">Densité des entrées</div>
+          <div className="appearance-block-desc">
+            Hauteur, espacement et taille d'icône. « Aéré » donne des cibles plus grandes, utile sur
+            écran tactile ; « Dense » fait tenir plus de rubriques sans défilement.
+          </div>
+          <PresetRow label="Densité de la navigation">
+            {NAV_DENSITY_KEYS.map(key => (
+              <PresetCard
+                key={key}
+                active={layout.navDensity === key}
+                onSelect={() => setLayout({ navDensity: key })}
+                preview={<NavSwatch placement={layout.navPlacement} density={key} />}
+                name={NAV_DENSITY[key].label}
+                desc={NAV_DENSITY[key].desc}
+              />
+            ))}
+          </PresetRow>
+        </div>
+
+        <div className="appearance-block">
+          <div className="appearance-block-title">Rubrique active</div>
+          <div className="appearance-block-desc">
+            Comment l'application signale l'écran où l'on se trouve.
+          </div>
+          <PresetRow label="Indicateur de rubrique active">
+            {NAV_ACTIVE_KEYS.map(key => (
+              <PresetCard
+                key={key}
+                active={layout.navActive === key}
+                onSelect={() => setLayout({ navActive: key })}
+                preview={<NavSwatch placement={layout.navPlacement} indicator={key} />}
+                name={NAV_ACTIVE[key].label}
+                desc={NAV_ACTIVE[key].desc}
+              />
+            ))}
+          </PresetRow>
+        </div>
+
+        <div className="appearance-block">
+          <div className="appearance-block-title">Éléments affichés</div>
+          <div className="appearance-block-desc">Ce que la navigation montre en plus des rubriques.</div>
+          {NAV_TOGGLES.map(t => (
+            <div className="nav-toggle-row" key={t.key}>
+              <div className="nav-toggle-text">
+                <div className="nav-toggle-label">{t.label}</div>
+                <div className="nav-toggle-desc">{t.desc}</div>
+              </div>
+              <Toggle checked={layout[t.key]} onChange={next => setLayout({ [t.key]: next })} />
+            </div>
+          ))}
         </div>
 
         <div className="appearance-block">

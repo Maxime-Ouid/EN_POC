@@ -1,11 +1,9 @@
 import { Screen } from '../../atoms/Screen';
 import { SubscreenPanel } from '../../atoms/SubscreenPanel';
 import { PageHeader } from '../../molecules/PageHeader';
-import { TabStrip } from '../../molecules/TabStrip';
 import { AppearanceTab } from '../../organisms/AppearanceTab';
 import { ModulesTab } from '../../organisms/ModulesTab';
 import { OfficeContentTab } from '../../organisms/OfficeContentTab';
-import type { TabDef } from '../../molecules/TabStrip';
 import type { ModulesTabProps } from '../../organisms/ModulesTab';
 import type { OfficeContent } from '../../organisms/OfficeContentTab';
 
@@ -18,8 +16,8 @@ export type V1PersonnalisationTab =
   | 'modules';
 
 export interface V1PersonnalisationScreenProps {
+  /** Section affichée. Choisie dans le sous-menu « Personnalisation » de la navigation. */
   activeTab: V1PersonnalisationTab;
-  onTabChange: (tab: V1PersonnalisationTab) => void;
   content: OfficeContent;
   onContentChange: (next: OfficeContent) => void;
   onSaveContent?: () => void;
@@ -28,14 +26,35 @@ export interface V1PersonnalisationScreenProps {
   modules: ModulesTabProps;
 }
 
-const TABS: TabDef[] = [
-  { key: 'coordonnees', icon: 'building', label: "Coordonnées et logo" },
-  { key: 'emails', icon: 'send', label: 'En-tête des emails' },
-  { key: 'apparence', icon: 'layers', label: 'Apparence' },
-  { key: 'accueil', icon: 'home', label: 'Accueil & mentions' },
-  { key: 'espace-client', icon: 'users', label: 'Espace client' },
-  { key: 'modules', icon: 'grid', label: 'Modules & modèles' },
-];
+/* Titre et sous-titre par section.
+   Ils remplacent la barre d'onglets retirée le 28/08/2026 : sans elle, le
+   titre de page est le seul repère qui dit dans quelle section on se trouve. */
+const SECTIONS: Record<V1PersonnalisationTab, { title: string; sub: string }> = {
+  coordonnees: {
+    title: "Coordonnées et logo de l'office",
+    sub: "Ce que voient vos clients en en-tête de l'Espace Notarial et dans vos documents.",
+  },
+  emails: {
+    title: 'En-tête des emails',
+    sub: "Bandeau et signature des messages envoyés au nom de l'étude.",
+  },
+  apparence: {
+    title: 'Apparence',
+    sub: "Couleurs, typographie, formes et navigation — appliqués à tout l'Espace Notarial.",
+  },
+  accueil: {
+    title: 'Accueil & mentions',
+    sub: "Texte d'accueil et mentions légales affichés à la connexion.",
+  },
+  'espace-client': {
+    title: 'Espace client',
+    sub: 'Ce que vos clients voient et peuvent faire depuis leur espace.',
+  },
+  modules: {
+    title: 'Modules & modèles',
+    sub: 'Fonctionnalités activées pour votre étude et modèles de dataroom.',
+  },
+};
 
 /* Personnalisation — la rubrique de l'interface actuelle, élargie.
 
@@ -47,31 +66,26 @@ const TABS: TabDef[] = [
    sait déjà faire (Apparence, branchée sur le moteur de thème et l'API
    /api/tenant-theme/) et ce qu'elle doit savoir faire (accueil, mentions
    légales, espace client). Ce qui n'a pas d'endpoint le dit à l'écran plutôt
-   que de simuler un enregistrement. */
+   que de simuler un enregistrement.
+
+   Les six sections étaient AUSSI une barre d'onglets en haut de l'écran, alors
+   qu'elles figurent déjà dans le sous-menu « Personnalisation » de la
+   navigation : les mêmes six choix, deux fois, à deux endroits, avec deux
+   états à garder d'accord. La barre a été retirée le 28/08/2026 ; la navigation
+   reste seule maîtresse de la section affichée. */
 export function V1PersonnalisationScreen({
   activeTab,
-  onTabChange,
   content,
   onContentChange,
   onSaveContent,
   contentNote,
   modules,
 }: V1PersonnalisationScreenProps) {
+  const section = SECTIONS[activeTab] ?? SECTIONS.coordonnees;
+
   return (
     <Screen>
-      <PageHeader
-        eyebrow="Office"
-        title="Personnalisation"
-        sub="Adaptez l'Espace Notarial à l'identité de votre étude — coordonnées, emails, couleurs, textes affichés à vos clients."
-      />
-
-      <div style={{ marginTop: 20 }}>
-        <TabStrip
-          tabs={TABS}
-          active={activeTab}
-          onChange={k => onTabChange(k as V1PersonnalisationTab)}
-        />
-      </div>
+      <PageHeader eyebrow="Personnalisation" title={section.title} sub={section.sub} />
 
       <SubscreenPanel level={3} active={activeTab === 'coordonnees'}>
         <OfficeContentTab

@@ -174,10 +174,6 @@ export function EspaceNotarialV1(props: EspaceNotarialV1Props) {
       {screen.startsWith('perso-') && (
         <V1PersonnalisationScreen
           activeTab={persoTab}
-          onTabChange={tab => {
-            const entry = Object.entries(PERSO_TABS).find(([, value]) => value === tab);
-            if (entry) setScreen(entry[0] as V1ScreenKey);
-          }}
           content={props.content}
           onContentChange={props.onContentChange}
           onSaveContent={props.onSaveContent}
