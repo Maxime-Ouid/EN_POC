@@ -145,17 +145,30 @@ L'essentiel en trois points :
 
 - **Aucune couleur en dur.** Tout passe par `var(--…)` — sinon la personnalisation
   par office ne l'atteint pas. `npm run check:ds` le vérifie.
-- **Composer, pas recréer.** 72 composants existent dans
+- **Composer, pas recréer.** 92 fichiers de composants existent dans
   `frontend/src/components/{atoms,molecules,organisms,templates,pages}` ; le
   catalogue interactif est sur `?view=ui-kit`.
 - **Le thème de l'office fait foi côté serveur** (`Office.theme`,
   `GET`/`PUT /api/tenant-theme/`, écriture réservée aux rôles admin/superadmin).
   `localStorage` n'est qu'un cache anti-flash, sous une clé suffixée par
   sous-domaine.
+- **La personnalisation ne porte plus seulement sur les couleurs** : depuis le
+  28/08/2026, le thème embarque aussi un bloc `layout` (emplacement de la
+  navigation, taille, densité, style de l'entrée active, trois interrupteurs).
+  Contrairement aux couleurs — dictionnaire ouvert côté Django — ce bloc est
+  borné par des **énumérations fermées** (`validators.py::THEME_NAV_ENUMS`) :
+  ajouter une option de navigation demande de toucher au backend, ajouter une
+  couleur non.
 
-La doc de référence (typographie, ombres, grilles) est dans
-`docs/design-system/DESIGN_SYSTEM.md`, avec les mêmes tokens en JSON et en Python
-pour le code qui en a besoin hors navigateur (PDF, emails).
+`main.tsx` monte quatre vues selon `?view=` : l'app V2 branchée sur Django (par
+défaut), `ui-kit`, `prototype-preview`, `v1` (Espace Notarial actuel reconstruit,
+sur données de démo) et `v1-app` (même navigation, branchée sur Django). Seules
+la vue par défaut et `v1-app` ont un backend.
+
+La doc de référence (typographie, ombres, grilles, §9 personnalisation, §9.6
+navigation) est dans `docs/design-system/DESIGN_SYSTEM.md`, avec les mêmes tokens
+de couleur en JSON et en Python pour le code qui en a besoin hors navigateur
+(PDF, emails) — le bloc `layout`, lui, n'a pas de miroir Python.
 
 > Ces éléments **remplacent** deux constats plus bas dans « État réel du code »,
 > écrits avant la reprise du front : `App.tsx` n'est plus un composant unique, et
@@ -393,14 +406,16 @@ session si le code a bougé.
   confirmée par inspection directe des 3 fichiers `.sqlite3` (comme pour `Dataroom` :
   `TestCase` ne gère pas bien les alias de DB enregistrés paresseusement — limite déjà
   documentée) et du dossier `media/`.
-- ⚠️ **Limite connue — fichiers servis sans contrôle d'accès** : `/media/<subdomain>/...`
-  est servi par `django.views.static.serve` (dev only) sans revérifier l'appartenance à
-  l'office une fois l'URL connue, contrairement aux endpoints API qui vérifient bien
-  `IsAuthenticated` + membership. Le chemin par subdomain évite une fuite *accidentelle*
-  entre tenants au niveau stockage mais n'est pas un contrôle d'accès. Cohérent avec le
-  niveau de simplification déjà accepté ailleurs (`DEBUG=True`, pas de HTTPS, pas de vrai
-  stockage S3 — déjà hors périmètre) ; à durcir (vue de téléchargement authentifiée) si
-  ce chantier va au-delà du POC.
+- ⚠️ **Limite connue — fichiers servis sans contrôle d'accès** (constat d'origine :
+  `/media/<subdomain>/...` servi par `django.views.static.serve` sans revérifier
+  l'appartenance à l'office). **Partiellement traité depuis** : le service local de
+  `/media/` a été supprimé avec le passage à MinIO, et `document.file.url` renvoie
+  maintenant une URL **présignée** qui expire, au lieu d'un chemin statique permanent.
+  Le fond du sujet reste le même : qui détient l'URL pendant sa validité télécharge le
+  fichier, sans revérification d'appartenance — contrairement aux endpoints API qui
+  vérifient `IsAuthenticated` + membership. Cohérent avec le niveau de simplification
+  accepté ailleurs (`DEBUG=True`, MinIO local sans durcissement) ; à durcir (vue de
+  téléchargement authentifiée) si ce chantier va au-delà du POC.
 - **Note pour tout futur modèle métier tenant** : suivre exactement le patron de
   `Dataroom`/`Document` — l'ajouter à `models.py`, **ne pas** l'ajouter à
   `SHARED_MODELS` dans `tenancy/router.py` (l'absence est ce qui le fait router vers le
@@ -446,16 +461,21 @@ session si le code a bougé.
   `0002_dataroom.py` (26/08/2026) — cette dernière ne s'applique réellement que sur les
   bases tenant (`default` n'a pas la table, par conception du routeur). `seed_demo`
   testé avec succès (alice, bob, carla).
-- **Frontend (`frontend/src/App.tsx`)** : composant unique, pas de routing, pas de
-  librairie de state. Origine API dérivée de `window.location.hostname` (plus de valeur
-  en dur), tous les `fetch` en `credentials: 'include'`. Plus de `localStorage` — l'état
-  d'auth est déduit d'un appel `my-offices` au chargement. Le sélecteur d'office (ancien
-  `<select>`) est remplacé par des boutons qui déclenchent l'échange de ticket SSO
-  décrit ci-dessus.
-- **Tests** : `backend/datarooms/tests.py` couvre la plomberie multi-tenant (15 tests :
-  ContextVar, normalisation d'alias, matrice `allow_migrate` (dont la classification
-  partagé/tenant de `office_enabled_modules`, `Dataroom` et `Document`), middleware par
-  `Host`, aller-retour/usage-unique des tickets SSO, validateur d'extension de fichier).
+- **Frontend (`frontend/src/App.tsx`)** — *obsolète depuis la reprise du front,
+  conservé pour l'historique* : `App.tsx` était un composant unique portant tous les
+  écrans. Il ne l'est plus (voir « Front — design system » plus haut et la reprise du
+  27-28/08/2026 ci-dessous). Ce qui reste vrai : pas de routeur ni de librairie de
+  state, origine API dérivée de `window.location.hostname` (`api/client.ts`), tous les
+  `fetch` en `credentials: 'include'`, état d'auth déduit d'un appel `my-offices` au
+  chargement, et bascule d'office par échange de ticket SSO plutôt qu'un `<select>`.
+- **Tests** : `backend/datarooms/tests.py` — **41 tests** au 28/08/2026. La plomberie
+  multi-tenant (ContextVar, normalisation d'alias, matrice `allow_migrate` (dont la
+  classification partagé/tenant de `office_enabled_modules`, `Dataroom` et `Document`),
+  middleware par `Host`, aller-retour/usage-unique des tickets SSO, validateur
+  d'extension de fichier), puis l'API de personnalisation (`clean_theme_payload`, dont
+  9 tests sur le bloc `layout` : énumérations refusées, booléens, thème sans bloc
+  `layout` accepté tel quel) et l'accès aux modules par office (module actif servi,
+  refusé sur un office qui ne l'a pas, slug inconnu en 404).
   Pièges rencontrés et documentés en
   commentaire dans les tests concernés : `ensure_tenant_registered` mute le dict global
   `connections.databases`, ce qui casse le nettoyage interne de `SimpleTestCase` si
@@ -473,9 +493,44 @@ session si le code a bougé.
   Commandes pour le détail (régénération suite à un fichier corrompu commité par
   erreur, et le guide d'installation pas-à-pas pour un nouveau développeur).
 - **Frontend stack** : Vite 8 + React 19 + TypeScript, lint via `oxlint` (pas
-  ESLint) configuré dans `frontend/.oxlintrc.json`, pas de framework CSS (juste
-  `App.css`/`index.css` par défaut de `npm create vite`, non utilisés par `App.tsx`
-  au-delà du `#root` global).
+  ESLint) configuré dans `frontend/.oxlintrc.json`, **aucune dépendance de style**
+  (`package.json` ne contient que React) — le style vient de
+  `src/styles/tokens.css` + `src/styles/components.css`. `src/index.css` (template
+  Vite) a été supprimé : il bridait `#root` à 1126px et écrasait des tokens.
+- **✅ Fait les 27 et 28/08/2026 — reprise complète du front** (branche
+  `front/design-system-components`, 4 commits) :
+  - **Bibliothèque de composants** : le prototype `index_16.html` est reconstruit en
+    92 fichiers de composants (atoms / molecules / organisms / templates / pages),
+    purement présentationnels. Catalogue navigable sur `?view=ui-kit`, inventaire
+    généré dans `.claude/skills/design-system/references/composants.md`.
+  - **Garde-fou** : `npm run check:ds` (`frontend/scripts/check-design-system.mjs`)
+    refuse toute couleur en dur, classe CSS inexistante ou classe de composant
+    recopiée. Compare à une référence (`design-system-baseline.json`) : 56 écarts
+    hérités du prototype sont acceptés, tout écart nouveau fait échouer.
+  - **Personnalisation par office persistée** : `Office.theme` (JSONField),
+    `GET`/`PUT /api/tenant-theme/` (`204` si jamais personnalisé), écriture réservée
+    aux rôles admin/superadmin, validation `clean_theme_payload`. 55 tokens de
+    couleur éditables clair/sombre + 3 préréglages de typographie + 3 de formes.
+  - **Modules activables visibles à l'écran** : la section « Modules » du menu est
+    construite depuis `tenant-config.enabled_modules`, et `ModuleScreen` distingue
+    quatre états (actif, non activé pour cet office → 403, actif mais écran pas
+    encore livré → 404, injoignable). L'onglet Modules est en lecture seule, la
+    raison écrite à l'écran : aucun endpoint d'activation n'existe. C'est l'étape 3
+    du scénario de démo, jusque-là démontrable en base mais invisible.
+  - **Espace Notarial actuel (V1) reconstruit** : 12 écrans (`components/pages/v1/`)
+    et une navigation à sous-menus, sur `?view=v1` (données de démo) et `?view=v1-app`
+    (branché sur Django). Ce que fait chaque écran est décrit dans
+    `docs/espace-notarial-v1.md`.
+  - **Navigation personnalisable** (28/08/2026) : emplacement (gauche/droite/haut/bas),
+    taille (dont un mode « icônes seules » à 62 px avec infobulle), densité, style de
+    l'entrée active, trois interrupteurs. Les valeurs sortent en `--nav-*`, la
+    structure en `data-nav-*` sur `<html>` ; les 4 énumérations et 3 booléens sont
+    bornés côté Django (`validators.py::THEME_NAV_ENUMS`) parce qu'une valeur inconnue
+    donnerait une navigation qui disparaît sans erreur. Un thème enregistré avant ce
+    commit n'a pas de bloc `layout` — c'est le cas normal, il retombe sur
+    `LAYOUT_DEFAULTS`, qui reproduit la navigation d'avant à l'identique.
+  - **Non vérifié à ce jour, à reprendre** : le rendu visuel des dispositions haut/bas
+    et du panneau volant des sous-menus (jugés en SSR et par lecture, pas à la souris).
 - **✅ Fait le 26/08/2026 — nav minimale + écrans Datarooms** : `App.tsx` a maintenant
   un état de vue local (`type View = {kind:'home'|'datarooms'|'dataroom'|'module', ...}`,
   `useState`) plutôt qu'un routeur. Nouveaux composants inline (même fichier, même
@@ -498,14 +553,20 @@ session si le code a bougé.
 - [x] Modèles `Module`, `Office`, `OfficeMembership` (base `default`, partagés) +
       `Dataroom`/`Document` (base tenant, isolation physique vérifiée le 26/08/2026)
 - [x] Admin Django avec toggle de modules par office (`filter_horizontal`)
-- [x] Auth par session Django (`login`, `my-offices`, `tenant-config`, `modules/coffre-fort`
-      — tous protégés par `IsAuthenticated` + vérification d'appartenance à l'office)
+- [x] Auth par session Django. Endpoints (`datarooms/urls.py`) : `ping`, `login`,
+      `whoami`, `my-offices`, `tenant-config`, `tenant-theme`, `modules/coffre-fort`,
+      `sso/issue`, `sso/consume`, `datarooms/`, `datarooms/<id>/documents/` — tous
+      protégés par `IsAuthenticated` + vérification d'appartenance à l'office, sauf
+      `ping` et `login`
 - [x] Frontend : formulaire de connexion, sélecteur d'office filtré par accès réel,
-      affichage conditionnel de module, couleur appliquée dynamiquement via variable CSS.
-      Nav minimale ajoutée le 26/08/2026 (Accueil/Datarooms/boutons de module, nom
-      d'utilisateur affiché via nouvel endpoint `GET /api/whoami/`) — état de vue local
-      (`useState`), pas de React Router. Toujours pas de styling poussé (volontaire,
-      attend les maquettes).
+      affichage conditionnel de module, nom d'utilisateur via `GET /api/whoami/` —
+      état de vue local (`useState`), pas de React Router.
+- [x] **Design system et écrans composés** — fait les 27-28/08/2026 : le prototype
+      reconstruit en composants React, garde-fou `npm run check:ds`, catalogue
+      `?view=ui-kit`. Le « pas de styling poussé » d'avant n'est plus d'actualité.
+- [x] **Modules activables visibles à l'écran** (menu construit depuis
+      `tenant-config.enabled_modules`, `ModuleScreen` à quatre états) — fait le
+      27/08/2026 : le pari n°1 a enfin une traduction visuelle.
 - [x] Migrations + seed de démo (base `default`) — fait le 26/08/2026
 - [x] **Migration vers une base SQLite par office** (routeur de base de données) — fait le
       26/08/2026 (`datarooms/tenancy/`) ; isolation physique prouvée avec de vraies
@@ -513,7 +574,11 @@ session si le code a bougé.
 - [x] **Vrai routage par sous-domaine** (`*.localhost`) avec identité partagée sans
       reconnexion — fait le 26/08/2026, via échange de ticket signé plutôt qu'un cookie
       de domaine partagé (rejeté par les navigateurs — voir "État réel du code")
-- [ ] Logo dynamique par office (la couleur est câblée, pas encore le logo)
+- [x] **Personnalisation par office persistée** (pari n°3) — fait le 27/08/2026 pour
+      les couleurs / typographie / formes, étendu le 28/08/2026 à la disposition et au
+      style de la navigation. Écran **Personnalisation → Apparence**, généré depuis
+      `theme/schema.ts` ; source de vérité côté serveur (`Office.theme`).
+- [ ] Logo dynamique par office (les couleurs sont câblées, pas encore le logo)
 - [x] Arborescence de dataroom minimale (créer / uploader / naviguer) — API backend
       faite le 26/08/2026, **UI faite le 26/08/2026** : écran « Datarooms » (liste +
       création par nom), écran détail (liste des documents + dépôt par glisser-déposer
@@ -524,8 +589,15 @@ session si le code a bougé.
       la nav sans redémarrage. Pas de hiérarchie de dossiers (une dataroom reste un
       conteneur plat de documents) — pas demandé, cohérent avec « un seul type de
       dataroom ».
-- [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
-      commencé, en attente de maquettes complémentaires
+- [x] Alignement visuel — fait autrement que prévu : plutôt que d'habiller le POC
+      « à la manière » des captures, l'Espace Notarial **actuel** a été reconstruit
+      dans le design system (12 écrans, `?view=v1`), ce qui donne un point de
+      comparaison direct V1 → V2. Les captures de `docs/reference-v1/` restent la
+      référence de style ; `docs/espace-notarial-v1.md` décrit écran par écran ce que
+      fait l'application actuelle.
+- [ ] **Rendu visuel des dispositions haut/bas de la navigation** — écrit et rendu en
+      SSR, jamais jugé à la souris (barre du bas, panneau volant des sous-menus et son
+      pont anti-fermeture). À reprendre côté relecteur.
 
 ## Backlog « si le temps le permet » (hors engagement ferme du POC)
 

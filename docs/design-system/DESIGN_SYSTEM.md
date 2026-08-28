@@ -468,7 +468,7 @@ En l'absence de dérivation, rien n'empêche techniquement une étude de choisir
 
 ---
 
-### 9.5 Disposition et style de la navigation (28/08/2026)
+### 9.6 Disposition et style de la navigation (28/08/2026)
 
 La personnalisation ne portait que sur les **couleurs**, la typographie et les rayons : la
 navigation restait un rail vertical de 236 px à gauche, pour toutes les études. Ce
