@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from .mfa import qr_code_data_uri
 from .models import AccessRestriction, Dataroom, Document, Folder, Office, OfficeMembership
 from .tenancy.sso import consume_ticket, issue_ticket
-from .validators import is_accepted_extension
+from .validators import ThemeValidationError, clean_theme_payload, is_accepted_extension
 
 User = get_user_model()
 
@@ -114,6 +114,44 @@ def tenant_config(request):
         "primary_color": office.primary_color,
         "enabled_modules": list(office.enabled_modules.values_list('slug', flat=True)),
     })
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def tenant_theme(request):
+    """Personnalisation visuelle de l'office courant (Office.theme).
+
+    GET  → 200 avec le thème enregistré, 204 si l'office n'a jamais personnalisé
+           (le front applique alors les valeurs Notantis par défaut).
+    PUT  → 200 avec le thème normalisé tel qu'il vient d'être stocké.
+
+    La lecture est ouverte à tout membre de l'office : le thème conditionne
+    l'affichage de chacun. L'écriture est réservée aux rôles admin et superadmin
+    — un membre ou un client ne repeint pas l'espace de toute l'étude.
+    """
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    membership = request.user.memberships.filter(office=office).first()
+    if membership is None:
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    if request.method == 'PUT':
+        if membership.role not in ('superadmin', 'admin'):
+            return Response(
+                {"error": "seul un administrateur de l'office peut modifier l'apparence"},
+                status=403,
+            )
+        try:
+            theme = clean_theme_payload(request.data)
+        except ThemeValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
+        office.theme = theme
+        office.save(update_fields=['theme'])
+        return Response(theme)
+
+    if not office.theme:
+        return Response(status=204)
+    return Response(office.theme)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

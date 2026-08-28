@@ -837,6 +837,34 @@ session si le code a bougé.
   visible dans `Signes`) ; upload de bob dans `Signes` (dossier visible uniquement
   par transit) → toujours `404`, confirmant que l'écriture reste bien gatée par
   l'accès direct seul.
+- **✅ Fait le 28/08/2026 — fusion backend-only de `Office.theme` depuis
+  `front/design-system-components`** : reprise de la partie backend de la
+  personnalisation visuelle par office développée par le collègue sur sa branche
+  design system, **sans toucher à `frontend/`** (voir `FUSION_BACKEND_THEME.md` à la
+  racine — document de passation détaillant ce qui a été repris/renuméroté et ce que
+  le collègue doit faire à la prochaine fusion de sa branche). `Office.theme`
+  (`JSONField(null=True, blank=True)`) — champ sur un modèle déjà partagé
+  (`SHARED_MODELS`), aucune modification du routeur nécessaire, confirmé par
+  inspection directe : la colonne `theme` existe sur `datarooms_office` dans
+  `db.sqlite3` (`default`), et aucune base tenant n'a de table `datarooms_office` du
+  tout (modèle jamais routé vers le tenant, comme attendu). `GET`/`PUT
+  /api/tenant-theme/` (`views.py::tenant_theme`) : lecture ouverte à tout membre de
+  l'office, écriture réservée `admin`/`superadmin`, `204` si l'office n'a jamais
+  personnalisé (distingue « pas de thème » de « thème vide » pour le front).
+  Validation dans `validators.py::clean_theme_payload` — couleurs par mode clair/
+  sombre (dictionnaire **ouvert** côté Django, le catalogue de tokens vit côté front
+  et une nouvelle couleur ne doit pas imposer de migration) et bloc `layout`
+  optionnel (disposition de la navigation — énumérations **fermées**,
+  `THEME_NAV_ENUMS`/`THEME_NAV_FLAGS`, une valeur inconnue produirait un attribut
+  `data-nav-*` sans sélecteur correspondant, donc une navigation qui disparaît sans
+  erreur). **Seul point de friction rencontré** : la migration `0004_office_theme.py`
+  du collègue (dépendant de `0003_document`, son point de divergence) entrait en
+  collision avec `0004_folder_document_folder.py`/`0005_accessrestriction.py` déjà
+  présentes ici — régénérée par Django (`makemigrations`) sous le nom
+  `0006_office_theme.py`, dépendant de `0005_accessrestriction`, contenu de
+  l'`AddField` identique. `makemigrations --check --dry-run` confirme « No changes
+  detected » après coup. 22 tests reprise tels quels (`ThemeValidatorTests`,
+  `TenantThemeApiTests`) — suite complète repassée : 64 tests, tous verts.
 
 ## État actuel du POC
 
@@ -909,6 +937,10 @@ session si le code a bougé.
       utilisateur (`UsersPage`) — voir "État réel du code" pour le détail.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
+- [x] Personnalisation visuelle par office (`Office.theme`) — **backend seulement**,
+      fait le 28/08/2026 par fusion ciblée depuis `front/design-system-components` (le
+      design system et son application côté écran restent sur cette branche, pas
+      encore fusionnés — voir "État réel du code" et `FUSION_BACKEND_THEME.md`).
 
 ## Backlog « si le temps le permet » (hors engagement ferme du POC)
 

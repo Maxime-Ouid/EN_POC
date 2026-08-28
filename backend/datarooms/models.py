@@ -18,6 +18,20 @@ class Office(models.Model):
     logo_url = models.URLField(blank=True)
     primary_color = models.CharField(max_length=7, default="#1a56db")
     enabled_modules = models.ManyToManyField(Module, blank=True, related_name="offices")
+    theme = models.JSONField(null=True, blank=True)
+    # Personnalisation visuelle de l'office : couleurs par thème clair/sombre,
+    # preset typographique, preset de formes. Forme attendue :
+    #   {"colors": {"light": {"bg": "#fafafd", ...}, "dark": {...}},
+    #    "typography": "classique", "shape": "equilibre"}
+    #
+    # Le schéma des tokens vit côté front (frontend/src/theme/schema.ts) et n'est
+    # volontairement PAS dupliqué ici : une couleur ajoutée au design system ne
+    # doit pas imposer une migration. Le backend stocke et borne (voir
+    # validators.clean_theme_payload), le front valide le contenu à la lecture
+    # (normalizeThemeState) et complète ce qui manque par ses valeurs par défaut.
+    #
+    # null = cet office n'a jamais rien personnalisé — l'API répond alors 204 et
+    # le front applique les valeurs Notantis d'origine.
 
     def __str__(self):
         return self.name
