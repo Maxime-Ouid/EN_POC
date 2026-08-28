@@ -47,8 +47,14 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_extensions',
     'storages',
+    'django_otp',
+    'django_otp.plugins.otp_totp',
     'datarooms',
 ]
+
+# MFA (TOTP) — voir CLAUDE.md, section Architecture. Nom affiché dans l'appli
+# d'authentification lors de l'enrôlement.
+OTP_TOTP_ISSUER = 'Espace Notarial'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

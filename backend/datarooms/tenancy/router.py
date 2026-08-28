@@ -2,7 +2,11 @@ from .context import get_current_tenant
 
 # Apps Django/tiers dont les modèles restent toujours sur la base "default"
 # (comptes, sessions, tokens...) — voir CLAUDE.md, section Architecture multi-tenant.
-SHARED_APPS = {"admin", "auth", "contenttypes", "sessions", "authtoken"}
+# "otp_totp" (django-otp) : TOTPDevice a une FK vers User (base default) — même
+# raisonnement que office_enabled_modules ci-dessous, doit être partagé avant toute
+# migration sous peine de blocage (allow_migrate refuse default ET lève
+# MissingTenantContext sur un `migrate` nu sans ContextVar posé).
+SHARED_APPS = {"admin", "auth", "contenttypes", "sessions", "authtoken", "otp_totp"}
 
 # Modèles de l'app "datarooms" qui sont des données transverses (registre des offices,
 # des modules, des appartenances) et non des données métier propres à un office.
@@ -16,9 +20,10 @@ SHARED_MODELS = {
     # (ex: /admin/ sur officea.localhost:8000), le ContextVar de tenant étant alors réel.
     ("datarooms", "office_enabled_modules"),
 }
-# Dataroom et Document sont volontairement ABSENTS de cet ensemble : ce sont des modèles
-# métier tenant (voir models.py), ils doivent rester routés vers la base de l'office
-# courant (via get_current_tenant()) et non vers "default".
+# Dataroom, Document, Folder et AccessRestriction sont volontairement ABSENTS de cet
+# ensemble : ce sont des modèles métier tenant (voir models.py), ils doivent rester
+# routés vers la base de l'office courant (via get_current_tenant()) et non vers
+# "default".
 
 
 class MissingTenantContext(Exception):

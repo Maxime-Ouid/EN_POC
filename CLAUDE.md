@@ -100,7 +100,20 @@ cd frontend && npm run dev        # serveur de dev Vite (https://localhost:5173)
 cd frontend && npm run build      # tsc -b && vite build
 cd frontend && npm run lint       # oxlint
 
-# Tests backend (15 tests sur la plomberie multi-tenant dans datarooms/tests.py)
+# Générer un code TOTP valide pour carla (secret fixe préconfiguré par seed_demo,
+# vecteur de test RFC 6238) — à relancer juste avant de le saisir en démo, le code
+# n'est valable que 30s. Fonctionne dès que django-otp est installé, pas besoin
+# d'accès DB (le calcul est indépendant de tout modèle).
+cd backend && python -c "
+from django_otp.oath import totp
+from binascii import unhexlify
+print(f'{totp(unhexlify(\"3132333435363738393031323334353637383930\")):06d}')
+"
+# Même secret en base32 (GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ) si besoin d'une saisie
+# manuelle dans une vraie appli d'authentification (Google Authenticator etc.) plutôt
+# que la commande ci-dessus.
+
+# Tests backend (20 tests sur la plomberie multi-tenant + MFA dans datarooms/tests.py)
 cd backend && python manage.py test
 ```
 
@@ -176,16 +189,49 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   cross-DB n'est de toute façon pas possible avec ce mécanisme (limite déjà anticipée).
   Absent de `SHARED_MODELS` dans `tenancy/router.py` **par conception** — c'est ce qui le
   fait router vers la base tenant. Champs : `name`, `created_at`.
+- `Folder` : troisième modèle métier tenant (fait le 27/08/2026) — vit dans la même base
+  tenant que `Dataroom`/`Document`, même patron (absent de `SHARED_MODELS`). Appartient à
+  une `Dataroom` (FK classique) et peut être imbriqué dans un autre `Folder` de la même
+  dataroom via `parent` (FK vers `self`, nullable — `None` = dossier racine). Champs :
+  `dataroom`, `parent`, `name`, `created_at`. `Document` gagne une FK `folder` nullable
+  (`None` = document à la racine de la dataroom, pas dans un sous-dossier) ; sa FK
+  `dataroom` existante reste inchangée et n'est pas dérivée du dossier — les deux doivent
+  rester cohérents (`folder.dataroom == document.dataroom`), ce que l'API impose en
+  résolvant tout id de dossier reçu (`folder`/`parent`) scopé à la dataroom de l'URL
+  plutôt qu'en confiance globale (voir `datarooms/views.py`, `_resolve_folder`) — un id de
+  dossier valide mais appartenant à une AUTRE dataroom est rejeté (400/404), vérifié en
+  curl le 27/08/2026. `tenant_document_path` (chemin de stockage) reste inchangé et ne
+  reflète pas l'arborescence de dossiers dans la clé S3 — seules les relations en base
+  portent la hiérarchie, le stockage reste à plat par dataroom (simplification
+  volontaire, sans conséquence fonctionnelle).
 - `Document` : deuxième modèle métier tenant (fait le 26/08/2026) — vit dans la même base
   tenant que `Dataroom`. `ForeignKey` vers `Dataroom` **classique** (pas de limite ici :
   les deux modèles vivent dans la même base physique, contrairement à une FK vers
   `Office`/`User`). Champs : `dataroom`, `name`, `file` (`FileField`), `uploaded_at`.
-  Fichier stocké sous `backend/media/<subdomain>/dataroom_<id>/<nom>` — chemin calculé par
+  Fichier stocké sous la clé `<subdomain>/dataroom_<id>/<nom>` dans le bucket MinIO
+  (`espace-notarial-documents` — stockage disque local abandonné depuis le passage à
+  MinIO, voir "État réel du code") — chemin calculé par
   `datarooms.tenancy.storage.tenant_document_path`, qui réutilise le même `ContextVar` que
   le routeur DB (`get_current_tenant()`), pas un nouveau mécanisme. Validation du format à
   l'upload par extension (`datarooms/validators.py`, liste tirée de
   `EN_vision_AMOA_MVP_v0.5_fusionne.md` §4.7) — pas d'antivirus/analyse de contenu (§7.5
   du document de vision, hors périmètre POC).
+- `AccessRestriction` : quatrième modèle métier tenant (fait le 28/08/2026) — même
+  patron que `Dataroom`/`Folder`/`Document` (absent de `SHARED_MODELS`). Restreint
+  l'accès à UN Dataroom, Folder ou Document précis (`OneToOneField` nullable vers
+  chacun des trois, exactement un renseigné par ligne — invariant appliqué au niveau
+  applicatif, pas par contrainte SQL) à une liste d'utilisateurs. `user_ids`
+  (`JSONField`, liste d'entiers) référence les utilisateurs par id simple — pas de
+  `ForeignKey` vers `User` (base `default`, cross-DB impossible avec ce mécanisme,
+  même contrainte que `Dataroom` → `Office`). Héritage par la hiérarchie : une
+  restriction sur un `Folder` s'applique à tout son contenu imbriqué sauf si un niveau
+  plus profond porte sa propre restriction — c'est la restriction la PLUS PROCHE qui
+  s'applique (pas de fusion de plusieurs restrictions le long de la chaîne), voir
+  `views._nearest_restriction`/`_user_can_access`. Absence de restriction sur toute la
+  chaîne = accès ouvert à tout membre de l'office (comportement par défaut, inchangé).
+  Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
+  `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
+  « restreint à personne ».
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -241,11 +287,18 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
 | `bob` | `demo1234` | Office B uniquement (rôle membre) |
 | `carla` | `demo1234` | **Office A + Office B** (rôle superadmin sur les deux) — compte à utiliser pour démontrer l'identité partagée |
 
+`carla` a un dispositif TOTP **déjà confirmé** (secret fixe préconfiguré par
+`seed_demo`, pas d'enrôlement à faire en démo) — voir Commandes pour générer un code
+valide au moment de la présentation. `alice` et `bob` n'ont pas de dispositif : leur
+premier login demande un enrôlement (QR code).
+
 ## Scénario de démo cible
 
-1. Connexion avec `carla` sur `officea.localhost:5173` → montrer qu'elle peut aussi
-   naviguer vers `officeb.localhost:5173` **sans se reconnecter** (preuve du pari n°2 :
-   identité partagée à travers de vrais sous-domaines)
+1. Connexion avec `carla` sur `officea.localhost:5173` (mot de passe **+ code TOTP**,
+   voir Commandes pour le générer — dispositif déjà confirmé, pas d'enrôlement à faire
+   en direct) → montrer qu'elle peut aussi naviguer vers `officeb.localhost:5173`
+   **sans se reconnecter, ni MFA à ressaisir** (preuve du pari n°2 : identité partagée
+   à travers de vrais sous-domaines — la MFA ne protège que la connexion initiale)
 2. Basculer entre les offices → couleur et modules affichés changent, données réellement
    servies depuis deux bases distinctes (preuve du pari n°3, et amorce du n°1)
 3. Ouvrir `/admin/` dans un autre onglet, désactiver le module « Coffre-fort » pour
@@ -420,11 +473,12 @@ session si le code a bougé.
   d'auth est déduit d'un appel `my-offices` au chargement. Le sélecteur d'office (ancien
   `<select>`) est remplacé par des boutons qui déclenchent l'échange de ticket SSO
   décrit ci-dessus.
-- **Tests** : `backend/datarooms/tests.py` couvre la plomberie multi-tenant (15 tests :
+- **Tests** : `backend/datarooms/tests.py` couvre la plomberie multi-tenant (20 tests :
   ContextVar, normalisation d'alias, matrice `allow_migrate` (dont la classification
-  partagé/tenant de `office_enabled_modules`, `Dataroom` et `Document`), middleware par
-  `Host`, aller-retour/usage-unique des tickets SSO, validateur d'extension de fichier).
-  Pièges rencontrés et documentés en
+  partagé/tenant de `office_enabled_modules`, `Dataroom`, `Document` et `otp_totp`),
+  middleware par `Host`, aller-retour/usage-unique des tickets SSO, validateur
+  d'extension de fichier, flux MFA complet — enrôlement, vérification, et régression
+  explicite sur la non-déclenchement via ticket SSO). Pièges rencontrés et documentés en
   commentaire dans les tests concernés : `ensure_tenant_registered` mute le dict global
   `connections.databases`, ce qui casse le nettoyage interne de `SimpleTestCase` si
   l'alias ajouté pendant le test n'est pas retiré en fin de test
@@ -459,6 +513,330 @@ session si le code a bougé.
   que par un clic dans le navigateur, pour ne pas geler la session d'automatisation ;
   le code du gestionnaire d'erreur reste néanmoins couvert par lecture (même chemin
   `res.ok`/`data.error` que le reste du fichier).
+- **✅ Fait le 27/08/2026 — MFA (TOTP, django-otp)** : `/api/login/` ne connecte plus
+  directement — il pose `request.session['mfa_user_id']` (session anonyme, avant tout
+  `django.contrib.auth.login()`) et répond `{mfa_required, enrollment}` selon qu'un
+  `TOTPDevice` confirmé existe déjà pour l'utilisateur. Deux nouvelles vues
+  `AllowAny` (l'utilisateur n'est justement pas encore authentifié à ce stade) :
+  `GET`/`POST /api/mfa/setup/` (enrôlement — QR code SVG en data URI via le helper
+  `django_otp.qr.write_qrcode_image` réutilisé tel quel dans `datarooms/mfa.py`, pas
+  de code QR réécrit à la main) et `POST /api/mfa/verify/` (dispositif déjà confirmé).
+  Session pleinement ouverte (`login()`) seulement après un code TOTP valide.
+  **Décision de conception clé** : pas d'`OTPMiddleware`/`request.user.is_verified()`
+  (le gating "global" habituel de django-otp) — chaque office ayant sa propre session
+  indépendante (voir plus haut), un tel gating aurait aussi bloqué la session ouverte
+  par `consume_sso_ticket` sur l'office cible, cassant l'exigence explicite que la
+  bascule d'office reste sans friction. La MFA est donc entièrement locale à
+  `/api/login/` + les deux nouvelles vues ; `consume_sso_ticket` est inchangé et ne
+  passe jamais par ce code — vérifié par un test dédié
+  (`test_sso_ticket_consumption_never_triggers_mfa`) et manuellement en `curl`.
+  **Piège routeur, même famille que `office_enabled_modules`** : `TOTPDevice` a une FK
+  vers `User` (base `default`) — sans `"otp_totp"` ajouté à `SHARED_APPS` dans
+  `tenancy/router.py` **avant** `migrate`, la table ne peut être créée nulle part
+  (bloquée sur `default`, `MissingTenantContext` sur toute base tenant). Confirmé par
+  inspection directe : `otp_totp_totpdevice` existe dans `db.sqlite3`, absente des deux
+  bases tenant.
+  **Piège de test à noter** : le throttling anti-bruteforce intégré de django-otp
+  (délai exponentiel après un échec, activé par défaut — `OTP_TOTP_THROTTLE_FACTOR=1`)
+  fait échouer une vérification valide si elle suit un échec de moins d'une seconde,
+  *avant même de regarder le code soumis* (`verify_is_allowed()` court-circuite
+  `verify_token()`). Rencontré dans les tests (code correct rejeté juste après un code
+  invalide), contourné en levant le throttle explicitement entre les deux tentatives
+  (`device.throttle_reset()`). **Vaut aussi pour la démo en direct** : après une saisie
+  erronée, attendre ~1s avant de resaisir, sinon même un code correct sera rejeté sans
+  explication apparente.
+  `seed_demo` préconfigure un dispositif confirmé pour `carla` avec un secret **fixe**
+  (le vecteur de test officiel RFC 6238, `"12345678901234567890"` en ASCII) — pas
+  d'enrôlement à faire en direct pendant la démo. Voir Commandes pour la commande qui
+  calcule un code valide à partir de ce secret.
+- **✅ Fait le 27/08/2026 — modèle `Folder` (troisième modèle métier tenant) + API** :
+  suit exactement le patron `Dataroom`/`Document` (absent de `SHARED_MODELS`, migration
+  `0004_folder_document_folder.py`, puis `migrate_all_tenants`). `Folder` : `dataroom`
+  (FK), `parent` (FK vers `self`, nullable — imbrication), `name`, `created_at`.
+  `Document` gagne une FK `folder` nullable (`None` = racine de la dataroom). Détail des
+  champs/relations dans "Modèle de données clé".
+  API ajoutée à `views.py`/`urls.py` :
+  - `POST /api/datarooms/<id>/folders/` — crée un dossier (`name`, `parent` optionnel).
+  - `GET /api/datarooms/<id>/folders/?parent=<id>` — contenu d'un niveau de
+    l'arborescence en **une seule réponse combinée** : `{"folders": [...], "documents":
+    [...]}` (sous-dossiers ET documents directement enfants de `parent`, racine de la
+    dataroom si `parent` absent) — pas deux appels séparés à combiner côté client.
+  - `POST`/`GET /api/datarooms/<id>/documents/` (déjà existant) étendu : le POST accepte
+    un champ `folder` optionnel dans le formulaire multipart pour uploader ailleurs qu'à
+    la racine ; le GET accepte `?folder=<id>` et, **changement de comportement côté
+    lecture** (sans conséquence sur les données existantes, qui étaient toutes à la
+    racine avant ce chantier) : sans ce paramètre, ne renvoie plus que les documents à la
+    racine (`folder=None`) au lieu de tous les documents de la dataroom quel que soit
+    leur dossier.
+  **Validation de cohérence dataroom/dossier** : tout id de dossier reçu (`folder` à
+  l'upload, `parent` à la création) est résolu via `Folder.objects.get(pk=..., dataroom=
+  dataroom)` — scopé à la dataroom de l'URL, pas une simple recherche par pk. Un id de
+  dossier valide mais appartenant à une AUTRE dataroom (même tenant) est donc rejeté
+  (`400` en écriture, `404` en lecture) plutôt qu'accepté silencieusement ; vérifié en
+  `curl` le 27/08/2026 (dossier d'une dataroom B refusé comme `parent`/`folder` sur une
+  dataroom A).
+  Isolation cross-tenant vérifiée par inspection directe des fichiers `.sqlite3`, comme
+  pour `Dataroom`/`Document` — pas de test automatisé pour l'isolation elle-même (limite
+  déjà documentée : `TestCase` ne gère pas bien les alias de DB tenant enregistrés
+  paresseusement) : dossiers/documents créés dans `officea` (dataroom de test, 2 dossiers
+  imbriqués, 1 document à la racine + 1 dans un dossier) absents de `officeb.sqlite3` et
+  de `db.sqlite3` (qui n'a même pas la table `datarooms_folder`, par conception du
+  routeur — confirmé). Régression ajoutée dans `TenantRouterTests`
+  (`test_folder_is_a_tenant_model_not_shared`), même patron que pour `Dataroom`/
+  `Document`. `tenant_document_path` (chemin de stockage MinIO) volontairement inchangé
+  — ne reflète pas la profondeur de dossier dans la clé S3, seule la base porte la
+  hiérarchie (simplification assumée, voir "Modèle de données clé").
+- **✅ Fait le 27/08/2026 — gestion des utilisateurs d'un office par ses admins** :
+  nouveaux endpoints dans `views.py`/`urls.py`, aucun nouveau modèle (réutilise
+  `User`/`OfficeMembership`, déjà partagés — base `default`). Gate d'accès :
+  `_manager_role(user, office)` (renommé le 28/08/2026, voir entrée dédiée plus bas —
+  s'appelait `_is_office_manager` et ne renvoyait qu'un booléen) = l'appelant a un
+  `OfficeMembership` avec `role` `admin` ou `superadmin` **pour `request.office`
+  précisément**, pas juste n'importe où — un superadmin d'un autre office (type carla)
+  sans rôle admin/superadmin sur l'office courant est rejeté comme n'importe quel autre
+  utilisateur.
+  - `GET`/`POST /api/office-users/` — liste les `OfficeMembership` de `request.office`
+    (`username`, `role`) ; POST crée un **nouveau** `User` + son `OfficeMembership` avec
+    le rôle choisi (le rattachement d'un compte existant est un endpoint séparé, ajouté
+    le 28/08/2026 — voir plus bas). Mot de passe validé via
+    `django.contrib.auth.password_validation.validate_password` (réutilise
+    `AUTH_PASSWORD_VALIDATORS` déjà configuré dans `settings.py`, pas de règle
+    réinventée) ; nom d'utilisateur déjà pris → `400` plutôt que de laisser
+    `IntegrityError` remonter.
+  - `PATCH /api/office-users/<membership_id>/` — modifie uniquement le `role` du
+    membership (pas le username/mot de passe — non demandé, et modifier un `User`
+    partagé depuis un seul office serait risqué vu qu'un compte peut avoir accès à
+    plusieurs offices). Scopé via `OfficeMembership.objects.get(pk=..., office=office)`
+    — même patron que `_resolve_folder` pour Dataroom/Folder : un `membership_id`
+    valide mais appartenant à un AUTRE office est `404`, pas `403` (l'existence même
+    de la ligne n'est pas confirmée à l'appelant).
+  **Isolation testée automatiquement** (contrairement à Dataroom/Document/Folder) :
+  `OfficeMembership`/`User` vivent dans `default`, pas de limite `TestCase` sur les
+  alias tenant paresseux ici. `OfficeUsersApiTests` (`datarooms/tests.py`) couvre
+  spécifiquement le scénario carla : un utilisateur superadmin sur deux offices à la
+  fois ne voit/ne peut modifier que sa ligne de l'office courant depuis
+  `/api/office-users/` (`test_office_list_excludes_other_office_memberships`,
+  `test_manager_cannot_reach_membership_of_another_office`) — vérifié aussi
+  manuellement en Chrome (alice, admin sur Office A, voit `Utilisateurs` dans la nav ;
+  bob, membre sur Office B, ne le voit pas et reçoit un vrai `403` de l'API en accès
+  direct, pas juste un bouton caché côté UI).
+  **Frontend** : nouvelle page `UsersPage` (`App.tsx`) — tableau des membres avec un
+  `<select>` de rôle par ligne (PATCH au changement) + formulaire de création
+  (username/password/rôle). Bouton nav « Utilisateurs » affiché seulement si
+  `isOfficeManager` (dérivé de `my-offices`, en cherchant l'entrée dont le subdomain
+  correspond au `Host` courant — pas un nouvel appel API). Pas de réinitialisation de
+  mot de passe ni d'invitation par email (explicitement hors périmètre pour ce
+  chantier).
+- **✅ Fait le 28/08/2026 — rattachement d'un utilisateur existant + visibilité
+  hiérarchique des rôles** : deux ajouts à la gestion des utilisateurs d'office
+  (27/08/2026, entrée ci-dessus).
+  - **Rang explicite des rôles** : `OfficeMembership.ROLE_RANK` (`models.py`) —
+    `{"superadmin": 3, "admin": 2, "membre": 1, "client": 0}`, défini une seule fois et
+    réutilisé partout (vues + frontend) plutôt que des comparaisons de chaînes
+    éparpillées. `_manager_role(user, office)` (renommage de `_is_office_manager`,
+    retourne le rôle et pas juste un booléen — nécessaire pour connaître le rang de
+    l'appelant), `_roles_at_or_below(rank)` et `_validate_role_for_caller(role,
+    caller_rank)` (`views.py`) centralisent toute la logique de rang.
+  - **Visibilité hiérarchique** : un admin (rang 2) ne voit plus les memberships
+    superadmin (rang 3) de son office dans `GET /api/office-users/` (filtre
+    `role__in=_roles_at_or_below(caller_rank)`) — un superadmin voit tout le monde, lui
+    y compris. `PATCH /api/office-users/<id>/` applique le même filtre à la résolution
+    du membership ciblé : un membership superadmin visé par un admin est `404`, **pas**
+    `403` — même logique que pour un membership d'un autre office (`_resolve_folder`
+    pour Dataroom/Folder, déjà documenté) : on ne confirme même pas son existence.
+  - **Cohérence rang à la création/au rattachement/à la modification** : la même règle
+    (`_validate_role_for_caller`) s'applique aux TROIS endpoints qui acceptent un `role`
+    en entrée — `POST /api/office-users/` (création), `POST /api/office-users/attach/`
+    (nouveau, voir ci-dessous) et `PATCH /api/office-users/<id>/`. **Écart volontaire
+    par rapport à la demande initiale**, qui ne mentionnait explicitement que les deux
+    endpoints POST pour cette règle : appliquée aussi au PATCH, sans quoi un admin
+    pourrait contourner l'interdiction de CRÉER un superadmin en PROMOUVANT un membre
+    existant (qu'il peut par ailleurs voir/gérer, donc pas bloqué par la règle de
+    visibilité) au rôle superadmin — un rôle demandé au-dessus du rang de l'appelant
+    renvoie `400 "rôle invalide"`, sans distinguer un rôle qui n'existe pas d'un rôle
+    hors de portée (même principe de non-confirmation que pour `attach`/`PATCH`
+    ci-dessus).
+  - **`POST /api/office-users/attach/`** — rattache un `User` **existant** (recherche
+    par `username` exact, `User.objects.filter(username=...).first()`) à l'office
+    courant, sans créer de compte ni exiger de mot de passe. Volontairement pas de
+    recherche/autocomplete sur les utilisateurs existants (cf. §4.1 du document de
+    vision sur l'annuaire d'offices exposé lors d'un partage entre études — déjà
+    identifié comme point de sécurité à ne pas reproduire, voir "Écarts assumés") :
+    l'admin doit connaître le nom exact ; un nom introuvable renvoie `404
+    {"error": "utilisateur introuvable"}`, un message générique qui ne confirme ni
+    n'infirme l'existence du compte ailleurs dans le système. Un utilisateur déjà
+    membre de l'office → `400`.
+  **Tests** (`OfficeUsersApiTests`, `datarooms/tests.py`, 8 nouveaux) : un admin ne voit
+  pas un superadmin dans la liste
+  (`test_admin_cannot_see_superadmin_in_list`), reçoit `404` en tentant de modifier son
+  rôle (`test_admin_gets_404_patching_superadmin_membership`), ne peut ni créer ni
+  rattacher quelqu'un en superadmin
+  (`test_admin_cannot_create_or_attach_as_superadmin`), ni promouvoir un membre
+  existant à ce rôle (`test_admin_cannot_promote_existing_member_to_superadmin`) ; un
+  superadmin voit et gère bien les memberships superadmin
+  (`test_superadmin_sees_and_manages_superadmin_rows`) ; scénario positif explicitement
+  demandé — un utilisateur superadmin existant sur un premier office (type carla) est
+  rattaché à un second office par le superadmin de ce second office
+  (`test_attach_existing_superadmin_to_second_office`) ; plus les cas nom inconnu et
+  déjà-membre pour `attach`. `test_manager_can_list_and_create` (test préexistant)
+  corrigé : son assertion supposait encore que `shared_super` (superadmin) apparaissait
+  dans la liste vue par un admin — devenu faux avec cette règle.
+  **Frontend** (`App.tsx`) : `ROLE_RANK`/`rolesAtOrBelow` (miroir exact du dict backend
+  — le serveur revalide toujours, ce filtrage n'est qu'un confort d'UI) filtrent les
+  `<option>` de rôle dans les trois menus déroulants (création, rattachement,
+  changement de rôle par ligne) selon `callerRole`, nouvelle prop de `UsersPage` dérivée
+  de `currentOffice.role` dans `App()`. Bascule `mode: 'create' | 'attach'` (deux
+  boutons nav, même patron que `Header`) : le formulaire de rattachement n'a ni champ
+  mot de passe ni recherche/liste d'utilisateurs, juste nom exact + rôle. Vérifié en
+  Chrome réel : alice (admin sur Office A) ne voit pas carla dans la liste, ses menus de
+  rôle n'offrent pas "superadmin" ; rattachement de bob (déjà utilisateur existant,
+  membre d'Office B uniquement) à Office A via "Ajouter un utilisateur existant" →
+  apparaît immédiatement dans la liste sans mot de passe créé ; vérifié aussi en curl
+  (login réel d'alice via son dispositif TOTP confirmé, pas de compte de test) que
+  `attach`/création/PATCH en rôle superadmin renvoient bien `400`, qu'un nom inconnu
+  renvoie `404` générique, et qu'un PATCH visant directement l'id du membership
+  superadmin de carla sur Office A renvoie `404` (pas `403`).
+- **✅ Fait le 28/08/2026 — contrôle d'accès par utilisateur sur Dataroom/Folder/
+  Document, avec héritage** : modèle `AccessRestriction` (voir "Modèle de données
+  clé"). Par défaut, comportement inchangé (tout membre de l'office a accès à tout le
+  contenu) ; une restriction n'existe que là où un admin en a explicitement créé une.
+  **Décision de conception — "la restriction la plus proche l'emporte", inchangée** :
+  pas de fusion/union de plusieurs restrictions le long de la hiérarchie
+  (`_nearest_restriction`/`_user_can_access`, `views.py`, non modifiées depuis leur
+  création). Une restriction sur un `Folder` s'applique à tout son contenu SAUF si un
+  niveau plus profond a la sienne propre, auquel cas c'est celle-là (et uniquement
+  celle-là) qui compte pour ce niveau — pour déterminer l'accès DIRECT à un niveau
+  précis, indépendamment de ce qui suit.
+  - **✅ Étendu le 28/08/2026 — visibilité de chemin** (`_subtree_has_accessible_
+    content`/`_level_visible`, `views.py`, fonctions NOUVELLES, volontairement
+    séparées de `_nearest_restriction`/`_user_can_access` pour ne jamais risquer de
+    régresser l'héritage déjà testé) : **remplace** la note ci-dessus qui affirmait
+    qu'un override de document ne pouvait pas contourner une restriction de dossier
+    plus large — devenue fausse. Un `Dataroom` ou `Folder` est désormais visible s'il
+    est directement accessible (comportement ci-dessus, inchangé) **OU** si son
+    sous-arbre contient, à n'importe quelle profondeur, un élément directement
+    accessible via une restriction plus précise — y compris si la `Dataroom`
+    elle-même est par ailleurs restreinte sans que l'utilisateur y figure. Remplace
+    aussi une distinction dataroom/dossier évoquée juste avant dans la conversation :
+    il n'y en a plus aucune — `_level_visible(user, dataroom, folder=None)` couvre le
+    niveau racine de la dataroom exactement comme n'importe quel `Folder`, même
+    fonction, même logique, `folder=None` désignant simplement la racine.
+    **Visibilité CALCULÉE, jamais stockée ni mutée** : accorder un accès à un document
+    imbriqué ne modifie JAMAIS la liste `user_ids` d'une restriction parente
+    (dataroom/dossier intermédiaire) — chaque restriction reste le reflet exact de ce
+    qui a été explicitement configuré à SON niveau (auditabilité), la visibilité de
+    chemin est recalculée à chaque requête. Conséquence : lister un niveau ne montre
+    QUE les éléments directement accessibles à ce niveau, PLUS les sous-dossiers qui
+    MÈNENT vers un accès plus profond (sans montrer le reste du contenu de ces
+    sous-dossiers de transit) — un utilisateur avec accès à un seul document imbriqué
+    peut naviguer depuis la liste des datarooms jusqu'à ce document en ne voyant, à
+    chaque niveau (dataroom incluse), que le seul élément menant à lui.
+    **Lecture seulement, jamais l'écriture** : appliqué à `datarooms_view` (liste),
+    `folders_view`/`documents_view` (accès à un niveau + filtrage des sous-dossiers,
+    GET uniquement) — la création de dossier et l'upload (POST) restent gatés par
+    `_user_can_access` seul, jamais `_level_visible` : un utilisateur qui ne fait que
+    TRANSITER par un niveau (visible uniquement parce qu'il mène vers un accès plus
+    profond) ne doit pas pouvoir y créer de contenu. Vérifié en curl (voir
+    ci-dessous) qu'un upload dans un tel dossier de transit reste bien `404`.
+  - API : `GET`/`POST /api/datarooms/<id>/access/`,
+    `.../folders/<folder_id>/access/`, `.../documents/<document_id>/access/` (lecture/
+    remplacement complet de la liste `user_ids` pour CE niveau précis) +
+    `GET /api/access-restrictions/` (liste TOUTES les restrictions actives de l'office,
+    avec libellé résolu et `dataroom_id` — consommée par la vue "par utilisateur" côté
+    frontend). Gate d'écriture : `_manager_role` (admin/superadmin de l'office courant,
+    même contrôle que la gestion des utilisateurs) — **jamais** `_user_can_access` :
+    un gestionnaire doit toujours pouvoir gérer une restriction même s'il ne fait pas
+    partie de la liste qu'il définit, sans quoi il pourrait se verrouiller lui-même
+    hors de sa propre gestion.
+  - Liste vide (`user_ids: []`) envoyée à un endpoint d'écriture **supprime** la ligne
+    de restriction plutôt que de la laisser vide — repasser par "aucune restriction"
+    (accès ouvert) est plus explicite qu'une ligne "restreint à personne" ; c'est aussi
+    ce qui permet à une UI à cases à cocher de rester intuitive ("tout décocher" =
+    "plus de restriction", pas "caché à tout le monde").
+  - Application dans `datarooms_view`/`folders_view`/`documents_view` (GET **et**
+    POST) : la liste des datarooms filtre celles inaccessibles ; lister/créer dans un
+    dossier inaccessible renvoie `404` (pas `403`) — même logique de non-confirmation
+    d'existence déjà établie pour le rang de rôle sur `office-users` et pour un
+    `folder_id` d'une autre dataroom.
+  - Validation des `user_ids` reçus : seuls les ids correspondant à de vrais
+    `OfficeMembership` de CET office sont retenus (`_set_restriction`), le reste est
+    silencieusement ignoré (défense en profondeur contre un id arbitraire, l'UI ne
+    propose de toute façon que des membres réels — pas d'erreur bloquante pour une
+    fonctionnalité "peu utilisée, interface simple" par consigne explicite).
+  **Vérifié manuellement en curl (pas de test automatisé pour l'application/héritage
+  elle-même — même limite déjà documentée pour Dataroom/Document/Folder : un tenant
+  de test fraîchement créé via `TestCase` n'a pas de schéma migré, et les écritures
+  dans une base tenant existante ne sont pas annulées par le rollback transactionnel
+  de `TestCase`, qui ne couvre que la base `default`)** sur les vraies bases
+  `officea`/`officeb` : restriction d'un `Folder` à alice seule → bob perd le dossier
+  de la liste ET un accès direct (`?parent=`) renvoie `404` ; un `Document` dans ce
+  dossier est également masqué pour bob par héritage (pas juste le dossier) ;
+  restriction d'une `Dataroom` entière → disparaît de `/api/datarooms/` pour
+  l'utilisateur exclu ; liste vide → réversion complète et immédiate à l'accès ouvert ;
+  `GET /api/access-restrictions/` retourne bien les trois niveaux avec un libellé
+  résolu (`"Folder Test Dataroom / Factures"`, etc.). Isolation tenant confirmée par
+  inspection directe des fichiers `.sqlite3` (table absente de `default`, présente et
+  vide après nettoyage dans `officea`/`officeb`). Automatisé : régression routeur
+  (`test_access_restriction_is_a_tenant_model_not_shared`) + gate de permission testée
+  sans jamais toucher de base tenant (`AccessRestrictionPermissionTests` : `403` pour
+  un non-gestionnaire sur les quatre endpoints, avec des id fictifs — la vérification
+  `_manager_role` s'exécute avant toute résolution de Dataroom/Folder/Document).
+  **Frontend** : `DataroomDetailPage` reçoit une nouvelle prop `isOfficeManager` (déjà
+  calculée dans `App()`, pas recalculée) ; bouton "Accès" par ligne dossier/document +
+  bouton "Restreindre l'accès à cette dataroom" (visibles seulement pour un
+  gestionnaire), ouvrant un panneau à cases à cocher (une par membre de l'office,
+  `GET /api/office-users/`) qui `POST`e la liste complète au bon endpoint selon le
+  niveau. Nouvelle colonne "Restrictions" dans `UsersPage` : par utilisateur, un
+  panneau liste TOUTES les restrictions existantes de l'office
+  (`GET /api/access-restrictions/`) avec une case par restriction — cocher/décocher
+  ajoute/retire CET utilisateur de la liste existante (ne crée jamais de nouvelle
+  restriction depuis cette vue, volontairement : partir d'une liste vide depuis "quels
+  objets restreindre pour cet utilisateur" n'a pas de sens tant qu'aucun objet n'a déjà
+  été restreint depuis sa propre page — la création reste uniquement l'action
+  "restreindre à..." sur le dossier/document/dataroom lui-même). Vérifié en Chrome
+  réel : restriction de "Factures" à bob+daniel via le panneau du dossier, confirmée
+  par lecture API ; puis ajout d'alice à cette même restriction depuis son propre
+  onglet "Restrictions" sur la page Utilisateurs, confirmée par lecture API
+  (`user_ids` passe de `[2,4]` à `[1,2,4]`).
+- **✅ Fait le 28/08/2026 — visibilité de chemin** (voir entrée `AccessRestriction`
+  ci-dessus pour `_subtree_has_accessible_content`/`_level_visible`). **Testé
+  automatiquement** — écart volontaire par rapport à la limite habituelle de ce
+  fichier sur les tests tenant, demandé explicitement vu la complexité de la
+  récursion sur l'arborescence : `PathVisibilityTests` (`datarooms/tests.py`) écrit
+  réellement du Dataroom/Folder/Document/AccessRestriction dans un tenant sqlite
+  dédié au test (`pathvis`, pas `officea`/`officeb`), migré via `call_command
+  ('migrate', ...)` puis supprimé en fin de test. **`unittest.TestCase` nu, ni
+  `django.test.TestCase` ni `TransactionTestCase`** — les deux ont été essayées et
+  échouent pour un alias enregistré dynamiquement : déclarer `databases =
+  {"default", "tenant_pathvis"}` fait planter la passe `check` globale que Django
+  exécute sur toutes les databases nommées par toutes les classes de test avant que
+  la moindre `setUpClass()` ne tourne (`ConnectionDoesNotExist`, l'alias n'existe pas
+  encore) ; `databases = '__all__'` évite ce crash (résolution dynamique) mais
+  `TestCase`/`TransactionTestCase` bloquent quand même la connexion au moment du test
+  (`DatabaseOperationForbidden`, testé empiriquement — la permission n'est pas
+  réévaluée dynamiquement malgré `'__all__'`). `unittest.TestCase` nu ne pose aucun
+  des deux pièges (aucun patch de connexion, aucune passe `check` par classe) — au
+  prix de perdre `self.client` (recréé via `django.test.Client()`) et tout rollback
+  automatique de `default` (géré manuellement via `addCleanup`, comme pour l'alias
+  tenant). Piège Windows rencontré : `Path.unlink()` sur le fichier tenant échoue
+  avec `PermissionError` si la connexion SQLite n'est pas explicitement fermée avant
+  (`connections[alias].close()`) — un handle de fichier reste ouvert sinon.
+  3 tests couvrent exactement les scénarios demandés (arborescence avec dossiers
+  "decoy" à plusieurs niveaux pour prouver le filtrage négatif, pas seulement
+  positif) : accès à un document imbriqué sur 2 niveaux (chemin complet, dataroom
+  incluse, visible — rien d'autre à aucun niveau) ; un dossier à deux enfants dont un
+  seul mène à un accès accordé (seul celui-là apparaît) ; une dataroom par ailleurs
+  restreinte qui redevient visible pour l'utilisateur exclu grâce à un document
+  imbriqué (mais seulement le chemin vers lui), avec un troisième utilisateur sans
+  aucun accès servant de régression de contrôle (ne voit rien du tout). **Vérifié
+  aussi manuellement en curl sur `officea` réel** (`Dataroom` 4, "Folder Test
+  Dataroom") : document uploadé dans `Contrats > Signes` restreint à bob, `Dataroom`
+  4 entière restreinte à alice seule → bob revoit la dataroom dans sa liste et peut
+  naviguer `Contrats` (seul dossier visible à la racine) → `Signes` (seul dossier
+  visible dans `Contrats`, `contrat.txt` masqué) → le document ciblé (seul élément
+  visible dans `Signes`) ; upload de bob dans `Signes` (dossier visible uniquement
+  par transit) → toujours `404`, confirmant que l'écriture reste bien gatée par
+  l'accès direct seul.
 
 ## État actuel du POC
 
@@ -468,6 +846,9 @@ session si le code a bougé.
 - [x] Admin Django avec toggle de modules par office (`filter_horizontal`)
 - [x] Auth par session Django (`login`, `my-offices`, `tenant-config`, `modules/coffre-fort`
       — tous protégés par `IsAuthenticated` + vérification d'appartenance à l'office)
+- [x] **MFA (TOTP, django-otp)** sur la connexion initiale — fait le 27/08/2026,
+      enrôlement (QR code) si pas de dispositif, code TOTP sinon ; ne se déclenche
+      jamais sur la bascule d'office via ticket SSO (voir "État réel du code")
 - [x] Frontend : formulaire de connexion, sélecteur d'office filtré par accès réel,
       affichage conditionnel de module, couleur appliquée dynamiquement via variable CSS.
       Nav minimale ajoutée le 26/08/2026 (Accueil/Datarooms/boutons de module, nom
@@ -489,9 +870,43 @@ session si le code a bougé.
       de bout en bout via l'automatisation Chrome (pas seulement `curl`) : création
       d'une dataroom, upload d'un fichier accepté, bascule d'office via le ticket SSO
       avec la nouvelle UI, toggle d'un module depuis `/admin/` répercuté en direct dans
-      la nav sans redémarrage. Pas de hiérarchie de dossiers (une dataroom reste un
-      conteneur plat de documents) — pas demandé, cohérent avec « un seul type de
-      dataroom ».
+      la nav sans redémarrage. Hiérarchie de dossiers ajoutée côté **API** le
+      27/08/2026 (modèle `Folder`, voir "État réel du code" et "Modèle de données
+      clé"), puis côté **UI** le 27/08/2026 également (`DataroomDetailPage`) :
+      sous-dossiers du niveau courant affichés à côté des documents, clic sur un
+      dossier pour y naviguer, fil d'Ariane simple (liste de boutons, un par niveau,
+      le dernier désactivé — même patron que les onglets de `Header`) pour remonter,
+      bouton de création de dossier au niveau affiché, upload (glisser-déposer ou
+      bouton) qui dépose désormais dans le dossier affiché plutôt que toujours à la
+      racine (`folder` ajouté au `FormData` seulement si un dossier est ouvert).
+      Vérifié de bout en bout en Chrome réel : création d'un dossier à la racine,
+      navigation dedans, upload d'un fichier dedans, retour à la racine — le fichier
+      n'y apparaît pas — puis navigation sur 2 niveaux (`Contrats` > `Signes`,
+      dossiers de test créés lors du chantier API) et remontée partielle via un clic
+      sur un niveau intermédiaire du fil d'Ariane (pas seulement la racine).
+- [x] Gestion des utilisateurs d'un office par ses admins/superadmins — fait le
+      27/08/2026 : `GET`/`POST`/`PATCH /api/office-users/`, page « Utilisateurs »
+      (liste + rôle modifiable + formulaire de création), isolation stricte par office
+      même pour une identité partagée type carla (voir "État réel du code"). Pas de
+      réinitialisation de mot de passe ni d'invitation par email (hors périmètre
+      explicite de ce chantier). Étendu le 28/08/2026 : rattachement d'un utilisateur
+      existant (`POST /api/office-users/attach/`, recherche par nom exact, pas
+      d'annuaire/autocomplete — cf. §4.1 du document de vision) + visibilité
+      hiérarchique des rôles (`OfficeMembership.ROLE_RANK`, un admin ne voit/ne gère/ne
+      crée jamais de superadmin sur son office, un superadmin voit tout).
+- [x] Contrôle d'accès par utilisateur sur Dataroom/Folder/Document, avec héritage —
+      fait le 28/08/2026 : modèle `AccessRestriction` (base tenant, quatrième modèle
+      métier après Dataroom/Folder/Document), accès ouvert par défaut à tout l'office,
+      restriction ponctuelle par admin/superadmin à un niveau précis, héritée par le
+      contenu imbriqué (la restriction la plus proche dans la hiérarchie l'emporte,
+      pas de fusion). Étendu le 28/08/2026 : visibilité de chemin
+      (`_subtree_has_accessible_content`/`_level_visible`) — un `Dataroom`/`Folder`
+      redevient visible, même par ailleurs restreint, s'il mène vers un élément
+      accordé plus profond (calculée à chaque requête, ne mute jamais aucune
+      restriction) ; lecture seulement, la création/l'upload restent gatés par
+      l'accès direct seul. UI en deux points d'entrée : bouton « Accès » par
+      dossier/document/dataroom (`DataroomDetailPage`) et onglet « Restrictions » par
+      utilisateur (`UsersPage`) — voir "État réel du code" pour le détail.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 
@@ -505,16 +920,32 @@ session si le code a bougé.
 ## Explicitement hors périmètre du POC
 
 Q&A (y compris ses réglages fins vus en V1 : modération, plages horaires...), templates,
-notion de portefeuille, audit trail / historique, facturation, droits fins par groupe,
-conformité DSN/RGPD, les 3 types de dossier distincts, la duplication de dossier entre
-offices. Tous documentés dans le document de vision pour le chiffrage MOE, mais non
-traités ici.
+notion de portefeuille, audit trail / historique, facturation, conformité DSN/RGPD, les
+3 types de dossier distincts, la duplication de dossier entre offices. Tous documentés
+dans le document de vision pour le chiffrage MOE, mais non traités ici.
 
 **Écart assumé le 26/08/2026** : « vrai stockage S3 » figurait ici à l'origine — ce
 n'est plus le cas. Décision explicite de l'utilisateur : le stockage des `Document` est
 passé à MinIO (S3-compatible) via `django-storages`/`boto3`, voir « État réel du code ».
 Toujours pas de vrai AWS S3 (MinIO local, sans persistance ni durcissement production),
 mais l'abstraction de stockage n'est plus « hors périmètre » comme axe technique.
+
+**Écart assumé le 27/08/2026** : la MFA (authentification à deux facteurs, TOTP) fait
+désormais partie du périmètre du POC — décision explicite de l'utilisateur, voir
+« État réel du code ». Le reste de la conformité DSN/RGPD au sens large (déclaration
+DSN, droits CNIL, archivage légal, etc., cf. document de vision) reste hors périmètre :
+la MFA en est sortie spécifiquement, pas toute la ligne.
+
+**Écart assumé le 28/08/2026** : « droits fins par groupe » retiré de la liste
+ci-dessus — décision explicite de l'utilisateur, voir « État réel du code » (modèle
+`AccessRestriction`). Le contrôle d'accès qui **entre** dans le périmètre du POC est
+volontairement plus simple que ce que cette ligne visait initialement : restriction
+ponctuelle **par utilisateur** (liste d'ids) sur un Dataroom/Folder/Document précis,
+avec héritage par le contenu imbriqué — pas de notion de groupe, pas de matrice de
+permissions par rôle/action, pas de droits différenciés lecture/écriture/suppression.
+Un vrai système de « droits fins par groupe » (groupes nommés, permissions composables
+par action) reste hors périmètre ; seule la restriction simple par utilisateur en est
+sortie.
 
 ## Pour Claude Code
 
