@@ -5,6 +5,7 @@ export * from './IdentityTab';
 export * from './Modal';
 export * from './ModulesTab';
 export * from './NewDataroomModal';
+export * from './OfficeContentTab';
 export * from './QACard';
 export * from './Sidebar';
 export * from './Slideover';

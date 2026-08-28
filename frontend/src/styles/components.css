@@ -565,3 +565,92 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 /* Pendant d'échec de .save-flash : l'enregistrement serveur a échoué, ce qui est
    affiché n'est pas ce qui est enregistré pour l'office. */
 .save-error{font-size:11px;color:var(--warning);font-weight:600;display:inline-flex;align-items:center;gap:4px;}
+
+/* ============ ESPACE NOTARIAL V1 — navigation à sous-menus et écrans iso ============
+   Reconstruction de l'interface administrateur actuelle (admin.espacenotarial.com)
+   avec les composants et les tokens du design system V2. Aucune couleur littérale :
+   ces écrans doivent se repeindre comme les autres quand une étude personnalise. */
+
+.nav-sub{margin:1px 0 6px 12px;padding-left:10px;border-left:1px solid var(--shell-border);}
+.nav-subitem{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;
+  color:var(--shell-text-dim);font-size:12.4px;font-weight:500;margin-bottom:1px;
+  border:1px solid transparent;
+}
+.nav-subitem:hover{background:var(--shell-bg-2);color:var(--shell-text);}
+.nav-subitem.active{background:var(--shell-active);color:var(--shell-text);border-color:var(--shell-border);}
+.nav-subitem .badge{margin-left:auto;font-size:10.5px;font-family:var(--font-mono);background:var(--brass-100);color:var(--brass-700);border-radius:99px;padding:1px 6px;}
+.nav-chev{margin-left:auto;width:11px;height:11px;flex:none;transition:transform .12s;}
+.nav-chev.open{transform:rotate(90deg);}
+
+.v1-toolbar{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  padding:10px 12px;margin-bottom:16px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);
+}
+.v1-toolbar-sep{width:1px;align-self:stretch;background:var(--border);margin:0 4px;}
+
+.v1-list-controls{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-bottom:12px;
+}
+.v1-list-controls .field{margin:0;}
+
+.v1-pager{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-top:12px;
+}
+.v1-pager-info{font-size:12px;color:var(--ink-500);}
+.v1-pager-pages{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+
+.v1-info-block{
+  display:flex;gap:12px;padding:14px 16px;margin-bottom:18px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);
+  font-size:12.5px;color:var(--ink-700);line-height:1.55;
+}
+.v1-info-block svg{width:16px;height:16px;flex:none;color:var(--info);margin-top:2px;}
+.v1-info-block p{margin:0 0 8px;}
+.v1-info-block p:last-child{margin-bottom:0;}
+.v1-warn-text{font-size:12px;color:var(--critical);margin-top:10px;line-height:1.5;}
+
+.v1-tile-grid{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+.v1-tile{
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:16px 22px;min-width:150px;
+  border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);
+  font-size:12.5px;font-weight:600;color:var(--ink-800);text-align:center;
+}
+.v1-tile:hover{border-color:var(--brass-400);background:var(--surface-alt);}
+.v1-tile svg{width:20px;height:20px;color:var(--brass-600);}
+
+.v1-tool-row{
+  display:flex;align-items:flex-start;gap:14px;padding:12px 0;
+  border-bottom:1px solid var(--border-soft);
+}
+.v1-tool-row:last-child{border-bottom:none;}
+.v1-tool-row-name{font-size:13px;font-weight:600;color:var(--ink-900);}
+.v1-tool-row-desc{font-size:11.8px;color:var(--ink-500);margin-top:2px;line-height:1.5;}
+
+.v1-empty{
+  border:1px dashed var(--border);border-radius:var(--radius-lg);
+  background:var(--surface-alt);padding:22px 24px;
+}
+.v1-empty-title{font-size:13.5px;font-weight:600;color:var(--ink-900);margin-bottom:6px;}
+.v1-empty-desc{font-size:12.5px;color:var(--ink-500);line-height:1.6;max-width:640px;}
+.v1-known{margin:16px 0 0;padding:0;list-style:none;}
+.v1-known li{
+  font-size:12.5px;color:var(--ink-700);padding:7px 0;
+  border-bottom:1px solid var(--border-soft);display:flex;gap:10px;
+}
+.v1-known li:last-child{border-bottom:none;}
+.v1-known .k{min-width:150px;color:var(--ink-400);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;}
+
+.v1-editorial{font-size:13px;color:var(--ink-700);line-height:1.7;max-width:760px;}
+.v1-editorial h3{font-size:14px;color:var(--ink-900);margin:18px 0 8px;}
+.v1-editorial p{margin:0 0 10px;}
+.v1-editorial ol,.v1-editorial ul{margin:0 0 10px;padding-left:20px;}
+.v1-editorial li{margin-bottom:4px;}
+
+button.v1-tile,button.v1-tool-row-name{font-family:inherit;cursor:pointer;}
+button.v1-tool-row-name{background:none;border:none;padding:0;text-align:left;color:var(--ink-900);font-size:13px;font-weight:600;}
+button.v1-tool-row-name:hover{color:var(--brass-700);}

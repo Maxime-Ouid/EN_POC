@@ -9,6 +9,9 @@ import './styles/components.css'
 import App from './App.tsx'
 import { PrototypeDemo } from './PrototypeDemo'
 import { UiKit } from './uikit/UiKit'
+import { V1AppView } from './v1/V1AppView'
+import { V1Preview } from './v1/V1Preview'
+import type { V1ScreenKey } from './v1/nav'
 import { IconSprite } from './components'
 import { ThemeProvider, applyThemeEarly } from './theme'
 import { apiThemeTransport } from './api/theme'
@@ -21,22 +24,40 @@ import { apiThemeTransport } from './api/theme'
 // après chaque connexion (voir App.tsx).
 const initialTheme = applyThemeEarly();
 
-// Deux vues de développement, en plus de l'application réelle (App.tsx) :
+// Vues disponibles, en plus de l'application réelle (App.tsx) :
 //   ?view=ui-kit             la bibliothèque de composants, fiche par fiche
-//   ?view=prototype-preview  la reconstitution navigable du prototype
-// Aucune des deux ne touche à App.tsx ni au backend.
-const view = new URLSearchParams(window.location.search).get('view');
+//   ?view=prototype-preview  la reconstitution navigable du prototype V2
+//   ?view=v1                 l'Espace Notarial ACTUEL reconstruit, sur données
+//                            de démonstration — la maquette à partager
+//   ?view=v1-app             la même navigation V1, branchée sur Django
+// Seule `v1-app` parle au backend ; les autres sont autonomes.
+const params = new URLSearchParams(window.location.search);
+const view = params.get('view');
+// `?view=v1&screen=facturation` ouvre directement une rubrique — pratique pour
+// partager un écran précis avec le client sans expliquer où cliquer.
+const initialScreen = params.get('screen') as V1ScreenKey | null;
+const usesBackend = !view || view === 'v1-app';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider
       initialState={initialTheme}
-      // Le UI kit et la maquette n'ont pas de backend : ils restent en
+      // Le UI kit et les maquettes n'ont pas de backend : ils restent en
       // personnalisation locale, sans transport.
-      transport={view ? undefined : apiThemeTransport}
+      transport={usesBackend ? apiThemeTransport : undefined}
     >
       <IconSprite />
-      {view === 'ui-kit' ? <UiKit /> : view === 'prototype-preview' ? <PrototypeDemo /> : <App />}
+      {view === 'ui-kit' ? (
+        <UiKit />
+      ) : view === 'prototype-preview' ? (
+        <PrototypeDemo />
+      ) : view === 'v1' ? (
+        <V1Preview initialScreen={initialScreen ?? undefined} />
+      ) : view === 'v1-app' ? (
+        <V1AppView />
+      ) : (
+        <App />
+      )}
     </ThemeProvider>
   </StrictMode>,
 )

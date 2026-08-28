@@ -6,3 +6,4 @@ export * from './ModuleScreen';
 export * from './PortfoliosScreen';
 export * from './SettingsScreen';
 export * from './StatsScreen';
+export * from './v1';

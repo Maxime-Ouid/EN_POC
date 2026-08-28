@@ -6,19 +6,34 @@ import { TopbarRight } from '../atoms/TopbarRight';
 import { Breadcrumb } from '../molecules/Breadcrumb';
 import { NavGroup } from '../molecules/NavGroup';
 import { NavItem } from '../molecules/NavItem';
+import { NavSubItem } from '../molecules/NavSubItem';
 import { SidebarBrand } from '../molecules/SidebarBrand';
 import { SidebarFoot } from '../molecules/SidebarFoot';
 import { TenantSwitcher } from '../molecules/TenantSwitcher';
 import { TopbarSearch } from '../molecules/TopbarSearch';
 import { Sidebar } from '../organisms/Sidebar';
 import { Topbar } from '../organisms/Topbar';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
+
+export interface NavSubEntry {
+  key: string;
+  label: string;
+  count?: number;
+}
 
 export interface NavEntry {
   key: string;
   icon: string;
   label: string;
   count?: number;
+  /**
+   * Sous-entrées de la rubrique (navigation V1 : « Dossiers » → « Exports
+   * multiples », « Espaces clients »…). Une rubrique qui en porte affiche un
+   * chevron ; cliquer dessus l'ouvre ET navigue vers sa première sous-entrée,
+   * comme l'interface actuelle.
+   */
+  items?: NavSubEntry[];
 }
 
 export interface NavSection {
@@ -48,6 +63,11 @@ export interface AppShellProps {
    * le backend — le lecteur doit toujours savoir ce qui est réel.
    */
   noticeLabel?: string | null;
+  /**
+   * Masque les intitulés de section de la sidebar. L'interface actuelle (V1)
+   * n'en affiche aucun : ses sections ne servent qu'à regrouper le code.
+   */
+  hideSectionLabels?: boolean;
 }
 
 // Assemble la coquille de l'app (sidebar + topbar + zone de contenu) — §6.14 +
@@ -71,7 +91,20 @@ export function AppShell({
   children,
   logoUrl,
   noticeLabel = 'Aperçu — maquette visuelle',
+  hideSectionLabels,
 }: AppShellProps) {
+  // Rubriques dépliées manuellement. Celle qui contient l'écran courant est
+  // toujours ouverte, qu'elle soit dans cet ensemble ou non : l'utilisateur ne
+  // doit jamais voir un item actif dans un menu replié.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   return (
     <div className="app is-active" id="app-main">
       <Sidebar>
@@ -79,18 +112,50 @@ export function AppShell({
         <TenantSwitcher name={officeName} role={officeRole} onClick={onSwitchOffice} />
         <Nav>
           {navSections.map(section => (
-            <NavGroup key={section.label} label={section.label}>
-              {section.items.map(item => (
-                <NavItem
-                  key={item.key}
-                  icon={item.icon}
-                  active={item.key === activeScreen}
-                  count={item.count}
-                  onClick={() => onNavigate(item.key)}
-                >
-                  {item.label}
-                </NavItem>
-              ))}
+            <NavGroup key={section.label} label={hideSectionLabels ? undefined : section.label}>
+              {section.items.map(item => {
+                const childKeys = item.items?.map(sub => sub.key) ?? [];
+                const hasActiveChild = childKeys.includes(activeScreen);
+                const open = expanded.has(item.key) || hasActiveChild;
+                return (
+                  <div key={item.key}>
+                    <NavItem
+                      icon={item.icon}
+                      active={item.key === activeScreen || hasActiveChild}
+                      count={item.count}
+                      expandable={childKeys.length > 0}
+                      expanded={open}
+                      onClick={() => {
+                        if (childKeys.length) {
+                          toggle(item.key);
+                          // Une rubrique à sous-menu n'a pas d'écran propre dans
+                          // l'interface actuelle : cliquer dessus ouvre sa
+                          // première sous-entrée.
+                          onNavigate(childKeys[0]);
+                        } else {
+                          onNavigate(item.key);
+                        }
+                      }}
+                    >
+                      {item.label}
+                    </NavItem>
+                    {open && childKeys.length > 0 && (
+                      <div className="nav-sub">
+                        {item.items?.map(sub => (
+                          <NavSubItem
+                            key={sub.key}
+                            active={sub.key === activeScreen}
+                            count={sub.count}
+                            onClick={() => onNavigate(sub.key)}
+                          >
+                            {sub.label}
+                          </NavSubItem>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </NavGroup>
           ))}
         </Nav>
