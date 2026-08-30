@@ -50,15 +50,21 @@ $FrontendPort = 5173
 
 # --- Outils -----------------------------------------------------------------
 
+# Se connecte par NOM d'hôte, pas par 127.0.0.1 : Vite écoute sur ::1 quand son
+# hôte est "localhost", et un test limité à IPv4 le déclare mort alors qu'il
+# répond. TcpClient.Connect(string) essaie chaque adresse résolue, IPv6 comprise.
 function Test-Port([int]$Port) {
-  $client = New-Object Net.Sockets.TcpClient
-  try {
-    $client.Connect('127.0.0.1', $Port)
-    $client.Close()
-    return $true
-  } catch {
-    return $false
+  foreach ($target in @('localhost', '127.0.0.1')) {
+    $client = New-Object Net.Sockets.TcpClient
+    try {
+      $client.Connect($target, $Port)
+      $client.Close()
+      return $true
+    } catch {
+      $client.Close()
+    }
   }
+  return $false
 }
 
 function Test-Alive($ProcessId) {
