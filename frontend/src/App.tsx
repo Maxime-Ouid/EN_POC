@@ -11,6 +11,11 @@ import {
   type DataroomDocument,
   NewDataroomModal,
   NewFolderModal,
+  AccessRestrictionModal,
+  OfficeUsersScreen,
+  OfficeUserModal,
+  type OfficeUserModalMode,
+  assignableRoles,
   StatsScreen,
   SettingsScreen,
   ModuleScreen,
@@ -20,6 +25,8 @@ import {
 import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
+import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRestrictions';
+import { useOfficeUsers } from './hooks/useOfficeUsers';
 import { useModule } from './hooks/useModule';
 import { api, type DocumentSummary } from './api/endpoints';
 import {
@@ -63,7 +70,14 @@ import {
    l'écran : on ne laisse pas croire que ces chiffres sont réels.
    =========================================================================== */
 
-type ScreenKey = 'dashboard' | 'portfolios' | 'datarooms' | 'dataroom' | 'stats' | 'settings';
+type ScreenKey =
+  | 'dashboard'
+  | 'portfolios'
+  | 'datarooms'
+  | 'dataroom'
+  | 'stats'
+  | 'users'
+  | 'settings';
 
 /**
  * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
@@ -81,6 +95,7 @@ const CRUMB_LABELS: Record<ScreenKey, string> = {
   datarooms: 'Dossiers',
   dataroom: 'Dossiers',
   stats: 'Statistiques & facturation',
+  users: "Annuaire de l'étude",
   settings: 'Personnalisation',
 };
 
@@ -98,6 +113,30 @@ const ROOT_NODE_ID = 'root';
 function toParentId(nodeId: string | undefined): number | undefined {
   if (!nodeId || nodeId === ROOT_NODE_ID) return undefined;
   return Number(nodeId);
+}
+
+/** Cible d'une restriction d'accès, telle que la modale l'affiche. */
+interface AccessTarget {
+  kind: AccessTargetKind;
+  /** Id de dossier (arbre) ou de document ; absent au niveau dataroom. */
+  id?: string;
+  label: string;
+}
+
+/**
+ * Ramène la cible envoyée par l'écran à celle que comprend l'API : le nœud
+ * racine de l'explorateur est synthétique (ROOT_NODE_ID), il n'existe pas comme
+ * Folder côté serveur — restreindre « la racine » est donc restreindre la
+ * dataroom elle-même.
+ */
+function toAccessTarget(
+  target: { kind: 'dataroom' | 'folder' | 'document'; id?: string; label: string },
+  dataroomName: string,
+): AccessTarget {
+  if (target.kind === 'folder' && (!target.id || target.id === ROOT_NODE_ID)) {
+    return { kind: 'dataroom', label: dataroomName };
+  }
+  return target;
 }
 
 function toDataroomDocument(doc: DocumentSummary, username: string): DataroomDocument {
@@ -162,10 +201,27 @@ export default function App() {
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [loginError, setLoginError] = useState<string | undefined>();
   const [mfaError, setMfaError] = useState<string | undefined>();
+  const [userModal, setUserModal] = useState<OfficeUserModalMode | null>(null);
+  const [userModalError, setUserModalError] = useState<string | null>(null);
+  const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   const datarooms = useDatarooms(authenticated);
   const dataroomTree = useDataroomTree(screen === 'dataroom' ? openDataroomId : null);
   const openModule = useModule(moduleSlug);
+
+  // L'annuaire alimente deux écrans : la page Annuaire et la liste à cocher de la
+  // modale d'accès. Il n'est chargé que quand l'un des deux est à l'écran — un
+  // membre simple n'y a de toute façon pas droit (403).
+  const officeUsers = useOfficeUsers(authenticated && (screen === 'users' || accessTarget !== null));
+
+  // Restriction de la cible ouverte. Sans cible, `dataroomId` vaut null : le hook
+  // ne déclenche aucune requête (voir sa clé interne).
+  const access = useAccessRestriction(
+    accessTarget ? openDataroomId : null,
+    accessTarget?.kind ?? 'dataroom',
+    accessTarget && accessTarget.kind !== 'dataroom' ? Number(accessTarget.id) : null,
+  );
 
   // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
   // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
@@ -436,6 +492,10 @@ export default function App() {
               }
             }}
             onCreateFolder={activeFolderId => setNewFolderModal({ parentId: activeFolderId })}
+            onManageAccess={target => {
+              setAccessError(null);
+              setAccessTarget(toAccessTarget(target, openDataroom.name));
+            }}
           />
           <NewFolderModal
             open={newFolderModal !== null}
@@ -448,6 +508,83 @@ export default function App() {
             onCreate={name => {
               const parentId = toParentId(newFolderModal?.parentId);
               void dataroomTree.createFolder(name, parentId).then(() => setNewFolderModal(null));
+            }}
+          />
+          <AccessRestrictionModal
+            open={accessTarget !== null}
+            kind={accessTarget?.kind ?? 'dataroom'}
+            targetLabel={accessTarget?.label ?? ''}
+            targetKey={`${accessTarget?.kind ?? 'dataroom'}:${accessTarget?.id ?? openDataroomId}`}
+            users={officeUsers.items.map(u => ({
+              userId: u.user_id,
+              username: u.username,
+              role: u.role,
+            }))}
+            usersError={officeUsers.error}
+            selectedUserIds={access.userIds}
+            loading={access.loading || officeUsers.loading}
+            error={accessError ?? access.error}
+            onClose={() => {
+              setAccessTarget(null);
+              setAccessError(null);
+            }}
+            onSave={userIds => {
+              setAccessError(null);
+              access
+                .save(userIds)
+                .then(() => setAccessTarget(null))
+                .catch((err: Error) => setAccessError(err.message));
+            }}
+          />
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'users' && (
+        <>
+          <OfficeUsersScreen
+            rows={officeUsers.items.map(u => ({
+              membershipId: u.membership_id,
+              userId: u.user_id,
+              username: u.username,
+              role: u.role,
+            }))}
+            loading={officeUsers.loading}
+            error={officeUsers.error}
+            assignableRoles={assignableRoles(currentOffice?.role)}
+            onCreateUser={() => {
+              setUserModalError(null);
+              setUserModal('create');
+            }}
+            onAttachUser={() => {
+              setUserModalError(null);
+              setUserModal('attach');
+            }}
+            onChangeRole={(membershipId, role) => {
+              void officeUsers.updateRole(membershipId, role);
+            }}
+          />
+          <OfficeUserModal
+            // Remonter le mode dans la clé remet les champs à zéro d'un mode à
+            // l'autre : un mot de passe saisi puis abandonné ne doit pas
+            // ressurgir dans le formulaire de rattachement.
+            key={userModal ?? 'closed'}
+            open={userModal !== null}
+            mode={userModal ?? 'create'}
+            roles={assignableRoles(currentOffice?.role)}
+            error={userModalError}
+            onClose={() => {
+              setUserModal(null);
+              setUserModalError(null);
+            }}
+            onSubmit={({ username: name, password, role }) => {
+              setUserModalError(null);
+              const done =
+                userModal === 'attach'
+                  ? officeUsers.attachUser(name, role)
+                  : officeUsers.createUser(name, password, role);
+              done
+                .then(() => setUserModal(null))
+                .catch((err: Error) => setUserModalError(err.message));
             }}
           />
         </>

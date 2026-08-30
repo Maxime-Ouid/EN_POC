@@ -4,6 +4,7 @@ export * from './HomeScreen';
 export * from './LoginScreen';
 export * from './MfaScreen';
 export * from './ModuleScreen';
+export * from './OfficeUsersScreen';
 export * from './PortfoliosScreen';
 export * from './SettingsScreen';
 export * from './StatsScreen';

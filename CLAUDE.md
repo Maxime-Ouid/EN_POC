@@ -1002,12 +1002,19 @@ session si le code a bougé.
       existant, visibilité hiérarchique des rôles) : `GET`/`POST`/`PATCH
       /api/office-users/`, `POST /api/office-users/attach/`, isolation stricte par
       office même pour une identité partagée type carla (voir "État réel du code").
-      **⚠️ UI absente depuis le 28/08/2026** : la page « Utilisateurs » existait dans
-      l'ancien `App.tsx` (liste + rôle modifiable + formulaire de création/
-      rattachement) mais a disparu avec le remplacement du frontend par la structure
-      du collègue, qui ne l'avait pas. Le hook `hooks/useOfficeUsers.ts` est prêt
-      côté front (liste/création/rattachement/changement de rôle) mais n'a aucun
-      écran consommateur — à reconstruire dans un chantier séparé.
+      **UI reconstruite le 30/08/2026** sur le design system : écran
+      `pages/OfficeUsersScreen.tsx` (« Annuaire de l'étude », entrée de navigation
+      dans la section Office), branché sur `hooks/useOfficeUsers.ts` — liste,
+      recherche/pagination locales façon V1, rôle modifiable en ligne, et modale
+      `organisms/OfficeUserModal.tsx` pour la création d'un compte comme pour le
+      rattachement d'un compte existant. Les rôles proposés sont bornés au rang de
+      l'appelant côté front (`organisms/officeRoles.ts`, miroir de
+      `OfficeMembership.ROLE_RANK`) — le refus reste au serveur, l'interface évite
+      seulement de proposer ce qui sera refusé. Un 403 affiche le message du
+      backend au lieu de masquer l'entrée de menu. **Vérifié : `tsc -b` et
+      `check:ds` (143 fichiers, aucun écart nouveau). Pas encore exercé dans un
+      navigateur réel** — `vite build` et `oxlint` n'étant pas lançables depuis le
+      sandbox Linux (binaires natifs installés pour Windows).
 - [x] Contrôle d'accès par utilisateur sur Dataroom/Folder/Document, avec héritage —
       **backend fait le 28/08/2026** : modèle `AccessRestriction` (base tenant,
       quatrième modèle métier après Dataroom/Folder/Document), accès ouvert par
@@ -1016,12 +1023,20 @@ session si le code a bougé.
       dans la hiérarchie l'emporte, pas de fusion), visibilité de chemin
       (`_subtree_has_accessible_content`/`_level_visible`) calculée à chaque requête,
       lecture seulement (la création/l'upload restent gatés par l'accès direct
-      seul). **⚠️ UI absente depuis le 28/08/2026** : le panneau « Accès » par
-      dossier/document/dataroom et l'onglet « Restrictions » par utilisateur
-      existaient dans l'ancien `App.tsx` mais ont disparu avec le remplacement du
-      frontend, même cause que pour la gestion des utilisateurs ci-dessus. Le hook
-      `hooks/useAccessRestrictions.ts` est prêt côté front mais n'a aucun écran
-      consommateur — à reconstruire dans un chantier séparé.
+      seul). **UI reconstruite le 30/08/2026** : modale
+      `organisms/AccessRestrictionModal.tsx`, ouverte depuis trois points de
+      `DataroomDetailScreen` — bouton « Accès du dossier » (niveau dataroom),
+      « Accès du sous-dossier » (dossier affiché), et une action cadenas sur chaque
+      ligne de document. La modale dit à l'écran les deux règles du backend que
+      l'interface pourrait faire mentir : aucune case cochée = accès OUVERT à toute
+      l'étude (et non « personne »), et la restriction la plus proche l'emporte,
+      le contenu imbriqué en héritant. Le nœud racine de l'explorateur étant
+      synthétique (`ROOT_NODE_ID`, pas un Folder côté serveur), y demander les accès
+      est ramené au niveau dataroom (`toAccessTarget` dans App.tsx). L'onglet
+      « Restrictions » par utilisateur (`useAccessRestrictionsList`,
+      `GET /api/access-restrictions/`) n'est **pas** reconstruit : le hook reste sans
+      écran consommateur. **Vérifié : `tsc -b` et `check:ds` ; pas encore exercé
+      dans un navigateur réel** (même raison que ci-dessus).
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le

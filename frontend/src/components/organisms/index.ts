@@ -1,3 +1,4 @@
+export * from './AccessRestrictionModal';
 export * from './AppearanceTab';
 export * from './DocumentSlideover';
 export * from './Explorer';
@@ -11,6 +12,8 @@ export * from './NavBar';
 export * from './NewDataroomModal';
 export * from './NewFolderModal';
 export * from './OfficeContentTab';
+export * from './OfficeUserModal';
+export * from './officeRoles';
 export * from './QACard';
 export * from './Sidebar';
 export * from './Slideover';

@@ -43,7 +43,14 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Office',
-    items: [{ key: 'settings', icon: 'settings', label: 'Personnalisation' }],
+    items: [
+      // Annuaire de l'étude : seule entrée de cette section adossée à un vrai
+      // endpoint (/api/office-users/). Elle reste visible pour tout le monde —
+      // c'est le serveur qui répond 403 aux non-administrateurs, et l'écran qui
+      // l'explique, plutôt qu'une entrée qui disparaît sans dire pourquoi.
+      { key: 'users', icon: 'users', label: "Annuaire de l'étude" },
+      { key: 'settings', icon: 'settings', label: 'Personnalisation' },
+    ],
   },
 ];
 

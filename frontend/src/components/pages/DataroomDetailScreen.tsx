@@ -81,6 +81,17 @@ export interface DataroomDetailScreenProps {
   onAddDocuments?: (activeFolderId: string | undefined, files?: FileList) => void;
   /** Crée un dossier DANS le dossier actuellement affiché (racine si aucun n'est sélectionné). */
   onCreateFolder?: (activeFolderId: string | undefined) => void;
+  /**
+   * Ouvre la gestion des accès d'un objet. `id` est l'identifiant de l'arbre
+   * (dossier) ou du document ; il est absent pour la dataroom entière. L'écran
+   * ne sait pas quel id d'arbre représente la racine : c'est à l'appelant de le
+   * ramener au niveau dataroom s'il y a lieu — voir App.tsx / ROOT_NODE_ID.
+   */
+  onManageAccess?: (target: {
+    kind: 'dataroom' | 'folder' | 'document';
+    id?: string;
+    label: string;
+  }) => void;
   onReply?: (qaId: string, text: string) => void;
   onDownloadDocument?: (documentId: string) => void;
 }
@@ -105,6 +116,7 @@ export function DataroomDetailScreen({
   onBackToList,
   onAddDocuments,
   onCreateFolder,
+  onManageAccess,
   onReply,
   onDownloadDocument,
 }: DataroomDetailScreenProps) {
@@ -171,6 +183,17 @@ export function DataroomDetailScreen({
             </svg>
             Export ZIP
           </Button>
+          {onManageAccess && (
+            <Button
+              size="sm"
+              onClick={() => onManageAccess({ kind: 'dataroom', label: dataroomName })}
+            >
+              <svg className="icon">
+                <use href="#i-lock" />
+              </svg>
+              Accès du dossier
+            </Button>
+          )}
           <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
             <svg className="icon">
               <use href="#i-plus" />
@@ -196,6 +219,23 @@ export function DataroomDetailScreen({
                   </svg>
                   Nouveau sous-dossier
                 </Button>
+                {onManageAccess && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      onManageAccess({
+                        kind: 'folder',
+                        id: activeFolderId,
+                        label: activeFolderLabel,
+                      })
+                    }
+                  >
+                    <svg className="icon">
+                      <use href="#i-lock" />
+                    </svg>
+                    Accès du sous-dossier
+                  </Button>
+                )}
                 <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
                   <svg className="icon">
                     <use href="#i-plus" />
@@ -240,9 +280,32 @@ export function DataroomDetailScreen({
                       <td className="mono dim">{doc.size}</td>
                       {doc.muted ? <td /> : (
                         <td>
-                          <svg className="icon" style={{ color: 'var(--ink-400)' }}>
-                            <use href="#i-eye" />
-                          </svg>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {onManageAccess && (
+                              // stopPropagation : la ligne entière ouvre le volet
+                              // document, ce bouton ne doit pas l'entraîner.
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-label={`Accès de ${doc.name}`}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  onManageAccess({
+                                    kind: 'document',
+                                    id: doc.id,
+                                    label: doc.name,
+                                  });
+                                }}
+                              >
+                                <svg className="icon">
+                                  <use href="#i-lock" />
+                                </svg>
+                              </Button>
+                            )}
+                            <svg className="icon" style={{ color: 'var(--ink-400)' }}>
+                              <use href="#i-eye" />
+                            </svg>
+                          </div>
                         </td>
                       )}
                     </tr>
