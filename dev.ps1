@@ -84,12 +84,24 @@ function Stop-Tree($ProcessId, [string]$Label) {
   }
 }
 
-function Wait-Port([int]$Port, [string]$Label, [int]$TimeoutSeconds = 60) {
+# Attend qu'un service ouvre son port, MAIS surveille aussi son processus : un
+# serveur qui meurt au démarrage (dépendance manquante, migration en retard) ne
+# répondra jamais, et attendre le délai complet pour dire "pas répondu" cache la
+# seule chose utile, la trace dans le log.
+function Wait-Service([int]$Port, [string]$Label, $ProcessId, [string]$ErrorLog, [int]$TimeoutSeconds = 60) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     if (Test-Port $Port) {
       Write-Host "  $Label prêt sur le port $Port" -ForegroundColor Green
       return $true
+    }
+    if (-not (Test-Alive $ProcessId)) {
+      Write-Host "  $Label s'est arrêté au démarrage :" -ForegroundColor Red
+      if (Test-Path $ErrorLog) {
+        Get-Content $ErrorLog -Tail 6 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+      }
+      Write-Host "    (trace complète : .\dev.ps1 logs)" -ForegroundColor DarkGray
+      return $false
     }
     Start-Sleep -Milliseconds 500
   }
@@ -143,8 +155,18 @@ function Start-Dev {
     started  = (Get-Date).ToString('s')
   } | ConvertTo-Json | Set-Content $pidFile
 
-  Wait-Port $BackendPort 'Backend' | Out-Null
-  Wait-Port $FrontendPort 'Frontend' | Out-Null
+  $backendOk = Wait-Service $BackendPort 'Backend' $backend.Id $backendErr
+  $frontendOk = Wait-Service $FrontendPort 'Frontend' $frontend.Id $frontendErr
+
+  if (-not $backendOk) {
+    Write-Host ""
+    Write-Host "  Dépendance Python manquante ? Le venv se remet à jour avec :" -ForegroundColor Yellow
+    Write-Host "    backend\.venv\Scripts\python.exe -m pip install -r requirements.txt" -ForegroundColor Yellow
+  }
+  if (-not ($backendOk -and $frontendOk)) {
+    Write-Host "  Puis : .\dev.ps1 stop, et relancer." -ForegroundColor DarkGray
+    return
+  }
 
   Write-Host ""
   Write-Host "  Office A : https://officea.localhost:$FrontendPort" -ForegroundColor Cyan
