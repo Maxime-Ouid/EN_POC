@@ -57,6 +57,15 @@ doit ressembler à la vraie cible, pas à une maquette simplifiée.
 Le `.venv` backend est un venv **Windows** (`backend/.venv/Scripts/`), pas un venv Unix.
 
 ```powershell
+# Tout l'environnement de dev en une commande (backend + frontend détachés, PID dans
+# .dev/) — ajouté le 30/08/2026. Les commandes détaillées ci-dessous restent valables
+# et servent au diagnostic quand quelque chose ne démarre pas.
+.\dev.ps1            # démarre les deux et attend que les ports répondent
+.\dev.ps1 stop       # arrête les deux, enfants compris (taskkill /T)
+.\dev.ps1 status     # qui tourne, sur quels ports
+.\dev.ps1 logs       # dernières lignes des sorties
+.\dev.ps1 totp       # code TOTP de carla
+
 # Backend — HTTPS via runserver_plus (django-extensions), remplace runserver depuis le
 # passage en HTTPS. Les deux serveurs de dev tournent exclusivement en HTTPS
 # (SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE=True) : ne pas revenir à runserver nu, les
