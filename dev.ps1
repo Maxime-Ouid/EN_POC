@@ -1,4 +1,4 @@
-<#
+﻿<#
   Environnement de dev du POC en une commande.
 
   Le backend (runserver_plus) et le frontend (vite) bloquent chacun leur
@@ -20,6 +20,13 @@
 
   Si Windows refuse d'exécuter le script :
     powershell -ExecutionPolicy Bypass -File .\dev.ps1
+
+  ENCODAGE - ce fichier doit rester en UTF-8 AVEC BOM, et sans tiret cadratin,
+  guillemet courbe ni apostrophe typographique. PowerShell 5.1 lit un .ps1 sans
+  BOM en ANSI (CP1252) : le tiret cadratin devient alors trois octets dont le
+  dernier vaut un guillemet fermant, qui termine la chaîne en cours et fait
+  échouer le parseur trente lignes plus loin, sur des accolades parfaitement
+  équilibrées. Constaté, pas théorique.
 #>
 
 param(
@@ -86,7 +93,7 @@ function Wait-Port([int]$Port, [string]$Label, [int]$TimeoutSeconds = 60) {
     }
     Start-Sleep -Milliseconds 500
   }
-  Write-Host "  $Label n'a pas répondu en $TimeoutSeconds s — voir .\dev.ps1 logs" -ForegroundColor Yellow
+  Write-Host "  $Label n'a pas répondu en $TimeoutSeconds s - voir .\dev.ps1 logs" -ForegroundColor Yellow
   return $false
 }
 
@@ -102,19 +109,19 @@ function Start-Dev {
     throw "Venv backend introuvable : $venvPython (voir SETUP.md)"
   }
   if (-not (Test-Path (Join-Path $root 'localhost+5.pem'))) {
-    throw "Certificat localhost+5.pem absent à la racine — les deux serveurs tournent en HTTPS (voir CLAUDE.md, Commandes)"
+    throw "Certificat localhost+5.pem absent à la racine - les deux serveurs tournent en HTTPS (voir CLAUDE.md, Commandes)"
   }
   # Un port déjà pris signifie presque toujours un serveur oublié d'une session
   # précédente : le dire plutôt que d'échouer obscurément au démarrage.
   foreach ($port in @($BackendPort, $FrontendPort)) {
     if (Test-Port $port) {
-      throw "Le port $port est déjà occupé — un serveur tourne encore (.\dev.ps1 stop, ou fermer le terminal concerné)"
+      throw "Le port $port est déjà occupé - un serveur tourne encore (.\dev.ps1 stop, ou fermer le terminal concerné)"
     }
   }
 
   New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 
-  Write-Host "Démarrage…" -ForegroundColor Cyan
+  Write-Host "Démarrage..." -ForegroundColor Cyan
 
   $backend = Start-Process -FilePath $venvPython `
     -ArgumentList 'manage.py', 'runserver_plus', '--cert-file', '../localhost+5.pem', '--key-file', '../localhost+5-key.pem' `
@@ -142,7 +149,7 @@ function Start-Dev {
   Write-Host ""
   Write-Host "  Office A : https://officea.localhost:$FrontendPort" -ForegroundColor Cyan
   Write-Host "  Office B : https://officeb.localhost:$FrontendPort" -ForegroundColor Cyan
-  Write-Host "  Comptes  : carla / demo1234 (superadmin, MFA déjà confirmée — .\dev.ps1 totp)" -ForegroundColor DarkGray
+  Write-Host "  Comptes  : carla / demo1234 (superadmin, MFA déjà confirmée - .\dev.ps1 totp)" -ForegroundColor DarkGray
   Write-Host "             alice / demo1234 (admin office A, enrôlement MFA au 1er login)" -ForegroundColor DarkGray
   Write-Host ""
   Write-Host "  Arrêter : .\dev.ps1 stop" -ForegroundColor DarkGray
@@ -154,7 +161,7 @@ function Stop-Dev {
     Write-Host "Rien à arrêter (aucun PID enregistré)." -ForegroundColor Yellow
     return
   }
-  Write-Host "Arrêt…" -ForegroundColor Cyan
+  Write-Host "Arrêt..." -ForegroundColor Cyan
   Stop-Tree $state.frontend 'Frontend'
   Stop-Tree $state.backend 'Backend'
   Remove-Item $pidFile -ErrorAction SilentlyContinue
@@ -200,7 +207,7 @@ function Show-Totp {
   # touche pas la base, inutile de démarrer Django.
   $code = & $venvPython -c "from django_otp.oath import totp; from binascii import unhexlify; print('%06d' % totp(unhexlify('3132333435363738393031323334353637383930')))"
   Write-Host "Code TOTP de carla : $code" -ForegroundColor Green
-  Write-Host "Valable 30 secondes — relancer si l'écran le refuse." -ForegroundColor DarkGray
+  Write-Host "Valable 30 secondes - relancer si l'écran le refuse." -ForegroundColor DarkGray
 }
 
 switch ($Action) {
