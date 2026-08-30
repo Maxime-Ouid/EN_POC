@@ -101,6 +101,29 @@ export function AppShell({
   const showSectionLabels = hideSectionLabels ? false : layout.showSectionLabels;
   const countOf = (n?: number) => (layout.showBadges ? n : undefined);
 
+  /* Rubrique parente de l'écran courant (« Personnalisation », « Activités »…),
+     lue dans le modèle de navigation plutôt que passée en prop.
+
+     Depuis le retrait des titres de page (28/08/2026), le fil d'Ariane est le
+     SEUL repère qui dit dans quelle rubrique on se trouve — rôle que tenait le
+     surtitre de l'en-tête. La déduire ici évite une n-ième table écran →
+     rubrique à garder d'accord avec la navigation : c'est la navigation qui
+     fait foi. Les écrans de premier niveau (Accueil, Support…) n'ont pas de
+     parent, le fil reste alors à deux segments. */
+  const parentSection = navSections
+    .flatMap(section => section.items)
+    .find(item => item.items?.some(sub => sub.key === activeScreen));
+
+  /* Une rubrique peut porter le même nom que sa première entrée — « Dossiers ›
+     Dossiers » dans la navigation V1. On n'affiche alors le segment qu'une
+     fois : répéter le mot ne dit rien de plus et fait douter le lecteur. */
+  const showParent = parentSection && parentSection.label !== breadcrumbCurrent;
+
+  const crumbItems = [
+    ...(breadcrumbRoot ? [{ label: breadcrumbRoot }] : []),
+    ...(showParent ? [{ label: parentSection.label }] : []),
+  ];
+
   return (
     <div className="app is-active" id="app-main">
       {horizontal ? (
@@ -193,10 +216,7 @@ export function AppShell({
       <div className="main" style={{ position: 'relative' }}>
         <Decor preset="app" />
         <Topbar>
-          <Breadcrumb
-            items={breadcrumbRoot ? [{ label: breadcrumbRoot }] : []}
-            current={breadcrumbCurrent}
-          />
+          <Breadcrumb items={crumbItems} current={breadcrumbCurrent} />
           <TopbarSearch placeholder="Rechercher un dossier, un document, un contact…" shortcut="⌘K" />
           <TopbarRight>
             {noticeLabel && <ProtoPill label={noticeLabel} />}

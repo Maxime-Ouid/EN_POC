@@ -7,7 +7,6 @@ import { Select } from '../../atoms/Select';
 import { TextInput } from '../../atoms/TextInput';
 import { Field } from '../../molecules/Field';
 import { FieldRow } from '../../molecules/FieldRow';
-import { PageHeader } from '../../molecules/PageHeader';
 
 export type V1StatsPortee = 'tous' | 'espace-client' | 'dossier' | 'groupe' | 'utilisateur';
 export type V1StatsDonnees = 'tout' | 'telechargements' | 'previsualisations';
@@ -60,8 +59,6 @@ export function V1StatsConsultationsScreen({ onAfficher }: V1StatsConsultationsS
 
   return (
     <Screen>
-      <PageHeader title="Statistiques de consultation de la documentation" />
-
       <Card padded style={{ marginTop: 16, maxWidth: 720 }}>
         <div className="section-title">Sélectionnez la période</div>
         <FieldRow>

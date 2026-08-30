@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Screen } from '../atoms/Screen';
 import { SubscreenPanel } from '../atoms/SubscreenPanel';
-import { PageHeader } from '../molecules/PageHeader';
 import { TabStrip } from '../molecules/TabStrip';
 import { AppearanceTab } from '../organisms/AppearanceTab';
 import { IdentityTab } from '../organisms/IdentityTab';
@@ -34,15 +33,9 @@ export function SettingsScreen({ identity, modules, defaultTab = 'sub3-identite'
 
   return (
     <Screen>
-      <PageHeader
-        eyebrow="Office"
-        title="Personnalisation"
-        sub="Adaptez l'Espace Notarial à l'identité de votre étude — en marque grise, sur votre propre sous-domaine."
-      />
-
-      <div style={{ marginTop: 20 }}>
-        <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as SettingsTabKey)} />
-      </div>
+      {/* Titre de page retiré le 28/08/2026 : le fil d'Ariane de la topbar
+          nomme l'écran. La barre d'onglets ouvre donc la page. */}
+      <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as SettingsTabKey)} />
 
       <SubscreenPanel level={3} active={activeTab === 'sub3-identite'}>
         <IdentityTab {...identity} />

@@ -146,9 +146,10 @@ export function DataroomDetailScreen({
         current={dataroomName}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        {/* Le nom du dossier est déjà le dernier segment du fil d'Ariane
+            juste au-dessus : le titre le répétait mot pour mot. */}
         <div>
-          <h1 className="page-title">{dataroomName}</h1>
-          <ButtonRow style={{ marginTop: 8 }}>
+          <ButtonRow>
             {tags.map((t, i) => (
               <Tag key={i} icon={t.plain ? undefined : 'tag'} plain={t.plain}>
                 {t.label}

@@ -2,7 +2,6 @@ import { Button } from '../../atoms/Button';
 import { Card } from '../../atoms/Card';
 import { Icon } from '../../atoms/Icon';
 import { Screen } from '../../atoms/Screen';
-import { PageHeader } from '../../molecules/PageHeader';
 import { Toolbar } from '../../molecules/Toolbar';
 
 export interface V1TransfertDataScreenProps {
@@ -28,8 +27,6 @@ export function V1TransfertDataScreen({
 }: V1TransfertDataScreenProps) {
   return (
     <Screen>
-      <PageHeader eyebrow="Outils" title="Transfert Data" />
-
       <Toolbar>
         <Button size="sm" variant="primary" onClick={onTelechargerApp}>
           <Icon id="down" />

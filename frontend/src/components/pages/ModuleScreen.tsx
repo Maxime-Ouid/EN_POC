@@ -41,15 +41,16 @@ export function ModuleScreen({
 }: ModuleScreenProps) {
   return (
     <section className="screen is-active">
-      <div className="eyebrow">Module de l'office</div>
-      <h1 className="page-title">{name}</h1>
-      <div className="page-sub">{desc}</div>
-
-      <Card padded style={{ marginTop: 20, maxWidth: 720 }}>
+      {/* En-tête de page retiré le 28/08/2026 : il répétait le nom du module,
+          déjà porté par le fil d'Ariane et par la carte. La description, elle,
+          n'existait qu'à cet endroit — elle descend dans la carte plutôt que de
+          disparaître avec le titre. */}
+      <Card padded style={{ maxWidth: 720 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
           <RowIcon icon={icon} bg={iconBg} color={iconColor} />
           <div style={{ flex: 1 }}>
             <div className="section-title">{name}</div>
+            <div className="tiny dim">{desc}</div>
             <div className="tiny dim">Servi par le backend de l'office, pas par le front</div>
           </div>
           {status === 'ready' && <Pill kind="success">Activé</Pill>}

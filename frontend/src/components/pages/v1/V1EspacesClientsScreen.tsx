@@ -10,7 +10,6 @@ import { Toggle } from '../../atoms/Toggle';
 import { Dropzone } from '../../molecules/Dropzone';
 import { Field } from '../../molecules/Field';
 import { ListControls } from '../../molecules/ListControls';
-import { PageHeader } from '../../molecules/PageHeader';
 import { RowName } from '../../molecules/RowName';
 import { TablePager } from '../../molecules/TablePager';
 import { Toolbar } from '../../molecules/Toolbar';
@@ -80,8 +79,6 @@ export function V1EspacesClientsScreen({
 
   return (
     <Screen>
-      <PageHeader title="Espaces clients" />
-
       <Toolbar>
         <Button size="sm" variant="primary" onClick={onCreate}>
           <Icon id="plus" />

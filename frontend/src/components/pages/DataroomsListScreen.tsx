@@ -45,13 +45,9 @@ export function DataroomsListScreen({
   return (
     <section className="screen is-active">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="eyebrow">{totalCount} dossiers</div>
-          <h1 className="page-title">Dossiers</h1>
-          <div className="page-sub">
-            Chaque dossier est une dataroom : arborescence, droits et échanges dédiés à une opération.
-          </div>
-        </div>
+        {/* Le titre est parti avec les autres le 28/08/2026 (fil d'Ariane) ; le
+            décompte, lui, est une donnée et reste. */}
+        <div className="eyebrow">{totalCount} dossiers</div>
         <Button variant="accent" onClick={onCreate}>
           <svg className="icon">
             <use href="#i-plus" />

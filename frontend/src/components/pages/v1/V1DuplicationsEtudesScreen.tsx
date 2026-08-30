@@ -9,7 +9,7 @@ import { TextInput } from '../../atoms/TextInput';
 import { Toggle } from '../../atoms/Toggle';
 import { Field } from '../../molecules/Field';
 import { FieldRow } from '../../molecules/FieldRow';
-import { PageHeader } from '../../molecules/PageHeader';
+import { Toolbar } from '../../molecules/Toolbar';
 
 export interface V1EtudeOption {
   value: string;
@@ -46,15 +46,15 @@ export function V1DuplicationsEtudesScreen({
 
   return (
     <Screen>
-      <PageHeader
-        title="Duplication de dossiers avec d'autres études de l'espacenotarial"
-        actions={
-          <Button size="sm" variant="ghost" onClick={onHistorique}>
-            <Icon id="clock" />
-            voir l'historique
-          </Button>
-        }
-      />
+      {/* Le titre de l'écran a été retiré (28/08/2026) : le fil d'Ariane le
+          porte. Le bouton qui vivait à côté de lui redescend dans la barre
+          d'actions, comme sur les autres écrans. */}
+      <Toolbar>
+        <Button size="sm" variant="ghost" onClick={onHistorique}>
+          <Icon id="clock" />
+          voir l'historique
+        </Button>
+      </Toolbar>
 
       <div className="v1-info-block" style={{ marginTop: 16 }}>
         <Icon id="shield" />

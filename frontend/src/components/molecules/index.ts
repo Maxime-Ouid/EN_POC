@@ -12,7 +12,6 @@ export * from './ModuleRow';
 export * from './NavGroup';
 export * from './NavItem';
 export * from './NavSubItem';
-export * from './PageHeader';
 export * from './PresetCard';
 export * from './PresetRow';
 export * from './RowName';

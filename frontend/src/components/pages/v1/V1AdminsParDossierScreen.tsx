@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { pagerInfo, useListPaging } from '../../../hooks/useListPaging';
 import { Screen } from '../../atoms/Screen';
 import { ListControls } from '../../molecules/ListControls';
-import { PageHeader } from '../../molecules/PageHeader';
 import { RowName } from '../../molecules/RowName';
 import { TablePager } from '../../molecules/TablePager';
 import { TableCard } from '../../organisms/TableCard';
@@ -37,8 +36,6 @@ export function V1AdminsParDossierScreen({ rows, total }: V1AdminsParDossierScre
 
   return (
     <Screen>
-      <PageHeader title="Liste des administrateurs délégués par dossiers" />
-
       <ListControls
         unit="administrateurs"
         perPage={list.perPage}

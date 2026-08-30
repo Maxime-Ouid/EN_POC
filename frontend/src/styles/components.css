@@ -79,8 +79,15 @@ html,body,#root{height:100%;}
    Le décalage passe donc par --nav-w et non par une largeur recopiée dans
    .main — c'était un 236px/250px codé en dur de part et d'autre, impossible à
    personnaliser sans les désynchroniser. */
+/* Le fond du rail passe par --nav-bg depuis le 28/08/2026. Il était codé
+   `transparent`, ce qui rendait le réglage « Fond de la sidebar » de
+   Personnalisation → Apparence strictement sans effet : on changeait la
+   couleur, rien ne bougeait. --nav-bg est un rgba, donc son opacité par
+   défaut (45 %) laisse toujours courir le dégradé de #app-main dessous —
+   l'intention d'origine est conservée, mais elle est maintenant réglable au
+   lieu d'être imposée. */
 .sidebar{
-  width:var(--nav-w);flex:none;background:transparent;color:var(--shell-text);
+  width:var(--nav-w);flex:none;background:var(--nav-bg);color:var(--shell-text);
   display:flex;flex-direction:column;
   border-right:1px solid var(--shell-border);
   height:100%;
@@ -218,8 +225,14 @@ html,body,#root{height:100%;}
   border:1px solid var(--card-glass-border);
   box-shadow:0 8px 30px rgba(20,23,26,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
 }
-.breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-500);white-space:nowrap;}
-.breadcrumb b{color:var(--ink-900);font-weight:600;}
+/* Fil d'Ariane — depuis le retrait des titres de page (28/08/2026), c'est le
+   seul repère qui nomme l'écran : l'écran courant est donc un cran plus gros
+   que ses parents. Les segments texte peuvent se tronquer (min-width:0), les
+   chevrons jamais (flex:none, hérité de svg.icon). */
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-500);white-space:nowrap;min-width:0;}
+.breadcrumb>a,.breadcrumb>span,.breadcrumb>b{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.breadcrumb b{color:var(--ink-900);font-weight:600;font-size:14px;}
+.breadcrumb a:hover{color:var(--ink-900);}
 .breadcrumb svg{width:13px;height:13px;color:var(--ink-400);}
 .topbar-search{
   flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--surface-alt);
@@ -543,6 +556,13 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 /* ============ PERSONNALISATION — Apparence (design system éditable) ============ */
 .subscreen3{display:none;}
 .subscreen3.is-active{display:block;}
+/* Barre d'onglets de l'écran Apparence + badge d'enregistrement sur la même
+   ligne. Le badge est hors onglets : il rend compte de tout l'écran, pas du
+   seul onglet ouvert. */
+.appearance-tabs-head{display:flex;align-items:center;gap:12px;margin-bottom:20px;}
+.appearance-tabs-head .tabstrip{flex:1;min-width:0;margin-bottom:0;overflow-x:auto;}
+.appearance-tabs-head .save-flash,.appearance-tabs-head .save-error{flex:none;}
+.appearance-reset{margin-top:26px;padding-top:18px;border-top:1px solid var(--border-soft);}
 .appearance-block{margin-bottom:26px;}
 .appearance-block:last-child{margin-bottom:0;}
 .appearance-block-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:3px;}
@@ -655,7 +675,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
   height:var(--nav-h);
   display:flex;align-items:center;gap:10px;
   padding:0 16px;
-  background:var(--card-glass-bg);
+  /* Même token que le rail : « Fond de la navigation » doit répondre quelle que
+     soit la disposition choisie. Sur --card-glass-bg, la barre d'onglets
+     suivait le fond de la TOPBAR — deux surfaces distinctes pilotées par un
+     seul réglage, et un réglage de navigation qui restait sans effet ici. */
+  background:var(--nav-bg);
   -webkit-backdrop-filter:blur(18px) saturate(160%);
   backdrop-filter:blur(18px) saturate(160%);
 }

@@ -3,7 +3,6 @@ import { pagerInfo, useListPaging } from '../../../hooks/useListPaging';
 import { Card } from '../../atoms/Card';
 import { Screen } from '../../atoms/Screen';
 import { ListControls } from '../../molecules/ListControls';
-import { PageHeader } from '../../molecules/PageHeader';
 import { StatCard } from '../../molecules/StatCard';
 import { TablePager } from '../../molecules/TablePager';
 import { TableCard } from '../../organisms/TableCard';
@@ -34,8 +33,6 @@ export function V1QuiEstConnecteScreen({ rows }: V1QuiEstConnecteScreenProps) {
 
   return (
     <Screen>
-      <PageHeader title="Qui est connecté ?" />
-
       <Card padded style={{ marginTop: 16, marginBottom: 16, maxWidth: 280 }}>
         <StatCard
           label="Sessions ouvertes"

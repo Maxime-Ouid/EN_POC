@@ -1,6 +1,5 @@
 import { Screen } from '../../atoms/Screen';
 import { SubscreenPanel } from '../../atoms/SubscreenPanel';
-import { PageHeader } from '../../molecules/PageHeader';
 import { AppearanceTab } from '../../organisms/AppearanceTab';
 import { ModulesTab } from '../../organisms/ModulesTab';
 import { OfficeContentTab } from '../../organisms/OfficeContentTab';
@@ -26,36 +25,6 @@ export interface V1PersonnalisationScreenProps {
   modules: ModulesTabProps;
 }
 
-/* Titre et sous-titre par section.
-   Ils remplacent la barre d'onglets retirée le 28/08/2026 : sans elle, le
-   titre de page est le seul repère qui dit dans quelle section on se trouve. */
-const SECTIONS: Record<V1PersonnalisationTab, { title: string; sub: string }> = {
-  coordonnees: {
-    title: "Coordonnées et logo de l'office",
-    sub: "Ce que voient vos clients en en-tête de l'Espace Notarial et dans vos documents.",
-  },
-  emails: {
-    title: 'En-tête des emails',
-    sub: "Bandeau et signature des messages envoyés au nom de l'étude.",
-  },
-  apparence: {
-    title: 'Apparence',
-    sub: "Couleurs, typographie, formes et navigation — appliqués à tout l'Espace Notarial.",
-  },
-  accueil: {
-    title: 'Accueil & mentions',
-    sub: "Texte d'accueil et mentions légales affichés à la connexion.",
-  },
-  'espace-client': {
-    title: 'Espace client',
-    sub: 'Ce que vos clients voient et peuvent faire depuis leur espace.',
-  },
-  modules: {
-    title: 'Modules & modèles',
-    sub: 'Fonctionnalités activées pour votre étude et modèles de dataroom.',
-  },
-};
-
 /* Personnalisation — la rubrique de l'interface actuelle, élargie.
 
    En V1, « Personnalisation » ne contient que « Coordonnées et logo de
@@ -72,7 +41,11 @@ const SECTIONS: Record<V1PersonnalisationTab, { title: string; sub: string }> = 
    qu'elles figurent déjà dans le sous-menu « Personnalisation » de la
    navigation : les mêmes six choix, deux fois, à deux endroits, avec deux
    états à garder d'accord. La barre a été retirée le 28/08/2026 ; la navigation
-   reste seule maîtresse de la section affichée. */
+   reste seule maîtresse de la section affichée.
+
+   Le titre de page a suivi le même jour, pour la même raison : il répétait le
+   libellé du sous-menu. C'est le fil d'Ariane (« office › Personnalisation ›
+   section ») qui dit désormais où l'on se trouve. */
 export function V1PersonnalisationScreen({
   activeTab,
   content,
@@ -81,12 +54,8 @@ export function V1PersonnalisationScreen({
   contentNote,
   modules,
 }: V1PersonnalisationScreenProps) {
-  const section = SECTIONS[activeTab] ?? SECTIONS.coordonnees;
-
   return (
     <Screen>
-      <PageHeader eyebrow="Personnalisation" title={section.title} sub={section.sub} />
-
       <SubscreenPanel level={3} active={activeTab === 'coordonnees'}>
         <OfficeContentTab
           section="coordonnees"

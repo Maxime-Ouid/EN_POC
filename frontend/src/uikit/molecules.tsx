@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   AvatarStack, Breadcrumb, Button, ButtonRow, Card, DocPanel, Dropzone,
   FeedItem, Field, FieldRow, Icon, MetaBanner, ModuleRow, Nav, NavGroup, NavItem,
-  PageHeader, Pill, PresetCard, PresetRow, RowName, Select, ShapeSwatch,
+  Pill, PresetCard, PresetRow, RowName, Select, ShapeSwatch,
   SidebarBrand, SidebarFoot, StatCard, TabStrip, TemplateOption, TenantSwitcher,
   TextInput, TokenItem, TopbarSearch, TypographySample, BarTrack,
 } from '../components';
@@ -98,20 +98,6 @@ function DropzoneDemo() {
 export function MoleculeSpecimens() {
   return (
     <>
-      <Specimen
-        name="PageHeader"
-        variants={[
-          { label: 'Surtitre + titre + sous-titre', node: (
-            <PageHeader eyebrow="Pilotage" title="Statistiques & facturation"
-              sub="Suivi d'usage par client, pour votre propre refacturation en marque grise." />
-          )},
-          { label: 'Avec actions à droite', node: (
-            <PageHeader eyebrow="245 dossiers" title="Dossiers"
-              actions={<ButtonRow><Button size="sm"><Icon id="filter" />Filtrer</Button><Button variant="accent" size="sm"><Icon id="plus" />Nouveau dossier</Button></ButtonRow>} />
-          )},
-        ]}
-      />
-
       <Specimen
         name="ButtonRow"
         variants={[{ label: 'Groupe d\'actions', node: (

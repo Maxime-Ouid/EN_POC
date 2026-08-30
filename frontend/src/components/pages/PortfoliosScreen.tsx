@@ -30,12 +30,8 @@ export interface PortfoliosScreenProps {
 export function PortfoliosScreen({ portfolios, onCreate, onFilter, onOpen }: PortfoliosScreenProps) {
   return (
     <section className="screen is-active">
-      <div className="eyebrow">Vue consolidée</div>
-      <h1 className="page-title">Portefeuilles</h1>
-      <div className="page-sub">
-        Regroupez les datarooms d'un même client ou d'une même opération complexe.
-      </div>
-      <ButtonRow style={{ marginTop: 18, marginBottom: 20 }}>
+      {/* Titre retiré le 28/08/2026 — le fil d'Ariane dit « Portefeuilles ». */}
+      <ButtonRow style={{ marginBottom: 20 }}>
         <Button variant="accent" onClick={onCreate}>
           <svg className="icon">
             <use href="#i-plus" />

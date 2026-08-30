@@ -351,8 +351,6 @@ export default function App() {
 
       {!openModuleEntry && screen === 'dashboard' && (
         <HomeScreen
-          officeName={session.tenant?.name ?? 'votre office'}
-          userFirstName={username.split(/[.@]/)[0]}
           // Seul le nombre de dossiers est réel ; les autres compteurs n'ont pas
           // encore de source côté backend.
           stats={{ ...DEMO_HOME_STATS, activeDatarooms: datarooms.items.length }}

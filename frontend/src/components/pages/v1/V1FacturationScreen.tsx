@@ -3,7 +3,6 @@ import { Button } from '../../atoms/Button';
 import { Card } from '../../atoms/Card';
 import { Icon } from '../../atoms/Icon';
 import { Screen } from '../../atoms/Screen';
-import { PageHeader } from '../../molecules/PageHeader';
 import { TabStrip } from '../../molecules/TabStrip';
 import { Toolbar } from '../../molecules/Toolbar';
 
@@ -34,8 +33,6 @@ export function V1FacturationScreen({
 
   return (
     <Screen>
-      <PageHeader title="Facturation du service" />
-
       <Toolbar>
         <Button size="sm" variant="primary" onClick={onModalites}>
           <Icon id="file" />

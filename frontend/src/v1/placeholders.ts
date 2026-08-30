@@ -14,30 +14,20 @@ import type { V1ScreenKey } from './nav';
 
 export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>> = {
   'exports-multiples': {
-    eyebrow: 'Dossiers',
-    title: 'Exports multiples',
     role: "Exporter en une fois la documentation de plusieurs dossiers.",
     known: [{ label: 'Source', value: 'Libellé du sous-menu Dossiers uniquement' }],
   },
   'duplication-dossier': {
-    eyebrow: 'Dossiers',
-    title: "Duplication d'un dossier",
     role: "Dupliquer un dossier au sein de l'étude — à ne pas confondre avec « Duplications entre études », qui est un écran distinct et, lui, documenté.",
     known: [{ label: 'Source', value: 'Libellé du sous-menu Dossiers uniquement' }],
   },
   'dossiers-inactifs': {
-    eyebrow: 'Dossiers',
-    title: 'Dossiers inactifs',
     known: [{ label: 'Source', value: 'Entrée survolée dans le sous-menu (capture 115130)' }],
   },
   'rapports-maj': {
-    eyebrow: 'Dossiers',
-    title: 'Rapports de mise à jour',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Dossiers uniquement' }],
   },
   'annuaire-clients': {
-    eyebrow: 'Annuaires',
-    title: 'Annuaire des clients',
     role: "Contacts extérieurs à l'étude, ajoutables comme membres d'un dossier.",
     known: [
       {
@@ -47,26 +37,19 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
     ],
   },
   'annuaire-societes': {
-    eyebrow: 'Annuaires',
-    title: 'Annuaire des sociétés',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Annuaires uniquement' }],
   },
   'changement-titulaire': {
-    eyebrow: 'Annuaires',
-    title: 'Changement de titulaire',
     role: "Transférer la titularité d'un dossier d'un membre de l'étude à un autre.",
     known: [{ label: 'URL relevée', value: '?page=swapcreateurdossier (capture 113854)' }],
   },
   telechargements: {
-    title: 'Téléchargements',
     known: [
       { label: 'Source', value: 'Rubrique de premier niveau, jamais dépliée sur les captures' },
       { label: 'Inconnu', value: "On ignore si cette rubrique a un sous-menu" },
     ],
   },
   'stats-connexions': {
-    eyebrow: 'Activités',
-    title: 'Statistiques de connexions',
     known: [
       {
         label: 'Hypothèse',
@@ -75,12 +58,9 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
     ],
   },
   'suivi-exportations': {
-    eyebrow: 'Activités',
-    title: 'Suivi des exportations',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Activités uniquement' }],
   },
   'transfert-fichiers': {
-    title: 'Transfert de fichiers',
     role: 'Envoyer ou recevoir des fichiers volumineux avec un client.',
     known: [
       {
@@ -91,37 +71,25 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
     ],
   },
   'espace-promoteurs': {
-    title: 'Espace promoteurs',
     known: [{ label: 'Source', value: 'Rubrique de premier niveau, jamais ouverte sur les captures' }],
   },
   'outils-structmaker': {
-    eyebrow: 'Outils',
-    title: 'Structmaker',
     role: "Importer l'arborescence complète d'un dossier Windows vers une dataroom.",
     known: [{ label: 'Trace indirecte', value: "Descriptif de la tuile « Structmaker » de l'accueil (113344)" }],
   },
   'outils-controle-integrite': {
-    eyebrow: 'Outils',
-    title: "Contrôle d'intégrité",
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
   },
   'outils-import-katz': {
-    eyebrow: 'Outils',
-    title: 'Import "Katz / Wargny"',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
   },
   'outils-import-oudot': {
-    eyebrow: 'Outils',
-    title: 'Import "Oudot.net"',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
   },
   'outils-reader-csv': {
-    eyebrow: 'Outils',
-    title: 'EspaceNotarialReader -> CSV',
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
   },
   support: {
-    title: 'Support',
     role: "Contact de l'équipe applicative et signalement d'incident.",
     known: [
       {

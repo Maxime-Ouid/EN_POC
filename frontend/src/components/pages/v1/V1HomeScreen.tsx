@@ -2,7 +2,6 @@ import { Card } from '../../atoms/Card';
 import { Grid } from '../../atoms/Grid';
 import { Icon } from '../../atoms/Icon';
 import { Screen } from '../../atoms/Screen';
-import { PageHeader } from '../../molecules/PageHeader';
 
 export interface V1HomeDossier {
   id: string;
@@ -75,8 +74,6 @@ export function V1HomeScreen({
 }: V1HomeScreenProps) {
   return (
     <Screen>
-      <PageHeader title="Bienvenue sur votre Espace Notarial" />
-
       <Grid columns={2} style={{ marginTop: 18, alignItems: 'start' }}>
         <Card padded>
           <div className="eyebrow">Accès rapides</div>

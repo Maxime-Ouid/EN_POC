@@ -4,7 +4,6 @@ import { Button } from '../../atoms/Button';
 import { Icon } from '../../atoms/Icon';
 import { Screen } from '../../atoms/Screen';
 import { ListControls } from '../../molecules/ListControls';
-import { PageHeader } from '../../molecules/PageHeader';
 import { RowName } from '../../molecules/RowName';
 import { TablePager } from '../../molecules/TablePager';
 import { Toolbar } from '../../molecules/Toolbar';
@@ -44,8 +43,6 @@ export function V1AnnuaireEtudeScreen({
 
   return (
     <Screen>
-      <PageHeader title="Annuaire de l'étude" />
-
       <Toolbar>
         <Button size="sm" variant="primary" onClick={onNouveauMembre}>
           <Icon id="plus" />

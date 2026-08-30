@@ -78,7 +78,7 @@ function ScreenSpecimens() {
         name="HomeScreen"
         variants={[{ label: 'Tableau de bord', node: (
           <ScreenPreview>
-            <HomeScreen officeName={demo.DEMO_OFFICE.name} userFirstName={demo.DEMO_OFFICE.userFirstName}
+            <HomeScreen
               stats={demo.DEMO_HOME_STATS} recentPortfolios={demo.PORTFOLIOS} recentActivity={demo.RECENT_ACTIVITY}
               onOpenPortfolio={noop} onSeeAllPortfolios={noop} onSeeFullHistory={noop} />
           </ScreenPreview>
@@ -188,7 +188,7 @@ function TemplateSpecimens() {
             userInitials={demo.DEMO_OFFICE.userInitials} userName={demo.DEMO_OFFICE.userName}
             userRole={demo.DEMO_OFFICE.userRole} breadcrumbRoot={demo.DEMO_OFFICE.name}
             breadcrumbCurrent="Accueil" hasUnreadNotifications>
-            <HomeScreen officeName={demo.DEMO_OFFICE.name} userFirstName={demo.DEMO_OFFICE.userFirstName}
+            <HomeScreen
               stats={demo.DEMO_HOME_STATS} recentPortfolios={demo.PORTFOLIOS} recentActivity={demo.RECENT_ACTIVITY}
               onOpenPortfolio={noop} onSeeAllPortfolios={noop} onSeeFullHistory={noop} />
           </AppShell>

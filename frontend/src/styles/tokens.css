@@ -22,6 +22,7 @@
   --ink-400:#8783a0;
   --brand-ink:#1a1258;
   --brand-ink-hover:#241a63;
+  --nav-bg:rgba(255,255,255,.45);
   --shell-bg:#1a1258;
   --shell-bg-2:#2c2170;
   --shell-text:#ffffff;
@@ -119,6 +120,7 @@
     --ink-400:#8983a8;
     --brand-ink:#1a1258;
     --brand-ink-hover:#241a63;
+    --nav-bg:rgba(16,13,31,.40);
     --shell-bg:#140d42;
     --shell-bg-2:#1c1558;
     --shell-text:#ffffff;
@@ -180,6 +182,7 @@
   --ink-400:#8983a8;
   --brand-ink:#1a1258;
   --brand-ink-hover:#241a63;
+  --nav-bg:rgba(16,13,31,.40);
   --shell-bg:#140d42;
   --shell-bg-2:#1c1558;
   --shell-text:#ffffff;

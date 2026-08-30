@@ -7,7 +7,6 @@ import { Icon } from '../atoms/Icon';
 import { RowIcon } from '../atoms/RowIcon';
 import { Screen } from '../atoms/Screen';
 import { SubscreenPanel } from '../atoms/SubscreenPanel';
-import { PageHeader } from '../molecules/PageHeader';
 import { TabStrip } from '../molecules/TabStrip';
 import { TableCard } from '../organisms/TableCard';
 import type { TabDef } from '../molecules/TabStrip';
@@ -69,15 +68,9 @@ export function StatsScreen({ usage, invoices, connected, defaultTab = 'sub-usag
 
   return (
     <Screen>
-      <PageHeader
-        eyebrow="Pilotage"
-        title="Statistiques & facturation"
-        sub="Suivi d'usage par client, pour votre propre refacturation en marque grise."
-      />
-
-      <div style={{ marginTop: 20 }}>
-        <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as StatsTabKey)} />
-      </div>
+      {/* Titre de page retiré le 28/08/2026 : le fil d'Ariane de la topbar
+          nomme l'écran. La barre d'onglets ouvre donc la page. */}
+      <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as StatsTabKey)} />
 
       <SubscreenPanel level={2} active={activeTab === 'sub-usage'}>
         <TableCard headers={['Espace client', 'Dossiers', 'Stockage', 'Part du total', 'Dernière activité']}>

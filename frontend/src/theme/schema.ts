@@ -77,7 +77,21 @@ export const TOKEN_SCHEMA: readonly TokenDef[] = [
   { key: 'brass-400', group: 'brand', label: 'Accent — clair', type: 'hex', light: '#ab84f7', dark: '#8656d9' },
   { key: 'brass-100', group: 'brand', label: 'Accent — fond de badge', type: 'rgba', light: '#f0e9fc', dark: 'rgba(150,104,244,.16)' },
 
-  { key: 'shell-bg', group: 'sidebar', label: 'Fond de la sidebar', type: 'hex', light: '#1a1258', dark: '#140d42' },
+  /* `nav-bg` peint la navigation elle-même — rail à gauche/droite ET barre
+     d'onglets en haut/bas. Il a été ajouté le 28/08/2026 après un constat
+     simple : « Fond de la sidebar » se modifiait sans que rien ne bouge à
+     l'écran. En cause, `shell-bg` ne peignait pas le rail (transparent par
+     construction, pour laisser courir le dégradé de l'app dessous) mais le
+     panneau de connexion, les sous-menus volants et les vignettes — le libellé
+     mentait donc sur trois écrans à la fois. Il est renommé plus bas.
+
+     Type `rgba` et non `hex` : à 100 % le rail devient un aplat opaque, en
+     dessous le dégradé transparaît. Un `hex` aurait rendu la transparence
+     impossible et cassé la mise en page voulue. Attention, le texte du rail est
+     sombre en thème clair (`nav-dim`) : un fond sombre à forte opacité le rend
+     illisible — c'est `shell-text`/`nav-dim` qu'il faut alors changer aussi. */
+  { key: 'nav-bg', group: 'sidebar', label: 'Fond de la navigation', type: 'rgba', light: 'rgba(255,255,255,.45)', dark: 'rgba(16,13,31,.40)' },
+  { key: 'shell-bg', group: 'sidebar', label: 'Fond des sous-menus volants et de la page de connexion', type: 'hex', light: '#1a1258', dark: '#140d42' },
   { key: 'shell-bg-2', group: 'sidebar', label: "Fond — sélecteur d'office", type: 'hex', light: '#2c2170', dark: '#1c1558' },
   { key: 'shell-text', group: 'sidebar', label: 'Texte de la sidebar', type: 'hex', light: '#ffffff', dark: '#ffffff' },
   { key: 'shell-text-dim', group: 'sidebar', label: 'Texte atténué de la sidebar', type: 'hex', light: '#b6acdb', dark: '#a89ed4' },

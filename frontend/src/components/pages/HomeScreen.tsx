@@ -24,8 +24,6 @@ export interface FeedEntry {
 }
 
 export interface HomeScreenProps {
-  officeName: string;
-  userFirstName: string;
   stats: {
     activeDatarooms: number;
     activeDeltaText: string;
@@ -45,8 +43,6 @@ export interface HomeScreenProps {
 
 // Écran d'accueil / dashboard — voir index_16.html #screen-dashboard.
 export function HomeScreen({
-  officeName,
-  userFirstName,
   stats,
   recentPortfolios,
   recentActivity,
@@ -58,11 +54,10 @@ export function HomeScreen({
 
   return (
     <section className="screen is-active">
-      <div className="eyebrow">{officeName}</div>
-      <h1 className="page-title">Bonjour, {userFirstName}</h1>
-      <div className="page-sub">Voici l'activité de votre Espace Notarial cette semaine.</div>
-
-      <Grid columns={4} style={{ marginTop: 22 }}>
+      {/* Titre, surtitre et sous-titre retirés le 28/08/2026 : le fil d'Ariane
+          de la topbar nomme l'office et l'écran, les répéter ici volait la
+          première hauteur d'écran aux chiffres. */}
+      <Grid columns={4}>
         <StatCard
           label="Dossiers actifs"
           value={stats.activeDatarooms}

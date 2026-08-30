@@ -88,8 +88,6 @@ export function PrototypeDemo() {
     >
       {screen === 'dashboard' && (
         <HomeScreen
-          officeName={DEMO_OFFICE.name}
-          userFirstName={DEMO_OFFICE.userFirstName}
           stats={DEMO_HOME_STATS}
           recentPortfolios={PORTFOLIOS.map(p => ({
             id: p.id,

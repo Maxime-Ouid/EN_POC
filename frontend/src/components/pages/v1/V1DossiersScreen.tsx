@@ -5,7 +5,6 @@ import { Icon } from '../../atoms/Icon';
 import { Pill } from '../../atoms/Pill';
 import { Screen } from '../../atoms/Screen';
 import { ListControls } from '../../molecules/ListControls';
-import { PageHeader } from '../../molecules/PageHeader';
 import { RowName } from '../../molecules/RowName';
 import { TablePager } from '../../molecules/TablePager';
 import { Toolbar } from '../../molecules/Toolbar';
@@ -49,8 +48,6 @@ export function V1DossiersScreen({ rows, total, onCreate, onOpen, notice }: V1Do
 
   return (
     <Screen>
-      <PageHeader title="Dossiers" />
-
       <Toolbar>
         <Button size="sm" variant="primary" onClick={onCreate}>
           <Icon id="plus" />
