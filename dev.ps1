@@ -50,11 +50,13 @@ $FrontendPort = 5173
 
 # --- Outils -----------------------------------------------------------------
 
-# Se connecte par NOM d'hôte, pas par 127.0.0.1 : Vite écoute sur ::1 quand son
-# hôte est "localhost", et un test limité à IPv4 le déclare mort alors qu'il
-# répond. TcpClient.Connect(string) essaie chaque adresse résolue, IPv6 comprise.
+# Trois cibles, dans cet ordre : IPv4, IPv6 explicite, puis le nom d'hôte. Vite
+# n'écoute pas forcément sur 127.0.0.1 (::1 seul selon la résolution de
+# "localhost" côté Node), et se fier au seul nom d'hôte ne suffit pas non plus
+# quand la résolution ne renvoie qu'une famille d'adresses. Un serveur bien
+# vivant déclaré mort fait perdre plus de temps que ces deux essais de plus.
 function Test-Port([int]$Port) {
-  foreach ($target in @('localhost', '127.0.0.1')) {
+  foreach ($target in @('127.0.0.1', '::1', 'localhost')) {
     $client = New-Object Net.Sockets.TcpClient
     try {
       $client.Connect($target, $Port)
@@ -65,6 +67,15 @@ function Test-Port([int]$Port) {
     }
   }
   return $false
+}
+
+# Qui écoute sur ce port, quel que soit son PID enregistré : le fichier .dev/
+# peut être périmé (terminal fermé, script relancé, processus adopté). Renvoie
+# les PID, ou rien si Get-NetTCPConnection n'existe pas sur ce Windows.
+function Get-PortOwners([int]$Port) {
+  $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+  if (-not $connections) { return @() }
+  return @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
 function Test-Alive($ProcessId) {
@@ -111,7 +122,8 @@ function Wait-Service([int]$Port, [string]$Label, $ProcessId, [string]$ErrorLog,
     }
     Start-Sleep -Milliseconds 500
   }
-  Write-Host "  $Label n'a pas répondu en $TimeoutSeconds s - voir .\dev.ps1 logs" -ForegroundColor Yellow
+  Write-Host "  $Label n'a pas répondu en $TimeoutSeconds s (processus toujours vivant)" -ForegroundColor Yellow
+  Write-Host "    Vérifier quand même dans le navigateur - voir aussi .\dev.ps1 logs" -ForegroundColor DarkGray
   return $false
 }
 
@@ -184,15 +196,24 @@ function Start-Dev {
 }
 
 function Stop-Dev {
-  $state = Read-State
-  if (-not $state) {
-    Write-Host "Rien à arrêter (aucun PID enregistré)." -ForegroundColor Yellow
-    return
-  }
   Write-Host "Arrêt..." -ForegroundColor Cyan
-  Stop-Tree $state.frontend 'Frontend'
-  Stop-Tree $state.backend 'Backend'
-  Remove-Item $pidFile -ErrorAction SilentlyContinue
+  $state = Read-State
+  if ($state) {
+    Stop-Tree $state.frontend 'Frontend'
+    Stop-Tree $state.backend 'Backend'
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
+  }
+
+  # Filet de sécurité : ce qui écoute encore sur les deux ports est arrêté même
+  # si son PID n'est pas (ou plus) dans .dev/pids.json - c'est exactement le cas
+  # qui laisse un "port déjà occupé" impossible à débloquer au démarrage suivant.
+  foreach ($item in @(
+      @{ Label = 'Backend'; Port = $BackendPort },
+      @{ Label = 'Frontend'; Port = $FrontendPort })) {
+    foreach ($owner in Get-PortOwners $item.Port) {
+      Stop-Tree $owner "$($item.Label) résiduel (port $($item.Port))"
+    }
+  }
 }
 
 function Show-Status {
