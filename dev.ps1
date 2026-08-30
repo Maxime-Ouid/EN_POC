@@ -50,16 +50,21 @@ $FrontendPort = 5173
 
 # --- Outils -----------------------------------------------------------------
 
-# Trois cibles, dans cet ordre : IPv4, IPv6 explicite, puis le nom d'hôte. Vite
-# n'écoute pas forcément sur 127.0.0.1 (::1 seul selon la résolution de
-# "localhost" côté Node), et se fier au seul nom d'hôte ne suffit pas non plus
-# quand la résolution ne renvoie qu'une famille d'adresses. Un serveur bien
-# vivant déclaré mort fait perdre plus de temps que ces deux essais de plus.
+# Mesuré sur ce projet : Vite n'écoute QUE sur ::1 (Get-NetTCPConnection -LocalPort
+# 5173 le montre), Django seulement sur 127.0.0.1. Il faut donc essayer les deux
+# familles - et surtout construire le TcpClient AVEC la famille voulue : le
+# constructeur par défaut de .NET Framework est IPv4 seul, il échoue sur ::1 quoi
+# qu'on lui passe, y compris via le nom "localhost". C'est ce détail qui faisait
+# déclarer mort un frontend parfaitement vivant.
 function Test-Port([int]$Port) {
-  foreach ($target in @('127.0.0.1', '::1', 'localhost')) {
-    $client = New-Object Net.Sockets.TcpClient
+  $targets = @(
+    @{ Address = '127.0.0.1'; Family = [Net.Sockets.AddressFamily]::InterNetwork },
+    @{ Address = '::1'; Family = [Net.Sockets.AddressFamily]::InterNetworkV6 }
+  )
+  foreach ($target in $targets) {
+    $client = New-Object -TypeName Net.Sockets.TcpClient -ArgumentList $target.Family
     try {
-      $client.Connect($target, $Port)
+      $client.Connect($target.Address, $Port)
       $client.Close()
       return $true
     } catch {
