@@ -8,13 +8,15 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "check:ds": "node scripts/check-design-system.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:icons": "node scripts/build-icon-sprite.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@iconify-json/ph": "^1.2.2",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

@@ -36,7 +36,14 @@ body{
 h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;color:var(--ink-900);margin:0;text-wrap:balance;}
 button{font-family:inherit;}
 a{color:inherit;}
-svg.icon{width:16px;height:16px;flex:none;display:block;}
+/* `color` et non `fill` : les symboles du sprite sont peints en `currentColor`,
+   ce qui est le SEUL moyen de les colorer à travers `<use>`. Une règle CSS ne
+   traverse pas le shadow DOM que `<use>` crée — un sélecteur qui viserait les
+   `<path>` ne matcherait jamais. Les propriétés héritées (`color`) et les
+   variables CSS, elles, passent. D'où aussi le fait que les surcharges
+   existantes (`.nav-item.active .icon{color:…}`) continuent de fonctionner :
+   elles gagnent sur cette ligne par spécificité, sans rien savoir du sprite. */
+svg.icon{width:16px;height:16px;flex:none;display:block;color:var(--icon-tint);}
 ::selection{background:var(--brass-100);}
 :focus-visible{outline:2px solid var(--brass-500);outline-offset:2px;}
 button, [role="button"], .clickable{cursor:pointer;}
