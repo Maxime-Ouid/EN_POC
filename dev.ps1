@@ -260,7 +260,7 @@ function Show-Totp {
   # Secret fixe posé par seed_demo (vecteur de test RFC 6238) : le calcul ne
   # touche pas la base, inutile de démarrer Django.
   $code = & $venvPython -c "from django_otp.oath import totp; from binascii import unhexlify; print('%06d' % totp(unhexlify('3132333435363738393031323334353637383930')))"
-  Write-Host "Code TOTP de carla : $code" -ForegroundColor Green
+  Write-Host "Code TOTP (carla et alice) : $code" -ForegroundColor Green
   Write-Host "Valable 30 secondes - relancer si l'écran le refuse." -ForegroundColor DarkGray
 }
 
