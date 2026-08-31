@@ -252,10 +252,24 @@ export default function App() {
    * sans redéploiement.
    */
   const navSections = useMemo(() => {
+    // La pastille de « Dossiers » vient du jeu de démonstration (245) : à côté
+    // d'une liste qui, elle, dit la vérité du serveur, ce chiffre faisait mentir
+    // le menu — un office vide s'annonçait avec 245 dossiers. Elle est remplacée
+    // par le décompte réel, et retirée tant que la liste n'est pas chargée
+    // plutôt que remplacée par un zéro qui ressemblerait à une réponse.
+    const withRealCounts = NAV_SECTIONS.map(section => ({
+      ...section,
+      items: section.items.map(item =>
+        item.key === 'datarooms'
+          ? { ...item, count: datarooms.loading || datarooms.error ? undefined : datarooms.items.length }
+          : item,
+      ),
+    }));
+
     const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
-    if (!active.length) return NAV_SECTIONS;
+    if (!active.length) return withRealCounts;
     return [
-      ...NAV_SECTIONS,
+      ...withRealCounts,
       {
         label: 'Modules',
         items: active.map(m => ({
@@ -265,7 +279,7 @@ export default function App() {
         })),
       },
     ];
-  }, [modulesWithServerState]);
+  }, [modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
