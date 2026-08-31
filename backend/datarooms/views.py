@@ -1,7 +1,10 @@
+import mimetypes
+from urllib.parse import quote
+
 from django.contrib.auth import authenticate, get_user_model, login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.http import HttpResponseBadRequest, HttpResponseRedirect
+from django.http import FileResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import render
 
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -686,3 +689,46 @@ def folders_view(request, dataroom_id):
             if _user_can_access(request.user, dataroom, folder=parent, document=d)
         ],
     })
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def document_content_view(request, dataroom_id, document_id):
+    """Sert le contenu binaire d'un document, pour l'affichage dans l'application.
+
+    Pourquoi passer par Django plutôt que par l'URL du stockage : `document.file.url`
+    est une URL MinIO signée en `http://localhost:9000`, alors que l'application est
+    servie en HTTPS — le navigateur bloque le contenu mixte, l'aperçu resterait vide.
+    Ce relais règle aussi un problème de fond : le fichier repasse par les MÊMES
+    contrôles d'accès que sa fiche (_user_can_access), au lieu de circuler sous forme
+    d'une URL signée que n'importe qui pourrait rejouer tant qu'elle est valide.
+
+    `Content-Disposition: inline` : le navigateur affiche au lieu de télécharger. Le
+    téléchargement reste possible depuis le lecteur PDF ou le bouton de la fiche.
+    """
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    dataroom, error = _dataroom_or_404(dataroom_id)
+    if error:
+        return error
+
+    document = dataroom.documents.filter(pk=document_id).first()
+    # 404 et non 403 quand l'accès est refusé : même logique que le reste du contrôle
+    # d'accès (voir _resolve_folder), on ne confirme pas l'existence d'une pièce que
+    # l'utilisateur n'a pas le droit de voir.
+    if document is None or not _user_can_access(
+        request.user, dataroom, folder=document.folder, document=document
+    ):
+        return Response({"error": "document introuvable"}, status=404)
+
+    content_type = mimetypes.guess_type(document.name)[0] or "application/octet-stream"
+    response = FileResponse(document.file.open('rb'), content_type=content_type)
+    # filename* (RFC 5987) : les noms de pièces notariales sont pleins d'accents, et
+    # un en-tête non ASCII casse la réponse chez certains navigateurs.
+    response["Content-Disposition"] = (
+        f"inline; filename*=UTF-8''{quote(document.name)}"
+    )
+    return response

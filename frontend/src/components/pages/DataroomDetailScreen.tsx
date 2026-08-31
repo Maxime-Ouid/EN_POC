@@ -94,6 +94,12 @@ export interface DataroomDetailScreenProps {
   }) => void;
   onReply?: (qaId: string, text: string) => void;
   onDownloadDocument?: (documentId: string) => void;
+  /**
+   * Aperçu du document ouvert dans le volet. Rendu par l'appelant, qui est le
+   * seul à connaître la dataroom et l'endpoint de contenu ; l'écran, lui, sait
+   * seulement quelle pièce est ouverte.
+   */
+  renderDocumentPreview?: (doc: DataroomDocument) => React.ReactNode;
 }
 
 // Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents /
@@ -119,6 +125,7 @@ export function DataroomDetailScreen({
   onManageAccess,
   onReply,
   onDownloadDocument,
+  renderDocumentPreview,
 }: DataroomDetailScreenProps) {
   const [activeTab, setActiveTab] = useState('sub-docs');
   const firstFolderId = tree[0]?.children?.[0]?.id ?? tree[0]?.id;
@@ -417,6 +424,7 @@ export function DataroomDetailScreen({
         }
         onClose={() => setOpenDoc(null)}
         onDownload={() => onDownloadDocument?.(openDoc!.id)}
+        preview={openDoc && renderDocumentPreview ? renderDocumentPreview(openDoc) : undefined}
       />
     </section>
   );

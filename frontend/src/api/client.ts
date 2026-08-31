@@ -69,3 +69,26 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/**
+ * Même contrat que `apiFetch`, mais pour une réponse binaire (contenu d'un
+ * document). Séparé plutôt que paramétré : le corps d'erreur reste du JSON, et
+ * mélanger les deux lectures dans une seule fonction rendait le typage de
+ * retour mensonger.
+ */
+export async function apiFetchBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(`${apiOrigin}${path}`, { credentials: 'include', signal });
+
+  if (!res.ok) {
+    let message = `Erreur ${res.status}`;
+    try {
+      const payload = (await res.json()) as { error?: string; detail?: string };
+      message = payload.error ?? payload.detail ?? message;
+    } catch {
+      /* réponse non JSON — on garde le statut */
+    }
+    throw new ApiError(message, res.status);
+  }
+
+  return await res.blob();
+}

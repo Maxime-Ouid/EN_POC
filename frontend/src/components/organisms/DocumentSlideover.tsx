@@ -48,16 +48,23 @@ export interface DocumentSlideoverProps {
   doc: DocumentSlideoverData | null;
   onClose: () => void;
   onDownload?: () => void;
+  /**
+   * Aperçu du contenu, monté par l'appelant (il seul connaît la dataroom et
+   * l'endpoint). Sa présence élargit le volet et le coupe en deux colonnes ;
+   * sans lui, la fiche garde exactement la forme qu'elle avait.
+   */
+  preview?: React.ReactNode;
 }
 
 // Volet latéral de fiche document — index_16.html #doc-slideover. Ouvert par un
 // clic sur une ligne de l'explorateur ; se ferme aussi quand on change d'écran
 // (c'est à l'appelant de remettre `doc` à null, comme le faisait showScreen()).
-export function DocumentSlideover({ doc, onClose, onDownload }: DocumentSlideoverProps) {
+export function DocumentSlideover({ doc, onClose, onDownload, preview }: DocumentSlideoverProps) {
   return (
-    <Slideover open={!!doc} onClose={onClose} title={doc?.name ?? 'Document'}>
+    <Slideover open={!!doc} onClose={onClose} title={doc?.name ?? 'Document'} wide={!!preview}>
+      {doc && preview && <div className="slideover-preview">{preview}</div>}
       {doc && (
-        <>
+        <div className={preview ? 'slideover-meta' : undefined}>
           <SoField label="Emplacement" value={doc.location} />
           <SoField label="Statut" value={<Pill kind={doc.status.kind}>{doc.status.label}</Pill>} />
           <SoField label="Ajouté par" value={`${doc.addedBy} — ${doc.date}`} />
@@ -107,7 +114,7 @@ export function DocumentSlideover({ doc, onClose, onDownload }: DocumentSlideove
             <Icon id="down" />
             Télécharger
           </button>
-        </>
+        </div>
       )}
     </Slideover>
   );

@@ -4,6 +4,7 @@ from .views import (
     coffre_fort_view, issue_sso_ticket, consume_sso_ticket, datarooms_view, documents_view,
     folders_view, office_users_view, office_user_detail_view, attach_office_user_view,
     dataroom_access_view, folder_access_view, document_access_view, access_restrictions_view,
+    document_content_view,
 )
 
 urlpatterns = [
@@ -21,6 +22,7 @@ urlpatterns = [
     path('datarooms/', datarooms_view),
     path('datarooms/<int:dataroom_id>/documents/', documents_view),
     path('datarooms/<int:dataroom_id>/documents/<int:document_id>/access/', document_access_view),
+    path('datarooms/<int:dataroom_id>/documents/<int:document_id>/content/', document_content_view),
     path('datarooms/<int:dataroom_id>/folders/', folders_view),
     path('datarooms/<int:dataroom_id>/folders/<int:folder_id>/access/', folder_access_view),
     path('datarooms/<int:dataroom_id>/access/', dataroom_access_view),

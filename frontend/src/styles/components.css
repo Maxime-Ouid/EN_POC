@@ -474,6 +474,40 @@ tbody tr:last-child td{border-bottom:none;}
 .slideover.is-active{transform:translateX(0);}
 .slideover-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border);}
 .slideover-body{padding:16px 18px;}
+
+/* Volet élargi : la fiche seule tient dans 340px, un document non. Le volet
+   passe à 60% de l'écran (plafonné à 1100px pour ne pas étirer un A4 sur un
+   écran large) et se coupe en deux colonnes — aperçu à gauche, métadonnées à
+   droite, à la largeur qu'elles avaient déjà. Sous 900px il n'y a de place pour
+   qu'une chose : l'aperçu passe au-dessus de la fiche, l'un sous l'autre. */
+.slideover.is-wide{width:min(60vw,1100px);min-width:min(100vw,720px);}
+.slideover.is-wide .slideover-body{
+  display:flex;align-items:stretch;gap:18px;height:calc(100% - 57px);overflow:hidden;
+}
+.slideover-preview{flex:1;min-width:0;display:flex;}
+.slideover-meta{width:320px;flex:none;overflow-y:auto;}
+@media (max-width:900px){
+  .slideover.is-wide{width:100vw;min-width:0;}
+  .slideover.is-wide .slideover-body{flex-direction:column;height:auto;overflow:visible;}
+  .slideover-meta{width:auto;}
+  .slideover-preview{min-height:320px;}
+}
+
+/* Aperçu de document — cadre commun aux quatre rendus (PDF, image, texte, et le
+   cas "format non prévisualisable", qui occupe la même place plutôt que de
+   laisser un trou). */
+.doc-preview{
+  flex:1;min-width:0;display:flex;background:var(--surface-alt);
+  border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden;
+}
+.doc-preview-empty{align-items:center;justify-content:center;padding:24px;}
+.doc-preview-frame{flex:1;width:100%;border:0;background:var(--surface);}
+.doc-preview-image{margin:auto;max-width:100%;max-height:100%;object-fit:contain;}
+.doc-preview-text{
+  flex:1;margin:0;padding:14px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+  font-family:var(--font-mono);font-size:12px;line-height:1.5;color:var(--ink-800);
+}
+
 .so-field{margin-bottom:14px;}
 .so-field .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-400);margin-bottom:3px;}
 .so-field .v{font-size:13px;color:var(--ink-900);font-weight:500;}

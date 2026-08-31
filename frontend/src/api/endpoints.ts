@@ -12,7 +12,7 @@
    changer de forme.
    =========================================================================== */
 
-import { apiFetch } from './client';
+import { apiFetch, apiFetchBlob } from './client';
 
 export interface WhoAmI {
   username: string;
@@ -215,6 +215,14 @@ export const api = {
   /** Toutes les restrictions actives de l'office, libellé résolu — réservé admin/superadmin. */
   listAccessRestrictions: (signal?: AbortSignal) =>
     apiFetch<AccessRestrictionSummary[]>('/api/access-restrictions/', { signal }),
+
+  /**
+   * Contenu binaire d'un document, servi par Django et non par MinIO : l'URL de
+   * stockage est en http alors que l'app est en https (contenu mixte bloqué), et
+   * ce relais applique les mêmes restrictions d'accès que la fiche.
+   */
+  documentContent: (dataroomId: number, documentId: number, signal?: AbortSignal) =>
+    apiFetchBlob(`/api/datarooms/${dataroomId}/documents/${documentId}/content/`, signal),
 
   /** Membres de l'office visibles par l'appelant (un admin ne voit pas les superadmin) — réservé admin/superadmin. */
   listOfficeUsers: (signal?: AbortSignal) =>

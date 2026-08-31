@@ -12,6 +12,7 @@ import {
   NewDataroomModal,
   NewFolderModal,
   AccessRestrictionModal,
+  DocumentPreview,
   OfficeUsersScreen,
   OfficeUserModal,
   type OfficeUserModalMode,
@@ -27,6 +28,7 @@ import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
 import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRestrictions';
 import { useOfficeUsers } from './hooks/useOfficeUsers';
+import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
 import { api, type DocumentSummary } from './api/endpoints';
 import {
@@ -175,6 +177,18 @@ function findFolderLabel(nodes: TreeNodeData[], id: string): string | undefined 
     }
   }
   return undefined;
+}
+
+/** Nom de fichier d'une pièce à partir de son id — l'écran ne renvoie que l'id au téléchargement. */
+function documentName(
+  documentsByFolder: Record<string, DataroomDocument[]>,
+  documentId: string,
+): string {
+  for (const docs of Object.values(documentsByFolder)) {
+    const found = docs.find(d => d.id === documentId);
+    if (found) return found.name;
+  }
+  return 'document';
 }
 
 function initialsOf(name: string): string {
@@ -510,6 +524,23 @@ export default function App() {
               setAccessError(null);
               setAccessTarget(toAccessTarget(target, openDataroom.name));
             }}
+            onDownloadDocument={documentId => {
+              void downloadDocument(openDataroom.id, Number(documentId), documentName(documentsByFolder, documentId));
+            }}
+            renderDocumentPreview={doc => (
+              <ConnectedDocumentPreview
+                // La clé remonte l'identité de la pièce : sans elle, passer d'un
+                // document à l'autre réutiliserait le composant et l'aperçu
+                // précédent resterait affiché le temps du chargement.
+                key={doc.id}
+                dataroomId={openDataroom.id}
+                documentId={Number(doc.id)}
+                fileName={doc.name}
+                onDownload={() => {
+                  void downloadDocument(openDataroom.id, Number(doc.id), doc.name);
+                }}
+              />
+            )}
           />
           <NewFolderModal
             open={newFolderModal !== null}
@@ -635,6 +666,55 @@ export default function App() {
       )}
     </AppShell>
   );
+}
+
+/**
+ * Aperçu branché sur l'API, monté dans le volet document.
+ *
+ * Séparé de `DocumentPreview` (qui reste pur) et défini ici plutôt que dans le
+ * design system : c'est un composant de raccordement, il connaît l'endpoint. Il
+ * est monté et démonté avec la pièce ouverte, ce qui suffit à libérer l'URL
+ * objet du document précédent (voir le nettoyage de useDocumentPreview).
+ */
+function ConnectedDocumentPreview({
+  dataroomId,
+  documentId,
+  fileName,
+  onDownload,
+}: {
+  dataroomId: number;
+  documentId: number;
+  fileName: string;
+  onDownload: () => void;
+}) {
+  const preview = useDocumentPreview(dataroomId, documentId, fileName);
+  return (
+    <DocumentPreview
+      fileName={fileName}
+      kind={preview.kind}
+      loading={preview.loading}
+      error={preview.error}
+      url={preview.url}
+      text={preview.text}
+      onDownload={onDownload}
+    />
+  );
+}
+
+/**
+ * Téléchargement d'une pièce. Passe par le même endpoint que l'aperçu, donc par
+ * les mêmes contrôles d'accès, plutôt que par un lien direct vers le stockage :
+ * l'URL MinIO est en http quand l'application est en https, et le navigateur
+ * refuserait de la suivre.
+ */
+async function downloadDocument(dataroomId: number, documentId: number, fileName: string) {
+  const blob = await api.documentContent(dataroomId, documentId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function pickFileAndUpload(upload: (file: File) => Promise<void>) {
