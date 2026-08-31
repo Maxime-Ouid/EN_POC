@@ -77,12 +77,12 @@ export const TOKEN_SCHEMA: readonly TokenDef[] = [
   { key: 'brass-400', group: 'brand', label: 'Accent — clair', type: 'hex', light: '#ab84f7', dark: '#8656d9' },
   { key: 'brass-100', group: 'brand', label: 'Accent — fond de badge', type: 'rgba', light: '#f0e9fc', dark: 'rgba(150,104,244,.16)' },
 
-  /* Les icônes sont des formes pleines, pas des traits : leur couleur porte
-     tout le contraste. Mesuré sur fond blanc, ce violet donne 3.76:1, juste
-     au-dessus du seuil de 3:1 exigé pour un élément graphique. Un office qui
-     l'éclaircit passe sous le seuil sans que rien ne le signale — c'est le
-     token le plus facile à rendre illisible de toute cette liste. */
-  { key: 'icon-tint', group: 'brand', label: 'Couleur des icônes', type: 'hex', light: '#9668f4', dark: '#9668f4' },
+  /* Les icônes sont en duotone : leur contour suit la couleur de texte du
+     contexte et porte le contraste, ce token ne peint que la surface d'accent,
+     à 55 % d'opacité. Un office peut donc le pousser loin sans rien rendre
+     illisible — c'est le contraire des tokens de texte, et le seul de cette
+     liste qui n'a pas de seuil à respecter. */
+  { key: 'icon-accent', group: 'brand', label: "Accent des icônes", type: 'hex', light: '#9668f4', dark: '#9668f4' },
 
   /* `nav-bg` peint la navigation elle-même — rail à gauche/droite ET barre
      d'onglets en haut/bas. Il a été ajouté le 28/08/2026 après un constat

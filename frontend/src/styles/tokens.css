@@ -35,14 +35,14 @@
   --brass-400:#ab84f7;
   --brass-100:#f0e9fc;
 
-  /* Teinte des icônes. Les glyphes du sprite sont des formes PLEINES (voir
-     scripts/build-icon-sprite.mjs) : la couleur porte tout le contraste, il n'y
-     a pas de trait pour rattraper. Mesuré sur fond blanc, `brass-500` à pleine
-     opacité donne 3.76:1 — au-dessus du seuil WCAG de 3:1 pour un élément
-     graphique. Le même violet à 50 % tombe à 1.84:1 : sous 90 % d'opacité, les
-     icônes ne sont plus conformes. Éclaircir cette valeur se paie donc en
-     lisibilité, pas seulement en douceur. */
-  --icon-tint:#9668f4;
+  /* Second ton des icônes. Les glyphes sont en duotone : le CONTOUR hérite de
+     la couleur de texte du contexte et porte le contraste, cet accent ne
+     porte que l'identité (voir scripts/build-icon-sprite.mjs). Il est posé à
+     55 % d'opacité, ce qui ne serait pas conforme pour un élément graphique
+     seul — mais il ne l'est jamais, le contour est toujours dessous. C'est
+     donc le token le plus libre de la liste : un office peut le pousser loin
+     sans rien rendre illisible. */
+  --icon-accent:#9668f4;
   --success:#2f8f5b;
   --success-bg:#e4f5ec;
   --warning:#b9820f;
@@ -142,14 +142,14 @@
     --brass-400:#8656d9;
     --brass-100:rgba(150,104,244,.16);
 
-    /* Teinte des icônes. Les glyphes du sprite sont des formes PLEINES (voir
-       scripts/build-icon-sprite.mjs) : la couleur porte tout le contraste, il n'y
-       a pas de trait pour rattraper. Mesuré sur fond blanc, `brass-500` à pleine
-       opacité donne 3.76:1 — au-dessus du seuil WCAG de 3:1 pour un élément
-       graphique. Le même violet à 50 % tombe à 1.84:1 : sous 90 % d'opacité, les
-       icônes ne sont plus conformes. Éclaircir cette valeur se paie donc en
-       lisibilité, pas seulement en douceur. */
-    --icon-tint:#9668f4;
+    /* Second ton des icônes. Les glyphes sont en duotone : le CONTOUR hérite de
+       la couleur de texte du contexte et porte le contraste, cet accent ne
+       porte que l'identité (voir scripts/build-icon-sprite.mjs). Il est posé à
+       55 % d'opacité, ce qui ne serait pas conforme pour un élément graphique
+       seul — mais il ne l'est jamais, le contour est toujours dessous. C'est
+       donc le token le plus libre de la liste : un office peut le pousser loin
+       sans rien rendre illisible. */
+    --icon-accent:#9668f4;
     --success:#7fbf9c;
     --success-bg:rgba(47,143,91,.18);
     --warning:#e3b25b;
@@ -213,14 +213,14 @@
   --brass-400:#8656d9;
   --brass-100:rgba(150,104,244,.16);
 
-  /* Teinte des icônes. Les glyphes du sprite sont des formes PLEINES (voir
-     scripts/build-icon-sprite.mjs) : la couleur porte tout le contraste, il n'y
-     a pas de trait pour rattraper. Mesuré sur fond blanc, `brass-500` à pleine
-     opacité donne 3.76:1 — au-dessus du seuil WCAG de 3:1 pour un élément
-     graphique. Le même violet à 50 % tombe à 1.84:1 : sous 90 % d'opacité, les
-     icônes ne sont plus conformes. Éclaircir cette valeur se paie donc en
-     lisibilité, pas seulement en douceur. */
-  --icon-tint:#9668f4;
+  /* Second ton des icônes. Les glyphes sont en duotone : le CONTOUR hérite de
+     la couleur de texte du contexte et porte le contraste, cet accent ne
+     porte que l'identité (voir scripts/build-icon-sprite.mjs). Il est posé à
+     55 % d'opacité, ce qui ne serait pas conforme pour un élément graphique
+     seul — mais il ne l'est jamais, le contour est toujours dessous. C'est
+     donc le token le plus libre de la liste : un office peut le pousser loin
+     sans rien rendre illisible. */
+  --icon-accent:#9668f4;
   --success:#7fbf9c;
   --success-bg:rgba(47,143,91,.18);
   --warning:#e3b25b;

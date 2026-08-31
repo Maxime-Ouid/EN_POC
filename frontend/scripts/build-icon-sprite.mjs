@@ -16,16 +16,28 @@
    traduire : un identifiant maison (`home`, `folder`, `seal`…) vers un nom
    Phosphor. Ajouter une icône = ajouter une ligne dans MAP, relancer.
 
-   Le choix de la graisse `fill`
-   -----------------------------
-   Les icônes sont affichées entre 10 et 16 px dans cette application
-   (`svg.icon` fait 16, `dashboard.css` descend à 10). En dessous de 14 px un
-   trait de 1.5 px occupe un dixième de la largeur du glyphe : il se brouille.
-   Une forme pleine garde sa silhouette. C'est le seul motif du choix — pas
-   l'esthétique.
+   Le choix de la graisse `duotone`, en bicolore
+   ---------------------------------------------
+   Chaque glyphe duotone est fait de DEUX tracés : un contour, et une forme
+   d'accent que Phosphor pose à 20 % d'opacité. Sur phosphoricons.com les deux
+   sont de la même couleur — l'accent n'est qu'une ombre du contour. Ici ils
+   sont dissociés : le contour prend `currentColor`, l'accent prend le token
+   `--icon-accent`. C'est ce qui rend le jeu identifiable au lieu d'emprunté,
+   pour le prix d'un attribut.
 
-   Conséquence : la couleur porte tout. Elle vient de `currentColor`, donc du
-   token `--icon-tint` posé sur `svg.icon`, que chaque office peut repeindre.
+   La répartition des rôles est délibérée. Le contour porte le CONTRASTE : il
+   hérite de la couleur de texte du contexte, donc il reste lisible partout, y
+   compris quand un office repeint tout. L'accent ne porte que l'IDENTITÉ : à
+   55 % d'opacité il ne serait pas conforme s'il était seul, mais il ne l'est
+   jamais. D'où le fait que `svg.icon` ne fixe PAS de couleur — les surcharges
+   existantes (`.nav-item.active .icon{color:…}`) recolorent le contour comme
+   avant, sans rien savoir du sprite.
+
+   Ce que ce choix coûte, pour mémoire : duotone est une graisse de contour.
+   Entre 10 et 13 px — le chrome du tableau de bord — les glyphes sont plus
+   pâles qu'une forme pleine ne le serait. C'était un arbitrage conscient, pas
+   un oubli ; le remettre en cause veut dire repasser en `-fill`.
+
    Ne PAS écrire de couleur en dur ici : `npm run check:ds` échouerait, et à
    raison.
 
@@ -47,34 +59,40 @@ const SRC = join(FRONTEND_DIR, 'node_modules', '@iconify-json', 'ph', 'icons.jso
    toucher aux 40 lignes de correspondance. Oublier ce suffixe ne produit
    aucune erreur : le sprite se génère, et l'application affiche simplement des
    contours au lieu de formes pleines. Seul un rendu le montre. */
-const WEIGHT = '-fill';
+const WEIGHT = '-duotone';
 
-/* Exceptions de graisse — la distinction objet / symbole.
-   -------------------------------------------------------
-   `fill` convient aux icônes qui représentent une CHOSE : un dossier, un
-   sceau, une cloche ont un intérieur, le remplir leur donne de la masse et
-   c'est ce qui les sauve à 11 px.
+/** Couleur et opacité du tracé d'accent. L'opacité reste dans le balisage —
+ *  et non dans une feuille de style — parce qu'une règle CSS ne traverse pas
+ *  le shadow DOM créé par `<use>` : elle ne pourrait jamais atteindre ce
+ *  `<path>`. Les variables CSS, elles, y passent, d'où le `var()`. */
+const ACCENT_FILL = 'var(--icon-accent)';
+const ACCENT_OPACITY = '.55';
 
-   Elle ne convient pas aux icônes qui sont un SIGNE : `+`, `×`, un chevron,
-   trois points n'ont pas d'intérieur. Phosphor résout le problème en les
-   inscrivant dans un carré plein — `plus-fill` est un carré violet contenant
-   un `+` en réserve. Sur cet écran ce serait un contresens : `x` est le bouton
-   fermer d'un onglet de tableau de bord et `plus` son bouton d'ajout ; les
-   encadrer les transforme en boutons pleins là où le bouton est déjà autour.
+/* Exceptions de graisse — la distinction objet / signe.
+   -----------------------------------------------------
+   Duotone suppose un glyphe qui a un INTÉRIEUR : un dossier, un sceau, une
+   cloche ont une surface à teinter. Un `+`, un `×`, un chevron, trois points
+   n'en ont pas. Phosphor comble alors le vide en posant l'accent en CARRÉ
+   derrière le signe — `plus-duotone` est un `+` sur un carré teinté. Sur cet
+   écran ce serait un contresens : `x` est le bouton fermer d'un onglet et
+   `plus` son bouton d'ajout ; leur ajouter un fond en fait des boutons à
+   l'intérieur d'un bouton.
 
-   `bold` donne le même signe en tracé épais — assez dense pour tenir à 11 px,
-   sans le cadre. C'est la seule raison de cette liste : ne pas y ajouter une
-   icône pour des motifs de goût, seulement quand `fill` change le sens. */
+   `bold` donne le même signe en tracé épais, sans fond, et assez dense pour
+   tenir à 11 px. C'est la seule raison de cette liste : ne pas y ajouter une
+   icône par goût, seulement quand l'accent change le sens du signe.
+
+   `search` et `list` n'y sont PAS, alors qu'ils y étaient en graisse `fill` :
+   la lentille de la loupe était opaque en plein, elle redevient un simple ton
+   en duotone ; même chose pour les barres de la liste. */
 const WEIGHT_OVERRIDES = {
   plus: '-bold',
   check: '-bold',
   x: '-bold',
   dots: '-bold',
   link: '-bold',
-  chevr: '-bold', // en `fill` : un triangle plein, pas le chevron attendu
+  chevr: '-bold', // l'accent duotone en fait un triangle, pas le chevron attendu
   chevd: '-bold',
-  list: '-bold', // en `fill` : un bloc plein illisible comme « liste »
-  search: '-bold', // en `fill` : la lentille est opaque, la loupe ne se lit plus
 };
 
 /* --- Correspondance identifiant maison → nom Phosphor ----------------------
@@ -171,7 +189,31 @@ for (const [id, phName] of Object.entries(MAP)) {
   }
   const w = icon.width ?? set.width ?? 24;
   const h = icon.height ?? set.height ?? 24;
-  const body = icon.body.replace(/\s+/g, ' ').trim();
+  let body = icon.body.replace(/\s+/g, ' ').trim();
+
+  /* Dissociation des deux tons. Le tracé d'accent est celui qui porte un
+     attribut `opacity` — Phosphor l'écrit APRÈS le `d`, et sa position varie
+     d'une icône à l'autre : `folder-duotone` l'a en second, `house-duotone`
+     en premier. Viser `:first-child` peindrait donc le contour une fois sur
+     deux (constaté). Seul l'attribut `opacity` est un repère fiable.
+
+     Les glyphes en graisse `bold` n'en ont pas : ils restent monochromes,
+     ce qui est exactement voulu pour un `+` ou un `×`. */
+  let accents = 0;
+  body = body.replace(/<path([^>]*?)opacity="[^"]*"([^>]*?)\/>/g, (_m, avant, apres) => {
+    accents += 1;
+    const attrs = (avant + apres).replace(/fill="[^"]*"/g, '').replace(/\s+/g, ' ').trimEnd();
+    return `<path${attrs} fill="${ACCENT_FILL}" opacity="${ACCENT_OPACITY}"/>`;
+  });
+
+  const attendu = (WEIGHT_OVERRIDES[id] ?? WEIGHT) === WEIGHT;
+  if (attendu && accents === 0) {
+    // Un duotone sans accent est un contour nu : l'icône s'afficherait, en
+    // paraissant simplement plus terne que ses voisines. Rien ne le signale.
+    console.error(`  ${id} (${phName}${weight}) : aucun tracé d'accent trouvé.`);
+    process.exit(1);
+  }
+
   symbols.push(`  <symbol id="i-${id}" viewBox="0 0 ${w} ${h}">${body}</symbol>`);
 }
 
@@ -210,13 +252,14 @@ const version = JSON.parse(
 const file = `// ATTENTION — fichier généré. Ne pas éditer à la main : la prochaine
 // exécution de \`npm run build:icons\` écrasera toute modification.
 //
-// Source  : Phosphor Icons (@iconify-json/ph ${version}), graisse \`fill\`, MIT.
+// Source  : Phosphor Icons (@iconify-json/ph ${version}), graisse \`duotone\`, MIT.
 // Recette : scripts/build-icon-sprite.mjs — la correspondance identifiant →
 //           nom Phosphor y est tenue, avec le motif du choix de la graisse.
 //
-// Les formes n'ont pas de couleur propre : elles héritent de \`currentColor\`,
-// donc du token \`--icon-tint\` posé sur \`svg.icon\` (components.css). C'est ce
-// qui permet à un office de repeindre ses icônes sans toucher au code.
+// Chaque glyphe a deux tons : le CONTOUR hérite de \`currentColor\`, donc de la
+// couleur de texte du contexte — c'est lui qui porte le contraste et que les
+// règles existantes (.nav-item.active .icon) recolorent. L'ACCENT est peint en
+// \`var(--icon-accent)\`, le token que chaque office peut changer.
 const SPRITE_SYMBOLS = \`
 ${symbols.join('\n')}
 \`;
@@ -240,4 +283,4 @@ export function IconSprite() {
 `;
 
 writeFileSync(OUT, file, 'utf8');
-console.log(`  IconSprite.tsx écrit — ${symbols.length} icônes (Phosphor ${version}, graisse fill).`);
+console.log(`  IconSprite.tsx écrit — ${symbols.length} icônes (Phosphor ${version}, graisse ${WEIGHT.slice(1)}).`);
