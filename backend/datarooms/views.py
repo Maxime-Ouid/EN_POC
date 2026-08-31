@@ -284,7 +284,28 @@ def attach_office_user_view(request):
     membership = OfficeMembership.objects.create(user=user, office=office, role=role)
     return Response(_serialize_membership(membership), status=201)
 
-@api_view(['PATCH'])
+def _purge_user_from_restrictions(user_id):
+    """Retire un utilisateur des restrictions d'accès de l'office COURANT.
+
+    Les restrictions référencent les utilisateurs par id nu (JSONField, pas de FK :
+    User vit dans la base default, la restriction dans celle du tenant). Rien ne
+    nettoie donc ces listes quand une appartenance disparaît — l'id resterait là,
+    sans effet tant que la personne est dehors, mais réactivé silencieusement le
+    jour où on la rattache. Une restriction vidée est supprimée plutôt que laissée
+    vide, conformément à l'invariant du modèle (une liste vide n'existe pas : voir
+    AccessRestriction et _set_restriction).
+    """
+    for restriction in AccessRestriction.objects.all():
+        if user_id not in restriction.user_ids:
+            continue
+        restants = [uid for uid in restriction.user_ids if uid != user_id]
+        if restants:
+            restriction.user_ids = restants
+            restriction.save()
+        else:
+            restriction.delete()
+
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def office_user_detail_view(request, membership_id):
     office = request.office
@@ -306,6 +327,19 @@ def office_user_detail_view(request, membership_id):
         )
     except OfficeMembership.DoesNotExist:
         return Response({"error": "utilisateur introuvable pour cet office"}, status=404)
+
+    if request.method == 'DELETE':
+        # Se retirer soi-même est refusé : un superadmin seul de son office se
+        # mettrait dehors sans aucun recours dans l'application (il n'existe pas
+        # d'écran pour se rattacher soi-même, seulement pour rattacher un autre).
+        if membership.user_id == request.user.id:
+            return Response(
+                {"error": "impossible de retirer votre propre appartenance à cet office"},
+                status=400,
+            )
+        _purge_user_from_restrictions(membership.user_id)
+        membership.delete()
+        return Response(status=204)
 
     role = request.data.get('role')
     role_error = _validate_role_for_caller(role, caller_rank)

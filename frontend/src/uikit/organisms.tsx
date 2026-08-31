@@ -167,26 +167,32 @@ export function OrganismSpecimens() {
       <Specimen
         name="Sidebar"
         variants={[{ label: 'Colonne latérale assemblée', node: (
-          <div style={{ height: 460, display: 'flex', background: 'var(--shell-bg)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-            <Sidebar>
-              <SidebarBrand name="Espace Notarial" sub="Next" />
-              <TenantSwitcher name="Briand & Hamon" role="Notaires associés" onClick={() => {}} />
-              <Nav>
-                <NavGroup label="Général">
-                  <NavItem icon="home" active>Accueil</NavItem>
-                  <NavItem icon="layers">Portefeuilles</NavItem>
-                  <NavItem icon="folder" count={245}>Dossiers</NavItem>
-                </NavGroup>
-                <NavGroup label="Pilotage">
-                  <NavItem icon="clock">Statistiques & facturation</NavItem>
-                </NavGroup>
-                <NavGroup label="Office">
-                  <NavItem icon="settings">Personnalisation</NavItem>
-                </NavGroup>
-              </Nav>
-              <SidebarFoot initials="CD" name="Cyril Dumont" role="Superadmin" onLogout={() => {}} />
-            </Sidebar>
-          </div>
+          // `.sidebar` est en position:fixed (components.css §6.14). `overflow:hidden`
+          // ne retient PAS un descendant fixe : il faut un bloc conteneur, ce que
+          // <Stage> fournit via son transform. Sans lui, la colonne s'échappait de sa
+          // fiche et se collait en haut à gauche, par-dessus la nav du UI kit.
+          <Stage height={460}>
+            <div style={{ height: '100%', display: 'flex', background: 'var(--shell-bg)' }}>
+              <Sidebar>
+                <SidebarBrand name="Espace Notarial" sub="Next" />
+                <TenantSwitcher name="Briand & Hamon" role="Notaires associés" onClick={() => {}} />
+                <Nav>
+                  <NavGroup label="Général">
+                    <NavItem icon="home" active>Accueil</NavItem>
+                    <NavItem icon="layers">Portefeuilles</NavItem>
+                    <NavItem icon="folder" count={245}>Dossiers</NavItem>
+                  </NavGroup>
+                  <NavGroup label="Pilotage">
+                    <NavItem icon="clock">Statistiques & facturation</NavItem>
+                  </NavGroup>
+                  <NavGroup label="Office">
+                    <NavItem icon="settings">Personnalisation</NavItem>
+                  </NavGroup>
+                </Nav>
+                <SidebarFoot initials="CD" name="Cyril Dumont" role="Superadmin" onLogout={() => {}} />
+              </Sidebar>
+            </div>
+          </Stage>
         )}]}
       />
 

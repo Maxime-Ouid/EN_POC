@@ -12,8 +12,10 @@ import {
   NewDataroomModal,
   NewFolderModal,
   AccessRestrictionModal,
+  ConfirmModal,
   DocumentPreview,
   OfficeUsersScreen,
+  type OfficeUserRowData,
   OfficeUserModal,
   type OfficeUserModalMode,
   assignableRoles,
@@ -217,6 +219,8 @@ export default function App() {
   const [mfaError, setMfaError] = useState<string | undefined>();
   const [userModal, setUserModal] = useState<OfficeUserModalMode | null>(null);
   const [userModalError, setUserModalError] = useState<string | null>(null);
+  const [userToRemove, setUserToRemove] = useState<OfficeUserRowData | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
 
@@ -607,6 +611,11 @@ export default function App() {
             onChangeRole={(membershipId, role) => {
               void officeUsers.updateRole(membershipId, role);
             }}
+            onRemoveUser={user => {
+              setRemoveError(null);
+              setUserToRemove(user);
+            }}
+            currentUsername={username}
           />
           <OfficeUserModal
             // Remonter le mode dans la clé remet les champs à zéro d'un mode à
@@ -632,6 +641,38 @@ export default function App() {
                 .catch((err: Error) => setUserModalError(err.message));
             }}
           />
+          <ConfirmModal
+            open={userToRemove !== null}
+            title="Retirer de l'étude"
+            confirmLabel="Retirer"
+            destructive
+            error={removeError}
+            onCancel={() => {
+              setUserToRemove(null);
+              setRemoveError(null);
+            }}
+            onConfirm={() => {
+              if (!userToRemove) return;
+              setRemoveError(null);
+              officeUsers
+                .removeUser(userToRemove.membershipId)
+                .then(() => setUserToRemove(null))
+                .catch((err: Error) => setRemoveError(err.message));
+            }}
+          >
+            {userToRemove && (
+              <>
+                <strong>{userToRemove.username}</strong> perdra l'accès à cette étude et à
+                tous ses dossiers. Son id est retiré des restrictions d'accès qui le
+                nommaient ; celles qui n'ont plus personne sont levées, donc leur contenu
+                redevient visible par toute l'étude.
+                <div style={{ marginTop: 8 }}>
+                  Le compte lui-même n'est pas supprimé : il reste membre de ses autres
+                  études, et peut être rattaché à nouveau ici.
+                </div>
+              </>
+            )}
+          </ConfirmModal>
         </>
       )}
 

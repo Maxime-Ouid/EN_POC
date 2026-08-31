@@ -239,4 +239,12 @@ export const api = {
   /** Change le rôle d'un membership — réservé admin/superadmin, `membershipId` scopé à l'office courant. */
   updateOfficeUserRole: (membershipId: number, role: string) =>
     apiFetch<OfficeUserRow>(`/api/office-users/${membershipId}/`, { method: 'PATCH', body: { role } }),
+
+  /**
+   * Retire un membre de l'office courant. Le compte lui-même n'est pas supprimé :
+   * il peut rester membre d'autres offices, et être rattaché à nouveau. Le serveur
+   * purge au passage son id des restrictions d'accès de cet office.
+   */
+  removeOfficeUser: (membershipId: number) =>
+    apiFetch<void>(`/api/office-users/${membershipId}/`, { method: 'DELETE' }),
 };

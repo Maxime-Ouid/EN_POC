@@ -71,5 +71,14 @@ export function useOfficeUsers(enabled: boolean) {
     [refresh],
   );
 
-  return { ...state, refresh, createUser, attachUser, updateRole };
+  /** Retire l'appartenance à CET office — le compte survit, il peut être rattaché à nouveau. */
+  const removeUser = useCallback(
+    async (membershipId: number) => {
+      await api.removeOfficeUser(membershipId);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { ...state, refresh, createUser, attachUser, updateRole, removeUser };
 }

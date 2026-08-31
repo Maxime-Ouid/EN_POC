@@ -40,9 +40,16 @@ export interface OfficeUsersScreenProps {
   onCreateUser?: () => void;
   onAttachUser?: () => void;
   onChangeRole?: (membershipId: number, role: string) => void;
+  /** Retire l'appartenance à cet office. L'appelant confirme avant d'agir. */
+  onRemoveUser?: (user: OfficeUserRowData) => void;
+  /**
+   * Utilisateur connecté : sa propre ligne n'offre pas le retrait (le serveur le
+   * refuse aussi — un gestionnaire seul se mettrait dehors sans recours).
+   */
+  currentUsername?: string;
 }
 
-const COLUMNS = ['Utilisateur', 'Identifiant', 'Rôle'];
+const COLUMNS = ['Utilisateur', 'Identifiant', 'Rôle', ''];
 
 /**
  * Annuaire de l'étude — utilisateurs de l'office courant (GET /api/office-users/).
@@ -64,6 +71,8 @@ export function OfficeUsersScreen({
   onCreateUser,
   onAttachUser,
   onChangeRole,
+  onRemoveUser,
+  currentUsername,
 }: OfficeUsersScreenProps) {
   const match = useCallback(
     (row: OfficeUserRowData, q: string) =>
@@ -138,6 +147,15 @@ export function OfficeUsersScreen({
                 </Select>
               ) : (
                 <Pill kind="neutral">{roleLabel(row.role)}</Pill>
+              )}
+            </td>
+            <td>
+              {/* Pas de bouton sur sa propre ligne : le serveur refuse ce retrait,
+                  autant ne pas le proposer. */}
+              {canManage && onRemoveUser && row.username !== currentUsername && (
+                <Button size="sm" variant="ghost" onClick={() => onRemoveUser(row)}>
+                  Retirer
+                </Button>
               )}
             </td>
           </tr>

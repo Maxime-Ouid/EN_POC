@@ -1,5 +1,6 @@
 export * from './AccessRestrictionModal';
 export * from './AppearanceTab';
+export * from './ConfirmModal';
 export * from './DocumentPreview';
 export * from './DocumentSlideover';
 export * from './Explorer';
