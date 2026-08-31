@@ -218,7 +218,11 @@ html,body,#root{height:100%;}
 .topbar{
   height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
   border-bottom:1px solid var(--border);
-  max-width:1500px;margin:18px auto;width:100%;border-radius:9px;
+  /* Alignée sur .content-inner : même largeur maximale (1500px), et même retrait
+     horizontal que le padding de .content (30px de chaque côté). Avec width:100%
+     la barre débordait du contenu dès que la fenêtre passait sous 1560px - elle
+     commençait 30px plus à gauche que les cartes du dessous. */
+  max-width:1500px;margin:18px auto;width:calc(100% - 60px);border-radius:9px;
   background:var(--card-glass-bg);
   -webkit-backdrop-filter:blur(18px) saturate(160%);
   backdrop-filter:blur(18px) saturate(160%);
