@@ -1,7 +1,7 @@
 import mimetypes
 from urllib.parse import quote
 
-from django.contrib.auth import authenticate, get_user_model, login
+from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, HttpResponseBadRequest, HttpResponseRedirect
@@ -87,6 +87,21 @@ def mfa_verify(request):
     login(request, user)
     del request.session['mfa_user_id']
     return Response({"username": user.username})
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def logout_view(request):
+    """Ferme la session de l'office courant.
+
+    AllowAny et non IsAuthenticated : se déconnecter d'une session déjà expirée
+    doit réussir, pas répondre 403. `logout()` vide aussi `mfa_user_id`, donc une
+    connexion abandonnée entre le mot de passe et le code TOTP est annulée.
+
+    La session est scopée à l'hôte de l'office (SESSION_COOKIE_DOMAIN non
+    défini) : les autres sous-domaines gardent la leur.
+    """
+    logout(request)
+    return Response({"status": "ok"})
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

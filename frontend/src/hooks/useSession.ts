@@ -112,5 +112,20 @@ export function useSession() {
     [state.status, refresh],
   );
 
-  return { ...state, refresh, login, submitMfa };
+  /**
+   * Ferme la session côté serveur puis repasse la page en `anonymous`.
+   *
+   * L'état local est remis à zéro même si l'appel échoue : laisser l'écran
+   * connecté après un clic sur « se déconnecter » est le pire des deux, et
+   * `whoami` retranchera de toute façon au prochain chargement.
+   */
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } finally {
+      setState({ ...INITIAL, status: 'anonymous' });
+    }
+  }, []);
+
+  return { ...state, refresh, login, submitMfa, logout };
 }

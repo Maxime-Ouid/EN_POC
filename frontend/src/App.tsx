@@ -223,6 +223,7 @@ export default function App() {
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
 
   const datarooms = useDatarooms(authenticated);
   const dataroomTree = useDataroomTree(screen === 'dataroom' ? openDataroomId : null);
@@ -414,6 +415,7 @@ export default function App() {
             }
           : undefined
       }
+      onLogout={() => setLogoutConfirm(true)}
       userInitials={initialsOf(username)}
       userName={username}
       userRole={currentOffice?.role ?? 'Membre'}
@@ -423,6 +425,29 @@ export default function App() {
       }
       noticeLabel="Données partiellement simulées"
     >
+      {/* Monté en dehors des écrans : la déconnexion se déclenche depuis la
+          sidebar et la topbar, présentes quel que soit l'écran affiché. */}
+      <ConfirmModal
+        open={logoutConfirm}
+        title="Se déconnecter"
+        confirmLabel="Se déconnecter"
+        onCancel={() => setLogoutConfirm(false)}
+        onConfirm={() => {
+          setLogoutConfirm(false);
+          void session.logout();
+        }}
+      >
+        Vous quittez <strong>{session.tenant?.name ?? 'cet office'}</strong> en tant que{' '}
+        <strong>{username}</strong>. Il faudra saisir à nouveau votre mot de passe et un
+        code d'authentification pour revenir.
+        {session.offices.length > 1 && (
+          <div style={{ marginTop: 8 }}>
+            Vos autres études restent ouvertes : chaque office a sa propre session, celle-ci
+            ne ferme que {window.location.host}.
+          </div>
+        )}
+      </ConfirmModal>
+
       {openModuleEntry && (
         <ModuleScreen
           name={openModuleEntry.name}

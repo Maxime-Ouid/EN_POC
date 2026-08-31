@@ -118,6 +118,9 @@ export const api = {
   verifyMfa: (token: string) =>
     apiFetch<{ username: string }>('/api/mfa/verify/', { method: 'POST', body: { token } }),
 
+  /** Ferme la session de l'office courant (les autres sous-domaines gardent la leur). */
+  logout: () => apiFetch<{ status: string }>('/api/logout/', { method: 'POST' }),
+
   whoami: (signal?: AbortSignal) => apiFetch<WhoAmI>('/api/whoami/', { signal }),
 
   myOffices: (signal?: AbortSignal) => apiFetch<OfficeMembership[]>('/api/my-offices/', { signal }),
