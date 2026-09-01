@@ -4,7 +4,8 @@ from .views import (
     coffre_fort_view, issue_sso_ticket, consume_sso_ticket, datarooms_view, documents_view,
     folders_view, office_users_view, office_user_detail_view, attach_office_user_view,
     dataroom_access_view, folder_access_view, document_access_view, access_restrictions_view,
-    document_content_view,
+    document_content_view, templates_view, template_detail_view, template_folders_view,
+    template_folder_detail_view, hyperadmin_offices_view, hyperadmin_office_detail_view,
 )
 
 urlpatterns = [
@@ -31,4 +32,10 @@ urlpatterns = [
     path('office-users/', office_users_view),
     path('office-users/attach/', attach_office_user_view),
     path('office-users/<int:membership_id>/', office_user_detail_view),
+    path('templates/', templates_view),
+    path('templates/<int:template_id>/', template_detail_view),
+    path('templates/<int:template_id>/folders/', template_folders_view),
+    path('templates/<int:template_id>/folders/<int:folder_id>/', template_folder_detail_view),
+    path('hyperadmin/offices/', hyperadmin_offices_view),
+    path('hyperadmin/offices/<int:office_id>/', hyperadmin_office_detail_view),
 ]

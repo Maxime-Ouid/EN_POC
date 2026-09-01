@@ -245,6 +245,38 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
   `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
   « restreint à personne ».
+- `Template`/`TemplateFolder` : cinquième et sixième modèles métier tenant (fait
+  le 01/09/2026) — même patron que `Dataroom`/`Folder`/`Document`/
+  `AccessRestriction` (absents de `SHARED_MODELS`, pas de FK vers `Office`/`User`).
+  `Template` (`name`, `description`, `created_at`) est une structure de dossiers
+  RÉUTILISABLE, jamais liée à une dataroom précise. `TemplateFolder` (`template`
+  FK, `parent` self-FK nullable — même imbrication que `Folder`, `name`,
+  `visible_to_roles` JSONField liste de rôles) décrit un nœud de cette
+  arborescence ; `visible_to_roles` n'est résolu en utilisateurs réels de
+  l'office QU'AU MOMENT où le template est appliqué (`views._apply_template`),
+  vide/absent = pas de restriction créée pour ce dossier — le comportement
+  d'accès par défaut selon le rôle (voir l'entrée `AccessRestriction` ci-dessus,
+  01/09/2026) s'applique tel quel. **Copie ponctuelle, jamais un lien vivant** :
+  appliquer un `Template` à la création d'une `Dataroom` (`POST /api/datarooms/`
+  avec `template_id`) copie récursivement `TemplateFolder` en de vrais `Folder`
+  (et `AccessRestriction` pour les nœuds à `visible_to_roles` non vide) — aucune
+  référence n'est conservée vers le `Template` d'origine ensuite, modifier le
+  `Template` après coup n'affecte donc jamais les datarooms déjà créées à partir
+  d'une version antérieure (vérifié par test, voir "État réel du code").
+- `HyperadminAccess` (fait le 01/09/2026) : marque un utilisateur comme
+  hyperadmin Notantis — rôle TRANSVERSE à tous les offices, à ne pas confondre
+  avec le rôle `superadmin` d'`OfficeMembership` (qui reste, lui, scopé à UN
+  office précis, même pour un utilisateur superadmin sur plusieurs offices
+  comme `carla`). `OneToOneField` vers `User`, vit dans la base `default` (comme
+  `Office`/`OfficeMembership`, ajouté à `SHARED_MODELS`) : l'existence d'une
+  ligne pour un utilisateur donné suffit à le rendre hyperadmin, peu importe le
+  sous-domaine depuis lequel il se connecte — le gate (`views._is_hyperadmin`)
+  ne dépend d'aucun `request.office`. Volontairement PAS `is_staff`/
+  `is_superuser` Django (portée `/admin/` différente) ni le rôle `superadmin`
+  d'`OfficeMembership`. `Office` gagne `is_active` (`BooleanField`, défaut
+  `True`) — un office désactivé devient inaccessible EXACTEMENT comme un
+  sous-domaine inconnu (`TenantResolutionMiddleware`, voir "État réel du
+  code"), sans suppression de données.
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -1052,6 +1084,226 @@ session si le code a bougé.
   que « Ouvert à toute l'étude » quand aucune case n'est cochée) et texte
   explicatif sous la pastille reformulés pour dire le nouveau défaut par rôle.
   `check:ds`/`build`/`lint` relancés, tous clean.
+- **✅ Fait le 01/09/2026 — templates de dataroom (backend uniquement)** :
+  modèles `Template`/`TemplateFolder` (voir "Modèle de données clé"), migration
+  `0007_template_templatefolder.py` (dépendance auto-détectée sur `0006_office_theme`,
+  générée par `makemigrations`, `--check --dry-run` confirme aucun changement
+  après coup), `migrate_all_tenants` relancé — tables confirmées présentes sur
+  `officea`/`officeb`, absentes de `db.sqlite3` (inspection directe des trois
+  fichiers `.sqlite3`, même méthode que pour `Dataroom`).
+  **API** (`views.py`/`urls.py`), CRUD réservé admin/superadmin de l'office —
+  `_manager_role`, même gate que `office-users` :
+  - `GET`/`POST /api/templates/` — liste/crée un `Template` (`name`,
+    `description`). Pas de filtre `office=` sur la requête ORM : `Template` vit
+    dans la base tenant, déjà scopée implicitement par la connexion (même patron
+    que `Dataroom` dans `datarooms_view`).
+  - `PATCH`/`DELETE /api/templates/<id>/` — modifie name/description, ou
+    supprime (cascade sur ses `TemplateFolder` via `on_delete=CASCADE`).
+  - `GET`/`POST /api/templates/<id>/folders/` — même patron que `folders_view`
+    (`?parent=<id>`, résolution scopée au template via `_resolve_template_folder`,
+    même exception `_FolderNotFound` réutilisée), mais sans "documents" dans la
+    réponse GET — un template n'a que des dossiers. `visible_to_roles` reçu en
+    écriture passe par `_clean_roles` (filtre silencieux aux seules clés valides
+    de `OfficeMembership.ROLE_RANK` — même défense en profondeur que
+    `_set_restriction` pour `user_ids`, pas de rejet bloquant sur un rôle
+    inconnu).
+  - `PATCH`/`DELETE /api/templates/<id>/folders/<folder_id>/` — modifie
+    name/`visible_to_roles`, ou supprime (cascade sur les enfants via le
+    self-FK).
+  **`POST /api/datarooms/` étendu** : accepte un `template_id` optionnel. Si
+  fourni et invalide → `400` "modèle introuvable" (la dataroom n'est pas créée).
+  Si valide, `_apply_template(dataroom, template, office)` parcourt
+  récursivement les `TemplateFolder` du template et crée un vrai `Folder` par
+  nœud ; pour chaque `TemplateFolder` à `visible_to_roles` non vide, résout les
+  rôles en ids réels via `OfficeMembership.objects.filter(office=office,
+  role__in=...)` et crée l'`AccessRestriction` correspondante sur le `Folder`
+  obtenu — SEULEMENT si la résolution donne au moins un id (même invariant que
+  `_set_restriction` : jamais de restriction "à personne"). C'est le seul moment
+  où les rôles du template deviennent des ids concrets — aucune référence n'est
+  conservée vers `template`/ses `TemplateFolder` après coup.
+  **⚠️ Changement de comportement décidé en revue de plan, pas dans la demande
+  initiale** : `POST /api/datarooms/` (création d'une dataroom, avec ou sans
+  template) est désormais réservé admin/superadmin (`_manager_role`) — jusqu'ici
+  ouvert à tout membre de l'office. Seule la création change ; `GET` (lister les
+  datarooms) reste inchangé, filtré par `_level_visible` comme avant. Aucun test
+  existant n'exerçait `POST /api/datarooms/` (vérifié par grep avant le
+  changement), donc aucune régression sur la suite existante — un test dédié
+  couvre le nouveau gate (voir ci-dessous).
+  **Tests** (`DataroomTemplateTests`, `datarooms/tests.py`, 5 nouveaux) : même
+  patron `unittest.TestCase` nu + tenant sqlite dédié
+  (`templatetest`) que `PathVisibilityTests`/`RoleBasedDefaultAccessTests`, mais
+  **sans écriture ORM directe dans `setUp`** — `Template`/`TemplateFolder`/
+  `Dataroom`/`Folder` sont tous créés via les endpoints eux-mêmes dans chaque
+  test (`TenantResolutionMiddleware` pose le contexte tenant depuis le `Host` de
+  chaque requête HTTP, pas besoin de `set_current_tenant` manuel ici — plus
+  simple que les deux classes précédentes puisqu'aucune donnée n'est prête
+  d'avance). Couvre : une dataroom créée depuis un template à 2 niveaux
+  reproduit bien l'arborescence, et la restriction du sous-dossier se résout
+  exactement aux ids réels des rôles listés (`visible_to_roles`) tandis que le
+  dossier racine (sans `visible_to_roles`) n'a AUCUNE restriction ; modifier le
+  template (renommer un dossier, en ajouter un autre) après la création d'une
+  dataroom ne change rien à cette dataroom, mais une SECONDE dataroom créée
+  ensuite depuis le même template obtient bien le nouvel état — preuve que la
+  copie est indépendante, pas une référence partagée ; une dataroom créée sans
+  `template_id` reste inchangée (arborescence vide) ; un `template_id` invalide
+  renvoie `400` sans créer la dataroom ; un membre/client reçoit `403` sur
+  `POST /api/datarooms/` là où un admin réussit (régression explicite pour le
+  resserrement du gate). Suite complète relancée : **72/72 tests verts** (67
+  existants + 5 nouveaux, aucune régression).
+  **Vérifié aussi manuellement en `curl` sur `officea` réelle** (connexion
+  `carla` + TOTP) : template à 2 niveaux créé (`Confidentiel` sous `Pieces
+  identite`, `visible_to_roles: ["admin","superadmin"]`), dataroom créée depuis
+  ce template → arborescence reproduite (`GET .../folders/`), restriction du
+  sous-dossier confirmée `user_ids: [1,3]` = exactement alice (admin) + carla
+  (superadmin) via recoupement avec `GET /api/office-users/`, dossier racine
+  confirmé sans restriction (`user_ids: []`). Données de test nettoyées après
+  vérification (`Dataroom`/`Template` supprimés via le shell Django).
+  **Pas d'UI dans ce chantier** — demande explicitement backend + tests + doc
+  (même situation que la gestion des utilisateurs/contrôle d'accès à l'origine,
+  voir plus haut) ; aucun hook/écran frontend créé.
+- **✅ Fait le 01/09/2026 — interface hyperadmin (rôle Notantis transverse)** :
+  modèle `HyperadminAccess` + `Office.is_active` (voir "Modèle de données clé"),
+  migration `0008_office_is_active_hyperadminaccess.py` (dépendance
+  auto-détectée sur `0007_template_templatefolder`, bundlée en un seul fichier
+  par `makemigrations` — `AddField` + `CreateModel`). `("datarooms",
+  "hyperadminaccess")` ajouté à `SHARED_MODELS` (`tenancy/router.py`) — même
+  piège déjà documenté pour `otp_totp`/`office_enabled_modules` : absent de cet
+  ensemble AVANT `migrate`, la table ne peut être créée nulle part
+  (`MissingTenantContext`). Isolation confirmée par inspection directe des
+  trois `.sqlite3` : `datarooms_hyperadminaccess` et la colonne
+  `datarooms_office.is_active` n'existent que dans `db.sqlite3`, absentes des
+  bases `officea`/`officeb`.
+  **`tenancy/middleware.py`** : un seul changement,
+  `if office is not None:` → `if office is not None and office.is_active:`
+  dans `TenantResolutionMiddleware.__call__`. C'est TOUT — `request.office`
+  reste à `None` et aucun contexte tenant n'est jamais posé pour un office
+  désactivé, exactement l'état déjà produit pour un `Host` qui ne correspond à
+  aucun `Office` (la docstring de la classe l'affirmait déjà avant ce
+  changement). Aucune vue en aval n'a besoin de connaître `is_active` — elles
+  traitent déjà `request.office is None` comme "office non résolu".
+  **API** (`views.py`/`urls.py`), gate `_is_hyperadmin(user)` (`HyperadminAccess.objects.filter(user=user).exists()`,
+  même style fonction simple que `_manager_role`) — **volontairement
+  indépendante de `request.office`**, voir décision "pas de sous-domaine dédié"
+  ci-dessous :
+  - `GET`/`POST /api/hyperadmin/offices/` — liste tous les `Office`
+    (`id`/`subdomain`/`name`/`is_active`/`enabled_modules`, slugs) ; POST crée
+    un office **et** son premier admin **dans le même flux** (`admin_mode:
+    "create"|"attach"`, réutilise exactement la logique déjà en place pour
+    `attach_office_user_view` côté "attach" — pas de recherche/annuaire,
+    message générique `"utilisateur introuvable"` en `404`). Validation
+    `subdomain`/`name` via `Office(...).full_clean()` (réutilise les
+    validateurs `SlugField` + l'unicité déjà déclarés sur le modèle, pas de
+    regex réinventée) AVANT toute écriture — pas de création partielle en cas
+    d'erreur. Provisionnement de la base tenant : `ensure_tenant_registered` +
+    `call_command('migrate', database=alias)`, EXACTEMENT le corps de la
+    boucle de `migrate_all_tenants.py` appliqué à ce seul office nouvellement
+    créé — sans ça l'office existerait dans le registre mais sa base
+    n'existerait pas encore.
+  - `PATCH /api/hyperadmin/offices/<id>/` — met à jour `is_active` et/ou
+    `enabled_module_slugs` (réutilise `Office.enabled_modules` déjà existant,
+    juste une interface qui évite `/admin/` Django) sur la même ressource,
+    style PATCH partiel déjà en place (`office_user_detail_view`,
+    `template_detail_view` : `if 'champ' in request.data:`). Slugs de module
+    inconnus silencieusement ignorés (même défense en profondeur que
+    `_clean_roles`/`_set_restriction`).
+  **`seed_demo`** étendu : compte `hyperadmin` (mdp `demo1234`), avec
+  `HyperadminAccess`. Pas de `TOTPDevice` préconfiguré (contrairement à
+  `carla`, qui porte spécifiquement LE scénario d'identité partagée) — premier
+  login enrôle son dispositif comme `alice`/`bob`.
+  **⚠️ Décision explicite — pas de sous-domaine dédié pour cette version** : le
+  gate `_is_hyperadmin` ne consulte jamais `request.office`, donc les routes
+  `/api/hyperadmin/...` restent utilisables depuis N'IMPORTE QUEL sous-domaine
+  d'office où l'appelant a une session active — pas besoin d'un nouveau
+  mécanisme de session (contrairement à l'échange de ticket SSO entre offices,
+  qui existe justement parce que chaque office a sa PROPRE session, voir
+  "Architecture multi-tenant"). Choix assumé pour cette première tranche
+  (liste/création/activation/modules) ; un sous-domaine dédié (ex.
+  `admin.<racine>.localhost`) resterait une évolution naturelle si l'interface
+  grossit (notifications globales, déjà au backlog).
+  **Tests** (`HyperadminTests`, `datarooms/tests.py`, 4 nouveaux) : même patron
+  `unittest.TestCase` nu + tenant(s) sqlite dédié(s) que les classes
+  précédentes, avec une particularité — ces tests déclenchent eux-mêmes la
+  création de NOUVEAUX offices/tenants (le comportement testé), donc `setUp`
+  prépare un office de CONTRÔLE séparé (`hyperadmintest`, jamais créé par un
+  test) qui sert uniquement de véhicule `HTTP_HOST` pour les appels
+  `/api/hyperadmin/...` (qui ignorent `request.office` de toute façon).
+  Couvre : un admin d'office "classique" (même role="admin") reçoit `403` sur
+  les trois surfaces (`GET`/`POST /offices/`, `PATCH /offices/<id>/`), et
+  aucun `Office` n'est créé par la tentative refusée ; créer un office
+  provisionne bien sa base tenant — vérifié par **inspection DIRECTE du
+  fichier `.sqlite3`** (`sqlite_master`, aucune dépendance au routeur/ORM pour
+  la preuve, même méthode que pour chaque modèle tenant précédent) — et son
+  premier admin est bien rattaché avec `role="admin"` dans le même flux ; un
+  office désactivé devient inaccessible avec EXACTEMENT le même message
+  qu'un sous-domaine inconnu (`404 "sous-domaine d'office non résolu"`), pas
+  un code d'erreur ad hoc — testé avant/après bascule sur le même utilisateur ;
+  plus un test de gestion des modules (slug valide appliqué, slug inconnu
+  silencieusement ignoré). Suite complète relancée : **76/76 tests verts** (72
+  existants + 4 nouveaux, aucune régression).
+  **Piège de test rencontré** : lancer `HyperadminTests` SEULE
+  (`manage.py test datarooms.tests.HyperadminTests`) fait afficher "Skipping
+  setup of unused database(s): default." — Django ne crée alors PAS de base de
+  test isolée pour `default` (aucune classe `django.test.TestCase` dans le
+  run ne le déclenche) et les écritures ORM sur les modèles partagés
+  (`Office`/`User`/`HyperadminAccess`...) retombent silencieusement sur la
+  VRAIE `db.sqlite3` — sans risque de perte de données (tout est nettoyé via
+  `addCleanup`, confirmé après coup par inspection directe du fichier), mais
+  ça a révélé que `db.sqlite3` n'avait pas encore reçu `migrate` (seul
+  `migrate_all_tenants` avait tourné, qui ne touche jamais `default`) : corrigé
+  en lançant `python manage.py migrate` en plus. La suite complète
+  (`manage.py test` sans argument) ne présente pas ce piège — une autre classe
+  du fichier déclenche la création normale d'une base de test isolée pour
+  `default`, comme documenté par les classes `unittest.TestCase` précédentes.
+  **Vérifié aussi manuellement en `curl` sur `officea` réelle** : connexion
+  `hyperadmin` (mot de passe + enrôlement MFA), liste des offices, création
+  d'un nouvel office (`officec`) avec un nouvel admin dans le même flux →
+  base tenant confirmée provisionnée sur disque (tables `datarooms_dataroom`/
+  `datarooms_template` présentes), activation du module `coffre-fort`,
+  désactivation puis réactivation (le module activé persiste — pas de perte de
+  données), et `alice` (admin d'office A, pas hyperadmin) confirmée refusée
+  (`403`) sur les trois endpoints. Données de vérification nettoyées après
+  coup (`officec`, son admin, sa base tenant).
+- **✅ Corrigé le 01/09/2026 — faille : connexion possible sur un office sans y
+  être rattaché**. Découverte en démo (`alice`, admin d'Office A uniquement,
+  parvenait à se connecter sur `officeb.localhost` alors qu'elle n'y a aucun
+  `OfficeMembership`). `login_view` authentifiait jusqu'ici uniquement sur les
+  identifiants globaux (`authenticate()`), sans jamais vérifier que ce compte
+  avait un motif de se connecter SUR CET OFFICE précis — la session s'ouvrait
+  donc pour de vrai sur n'importe quel sous-domaine, MFA comprise.
+  **Pas de fuite de données** : chaque endpoint de contenu (`tenant-config`,
+  `/api/datarooms/`, etc.) revérifie déjà `request.user.memberships.filter
+  (office=office).exists()` et répond `403` — c'est ce qui a fait apparaître
+  la liste vide plutôt que des données d'Office B. Le problème était que la
+  connexion elle-même n'aurait jamais dû aboutir : un futur endpoint qui
+  oublierait cette revérification transformerait l'anomalie en vraie fuite.
+  **Correctif** : `login_view` vérifie désormais `request.office` (404
+  "sous-domaine d'office non résolu" si non résolu, même message que partout
+  ailleurs) puis `user.memberships.filter(office=office).exists()` (403 "accès
+  non autorisé à cet office", même message que `datarooms_view`/
+  `tenant_config`/etc. — pas de nouvelle formulation) — AVANT de poser
+  `session['mfa_user_id']`, donc avant même de révéler si l'enrôlement MFA est
+  nécessaire. **Exception délibérée : `_is_hyperadmin(user)`** — un hyperadmin
+  n'a par construction aucun `OfficeMembership` nulle part (voir
+  `HyperadminAccess`) et doit pouvoir se connecter depuis n'importe quel
+  sous-domaine d'office, conformément à la décision de ne pas lui dédier de
+  sous-domaine séparé (voir entrée du 01/09/2026 ci-dessus). Le chemin
+  `issue_sso_ticket`/`consume_sso_ticket` (bascule d'office sans reconnexion)
+  n'était PAS concerné : `issue_sso_ticket` vérifiait déjà l'appartenance
+  avant d'émettre un ticket, seul `login_view` avait cet angle mort.
+  **Tests** (`MfaLoginFlowTests`, `datarooms/tests.py`) : la classe utilise
+  désormais un `Office` réel + un `OfficeMembership` pour son utilisateur de
+  test (`enrollee`) plutôt qu'un contexte office-agnostique — 3 tests
+  ajoutés : un compte valide mais sans rattachement à l'office reçoit `403`
+  sans qu'aucune session MFA en attente ne s'ouvre (régression explicite pour
+  la faille) ; un sous-domaine non résolu renvoie `404` ; un hyperadmin se
+  connecte normalement sur un office où il n'a aucun rattachement (confirme
+  l'exception). Suite complète relancée : **79/79 tests verts** (76 existants
+  + 3 nouveaux, aucune régression).
+  **Vérifié aussi manuellement en `curl`** sur `officea`/`officeb` réels,
+  reproduisant exactement le scénario de démo : `alice` sur `officeb` → `403`
+  (corrigé) ; `alice` sur `officea` → toujours `200` (inchangé) ; `hyperadmin`
+  sur `officeb` → toujours `200` (exception préservée) ; `bob` sur `officeb`
+  (vrai membre) → toujours `200` (inchangé).
 
 ## État actuel du POC
 
@@ -1135,6 +1387,30 @@ session si le code a bougé.
       `GET /api/access-restrictions/`) n'est **pas** reconstruit : le hook reste sans
       écran consommateur. **Vérifié : `tsc -b` et `check:ds` ; pas encore exercé
       dans un navigateur réel** (même raison que ci-dessus).
+- [x] Templates de dataroom (structure de dossiers réutilisable) — **backend
+      fait le 01/09/2026** : modèles `Template`/`TemplateFolder` (base tenant,
+      voir "Modèle de données clé"), CRUD réservé admin/superadmin
+      (`/api/templates/...`), `POST /api/datarooms/` accepte un `template_id`
+      optionnel qui reproduit récursivement l'arborescence en vrais
+      `Folder`/`AccessRestriction` (résolution des rôles en utilisateurs réels
+      au moment de l'application, aucun lien conservé vers le template ensuite
+      — voir "État réel du code"). **Changement connexe décidé en revue** :
+      créer une dataroom (avec ou sans template) est désormais réservé
+      admin/superadmin, ce qui n'était pas le cas avant. Pas d'UI dans ce
+      chantier (demande explicitement backend + tests + doc).
+- [x] Interface hyperadmin (rôle Notantis transverse) — **backend fait le
+      01/09/2026** : modèle `HyperadminAccess` (base default, distinct du rôle
+      `superadmin` d'`OfficeMembership` qui reste scopé à un office),
+      `Office.is_active` (un office désactivé devient inaccessible comme un
+      sous-domaine inconnu, `TenantResolutionMiddleware`). `GET`/`POST
+      /api/hyperadmin/offices/` (liste, création d'un office + son premier
+      admin dans le même flux, provisionnement de sa base tenant), `PATCH
+      /api/hyperadmin/offices/<id>/` (activer/désactiver, gérer les modules
+      activés). Gate `_is_hyperadmin`, volontairement indépendant de
+      `request.office` — pas de sous-domaine dédié pour cette première version
+      (décision explicite, voir "État réel du code"). `seed_demo` étendu
+      (compte `hyperadmin`). Pas d'UI dans ce chantier (demande explicitement
+      backend + tests + doc). Notifications globales laissées au backlog.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le
@@ -1153,10 +1429,10 @@ session si le code a bougé.
 
 ## Explicitement hors périmètre du POC
 
-Q&A (y compris ses réglages fins vus en V1 : modération, plages horaires...), templates,
-notion de portefeuille, audit trail / historique, facturation, conformité DSN/RGPD, les
-3 types de dossier distincts, la duplication de dossier entre offices. Tous documentés
-dans le document de vision pour le chiffrage MOE, mais non traités ici.
+Q&A (y compris ses réglages fins vus en V1 : modération, plages horaires...), notion de
+portefeuille, audit trail / historique, facturation, conformité DSN/RGPD, les 3 types de
+dossier distincts, la duplication de dossier entre offices. Tous documentés dans le
+document de vision pour le chiffrage MOE, mais non traités ici.
 
 **Écart assumé le 26/08/2026** : « vrai stockage S3 » figurait ici à l'origine — ce
 n'est plus le cas. Décision explicite de l'utilisateur : le stockage des `Document` est
@@ -1180,6 +1456,14 @@ permissions par rôle/action, pas de droits différenciés lecture/écriture/sup
 Un vrai système de « droits fins par groupe » (groupes nommés, permissions composables
 par action) reste hors périmètre ; seule la restriction simple par utilisateur en est
 sortie.
+
+**Écart assumé le 01/09/2026** : « templates » retiré de la liste ci-dessus — décision
+explicite de l'utilisateur, voir « État réel du code » (modèles `Template`/
+`TemplateFolder`). Ce qui **entre** dans le périmètre : une structure de dossiers
+réutilisable (avec restrictions d'accès par rôle résolues à l'application), reproduite en
+un vrai `Dataroom`/`Folder`/`AccessRestriction` indépendant à la création — pas de notion
+de template de contenu (documents pré-remplis, champs à compléter) ni de bibliothèque de
+templates partagée entre offices, qui restent hors périmètre.
 
 ## Pour Claude Code
 

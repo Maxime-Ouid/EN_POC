@@ -19,6 +19,10 @@ SHARED_MODELS = {
     # modules activés d'un office échoue dès qu'elle est faite via un sous-domaine réel
     # (ex: /admin/ sur officea.localhost:8000), le ContextVar de tenant étant alors réel.
     ("datarooms", "office_enabled_modules"),
+    # HyperadminAccess a une FK (OneToOne) vers User (base default) — même
+    # raisonnement que otp_totp/office_enabled_modules : doit être partagé AVANT
+    # tout migrate, sinon MissingTenantContext bloque sa création partout.
+    ("datarooms", "hyperadminaccess"),
 }
 # Dataroom, Document, Folder et AccessRestriction sont volontairement ABSENTS de cet
 # ensemble : ce sont des modèles métier tenant (voir models.py), ils doivent rester

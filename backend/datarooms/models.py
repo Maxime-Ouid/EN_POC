@@ -18,6 +18,12 @@ class Office(models.Model):
     logo_url = models.URLField(blank=True)
     primary_color = models.CharField(max_length=7, default="#1a56db")
     enabled_modules = models.ManyToManyField(Module, blank=True, related_name="offices")
+    is_active = models.BooleanField(default=True)
+    # Un office désactivé devient inaccessible EXACTEMENT comme un sous-domaine
+    # inconnu (tenancy/middleware.py : TenantResolutionMiddleware ne pose ni
+    # request.office ni le contexte tenant si is_active=False) — pas de
+    # suppression de données, juste un accès coupé. Bascule depuis l'interface
+    # hyperadmin (views.hyperadmin_office_detail_view), pas /admin/.
     theme = models.JSONField(null=True, blank=True)
     # Personnalisation visuelle de l'office : couleurs par thème clair/sombre,
     # preset typographique, preset de formes. Forme attendue :
@@ -58,6 +64,22 @@ class OfficeMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} @ {self.office} ({self.role})"
+
+class HyperadminAccess(models.Model):
+    """Marque un utilisateur comme hyperadmin Notantis — rôle TRANSVERSE à tous
+    les offices, distinct du rôle "superadmin" d'OfficeMembership (qui reste
+    scopé à UN office précis, même pour un utilisateur superadmin sur plusieurs
+    offices comme carla). Vit dans la base default (ajouté à SHARED_MODELS,
+    tenancy/router.py) : l'existence d'une ligne pour un utilisateur donné
+    signifie qu'il est hyperadmin, peu importe le sous-domaine depuis lequel il
+    se connecte (voir views._is_hyperadmin, gate des routes /api/hyperadmin/...,
+    indépendant de request.office). Volontairement PAS is_staff/is_superuser
+    Django (portée /admin/ différente, pas d'API applicative dédiée) ni le rôle
+    "superadmin" d'OfficeMembership (scopé à un office)."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="hyperadmin_access")
+
+    def __str__(self):
+        return f"Hyperadmin: {self.user}"
 
 class Dataroom(models.Model):
     """Modèle métier tenant : vit dans la base de l'office (tenant_<subdomain>), pas
@@ -137,3 +159,44 @@ class AccessRestriction(models.Model):
     def __str__(self):
         target = self.dataroom or self.folder or self.document
         return f"Restriction sur {target} ({len(self.user_ids)} utilisateur(s))"
+
+class Template(models.Model):
+    """Structure de dossiers réutilisable pour créer des Dataroom pré-remplies —
+    même patron que Dataroom/Folder/Document/AccessRestriction : vit dans la base
+    tenant, absent de SHARED_MODELS par conception (voir tenancy/router.py), pas
+    de FK vers Office (déjà déterminé par le fichier SQLite).
+
+    Une définition PURE, jamais liée à une dataroom précise : l'appliquer à la
+    création d'une Dataroom (views._apply_template) copie son arborescence de
+    TemplateFolder en de VRAIS Folder/AccessRestriction indépendants. Modifier ce
+    Template (ou ses TemplateFolder) par la suite n'affecte JAMAIS les datarooms
+    déjà créées à partir d'une version antérieure — aucun lien n'est conservé vers
+    le Template d'origine après application."""
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+class TemplateFolder(models.Model):
+    """Nœud de l'arborescence d'un Template — même patron que Folder (parent
+    nullable = racine du template, imbrication via self-FK, cascade sur les
+    enfants à la suppression).
+
+    visible_to_roles (liste de rôles OfficeMembership.ROLE_RANK, JSONField) n'est
+    résolu en utilisateurs réels de l'office QU'AU MOMENT où le Template est
+    appliqué à une Dataroom (views._apply_template) — vide/absent = aucune
+    AccessRestriction créée pour le Folder obtenu, qui reste alors au
+    comportement d'accès par défaut selon le rôle (voir views._user_can_access,
+    changement du 01/09/2026 : ouvert pour membre/admin/superadmin, fermé pour
+    client)."""
+    template = models.ForeignKey(Template, on_delete=models.CASCADE, related_name="folders")
+    parent = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="children"
+    )
+    name = models.CharField(max_length=255)
+    visible_to_roles = models.JSONField(default=list, blank=True)
+
+    def __str__(self):
+        return self.name

@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from datarooms.models import Office, Module, OfficeMembership
+from datarooms.models import HyperadminAccess, Office, Module, OfficeMembership
 
 # Vecteur de test officiel RFC 6238 ("12345678901234567890" en ASCII) — secret fixe et
 # connu pour la démo, pas de génération aléatoire : voir CLAUDE.md pour la commande qui
@@ -58,4 +58,14 @@ class Command(BaseCommand):
             defaults={"key": DEMO_TOTP_KEY, "confirmed": True},
         )
 
-        self.stdout.write(self.style.SUCCESS("Données de démo créées (alice, bob, carla / mdp: demo1234)."))
+        # hyperadmin : rôle Notantis transverse à tous les offices (HyperadminAccess),
+        # distinct du rôle "superadmin" d'OfficeMembership porté par carla (scopé,
+        # lui, à office_a/office_b précisément). Pas de TOTPDevice préconfiguré
+        # (contrairement à carla) : ce compte n'a pas de scénario de démo en direct
+        # dédié, premier login enrôle son dispositif comme alice/bob.
+        hyperadmin = make_user("hyperadmin")
+        HyperadminAccess.objects.get_or_create(user=hyperadmin)
+
+        self.stdout.write(self.style.SUCCESS(
+            "Données de démo créées (alice, bob, carla, hyperadmin / mdp: demo1234)."
+        ))

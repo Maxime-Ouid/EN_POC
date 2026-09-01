@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import unittest
 from binascii import unhexlify
 
@@ -10,7 +11,9 @@ from django.test import Client, RequestFactory, TestCase
 from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from .models import AccessRestriction, Dataroom, Document, Folder, Office, OfficeMembership
+from .models import (
+    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership,
+)
 from .tenancy.context import get_current_tenant, reset_current_tenant, set_current_tenant, TenantContext
 from .tenancy.middleware import TenantResolutionMiddleware
 from .tenancy.registry import ensure_tenant_registered, tenant_alias, tenant_db_path
@@ -394,19 +397,75 @@ class SsoTicketTests(TestCase):
 
 
 class MfaLoginFlowTests(TestCase):
-    # Le flux MFA ne touche jamais request.office (login_view est office-agnostique),
-    # donc testable avec le Client Django normal — pas la limite déjà documentée sur
-    # les alias tenant enregistrés paresseusement.
+    # login_view vérifie désormais l'appartenance à l'office du sous-domaine
+    # (01/09/2026, voir CLAUDE.md — faille corrigée : n'importe quel compte
+    # pouvait auparavant ouvrir une session sur n'importe quel office, même sans
+    # y être rattaché). Ces tests utilisent donc un Host réel + OfficeMembership
+    # pour "enrollee". mfa_setup/mfa_verify, eux, restent office-agnostiques :
+    # une fois la porte franchie à /api/login/, ils n'agissent que sur
+    # request.session['mfa_user_id'], sans revérifier request.office — testables
+    # avec le Client Django normal, pas la limite déjà documentée sur les alias
+    # tenant enregistrés paresseusement.
+    #
+    # Host réel => TenantResolutionMiddleware appelle ensure_tenant_registered,
+    # qui mute le dict global connections.databases — même piège déjà documenté
+    # pour test_sso_ticket_consumption_never_triggers_mfa, nettoyé pareil.
+
+    HOST = "mfaoffice.localhost:8000"
 
     def setUp(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("mfaoffice"), None)
+        self.office = Office.objects.create(subdomain="mfaoffice", name="MFA Office")
         self.user = User.objects.create_user(username="enrollee", password="pw123456")
+        OfficeMembership.objects.create(user=self.user, office=self.office, role="membre")
 
     def _login(self):
         return self.client.post(
             "/api/login/",
             {"username": "enrollee", "password": "pw123456"},
             content_type="application/json",
+            HTTP_HOST=self.HOST,
         )
+
+    def test_login_rejected_for_user_without_office_membership(self):
+        # Régression explicitement demandée : la faille corrigée aujourd'hui —
+        # un compte valide mais sans OfficeMembership sur CET office précis ne
+        # doit plus jamais pouvoir entamer une connexion ici.
+        outsider = User.objects.create_user(username="outsider", password="pw123456")
+        res = self.client.post(
+            "/api/login/",
+            {"username": "outsider", "password": "pw123456"},
+            content_type="application/json",
+            HTTP_HOST=self.HOST,
+        )
+        self.assertEqual(res.status_code, 403)
+        # Aucune session MFA en attente n'a été ouverte pour autant.
+        self.assertIsNone(self.client.session.get('mfa_user_id'))
+
+    def test_login_rejected_for_unresolved_subdomain(self):
+        res = self.client.post(
+            "/api/login/",
+            {"username": "enrollee", "password": "pw123456"},
+            content_type="application/json",
+            HTTP_HOST="doesnotexist.localhost:8000",
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_hyperadmin_can_login_on_office_without_membership(self):
+        # Exception délibérée à la vérification d'appartenance : un hyperadmin
+        # n'a par construction aucun OfficeMembership nulle part (voir
+        # HyperadminAccess) et doit pouvoir se connecter depuis n'importe quel
+        # sous-domaine d'office (pas de sous-domaine dédié, voir CLAUDE.md).
+        hyperadmin = User.objects.create_user(username="hat_login", password="pw123456")
+        HyperadminAccess.objects.create(user=hyperadmin)
+        res = self.client.post(
+            "/api/login/",
+            {"username": "hat_login", "password": "pw123456"},
+            content_type="application/json",
+            HTTP_HOST=self.HOST,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"mfa_required": True, "enrollment": True})
 
     def test_login_without_device_requires_enrollment(self):
         res = self._login()
@@ -1122,3 +1181,437 @@ class RoleBasedDefaultAccessTests(unittest.TestCase):
         )
         data = res.json()
         self.assertEqual([d["id"] for d in data["documents"]], [self.doc_in_f1.id])
+
+
+class DataroomTemplateTests(unittest.TestCase):
+    """Teste le système de templates de dataroom (01/09/2026, voir CLAUDE.md,
+    "État réel du code") : CRUD `Template`/`TemplateFolder` (`/api/templates/...`,
+    réservé admin/superadmin — _manager_role, même gate que la gestion des
+    utilisateurs), et le paramètre `template_id` optionnel de `POST
+    /api/datarooms/` (`_apply_template`). S'appuie directement sur le changement
+    de défaut d'accès par rôle du même jour (`_user_can_access`) :
+    `visible_to_roles` sur un `TemplateFolder` se traduit en une vraie
+    `AccessRestriction` sur le `Folder` réel, résolue au moment de l'application
+    — jamais un lien vivant vers le `Template` d'origine.
+
+    Même patron que `PathVisibilityTests`/`RoleBasedDefaultAccessTests` ci-dessus
+    (`unittest.TestCase` nu, tenant sqlite dédié migré/nettoyé par test — mêmes
+    raisons documentées là-bas), mais SANS écriture ORM directe dans `setUp` :
+    `Template`/`TemplateFolder`/`Dataroom`/`Folder` sont tous des modèles tenant
+    créés uniquement via les endpoints eux-mêmes dans chaque test —
+    `TenantResolutionMiddleware` pose le contexte tenant à partir du `Host` de
+    chaque requête HTTP, pas besoin de `set_current_tenant` manuel ici."""
+
+    SUBDOMAIN = "templatetest"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Template Test Office")
+        self.addCleanup(self.office.delete)
+
+        self.admin_user = User.objects.create_user(username="templatetest_admin", password="pw123456")
+        self.addCleanup(self.admin_user.delete)
+        OfficeMembership.objects.create(user=self.admin_user, office=self.office, role="admin")
+
+        self.membre_user = User.objects.create_user(username="templatetest_membre", password="pw123456")
+        self.addCleanup(self.membre_user.delete)
+        OfficeMembership.objects.create(user=self.membre_user, office=self.office, role="membre")
+
+        self.client_user = User.objects.create_user(username="templatetest_client", password="pw123456")
+        self.addCleanup(self.client_user.delete)
+        OfficeMembership.objects.create(user=self.client_user, office=self.office, role="client")
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def test_dataroom_from_template_reproduces_tree_and_resolves_role_restrictions(self):
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.post(
+            "/api/templates/", {"name": "Succession standard"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        template_id = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/",
+            {"name": "Pièces d'identité"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        root_tf_id = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/",
+            {"name": "Confidentiel client", "parent": root_tf_id, "visible_to_roles": ["admin", "membre"]},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+
+        res = self.client.post(
+            "/api/datarooms/",
+            {"name": "Dossier Succession Dupont", "template_id": template_id},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        dataroom_id = res.json()["id"]
+
+        # Racine de la dataroom : un seul dossier réel, reproduisant "Pièces d'identité".
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/", HTTP_HOST=host)
+        data = res.json()
+        self.assertEqual(len(data["folders"]), 1)
+        self.assertEqual(data["folders"][0]["name"], "Pièces d'identité")
+        real_root_id = data["folders"][0]["id"]
+
+        # Aucune restriction sur ce dossier (visible_to_roles vide au template).
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/{real_root_id}/access/", HTTP_HOST=host)
+        self.assertEqual(res.json()["user_ids"], [])
+
+        # Sous-dossier : reproduit, ET restriction résolue exactement à admin+membre.
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/?parent={real_root_id}", HTTP_HOST=host)
+        data = res.json()
+        self.assertEqual(len(data["folders"]), 1)
+        self.assertEqual(data["folders"][0]["name"], "Confidentiel client")
+        real_sub_id = data["folders"][0]["id"]
+
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/{real_sub_id}/access/", HTTP_HOST=host)
+        self.assertEqual(
+            sorted(res.json()["user_ids"]), sorted([self.admin_user.id, self.membre_user.id])
+        )
+
+    def test_editing_template_after_creation_does_not_affect_existing_dataroom(self):
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.post(
+            "/api/templates/", {"name": "Vente"}, content_type="application/json", HTTP_HOST=host
+        )
+        template_id = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/", {"name": "A"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        tf_a_id = res.json()["id"]
+
+        res = self.client.post(
+            "/api/datarooms/", {"name": "D1", "template_id": template_id},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        d1_id = res.json()["id"]
+
+        # On modifie le template APRÈS la création de D1 : renomme "A" en "B",
+        # ajoute un nouveau dossier "C".
+        res = self.client.patch(
+            f"/api/templates/{template_id}/folders/{tf_a_id}/",
+            {"name": "B"}, content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 200)
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/", {"name": "C"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+
+        # D1, créée AVANT la modification, garde "A" et ne voit jamais "C" —
+        # aucun lien vivant vers le Template.
+        res = self.client.get(f"/api/datarooms/{d1_id}/folders/", HTTP_HOST=host)
+        names = {f["name"] for f in res.json()["folders"]}
+        self.assertEqual(names, {"A"})
+
+        # Une NOUVELLE dataroom créée maintenant obtient bien "B"+"C" — preuve que
+        # la copie est réellement indépendante, pas une référence partagée.
+        res = self.client.post(
+            "/api/datarooms/", {"name": "D2", "template_id": template_id},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        d2_id = res.json()["id"]
+        res = self.client.get(f"/api/datarooms/{d2_id}/folders/", HTTP_HOST=host)
+        names = {f["name"] for f in res.json()["folders"]}
+        self.assertEqual(names, {"B", "C"})
+
+    def test_dataroom_without_template_unchanged(self):
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Sans modèle"}, content_type="application/json", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 201)
+        dataroom_id = res.json()["id"]
+
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/", HTTP_HOST=host)
+        data = res.json()
+        self.assertEqual(data["folders"], [])
+        self.assertEqual(data["documents"], [])
+
+    def test_invalid_template_id_returns_400(self):
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        before = {d["id"] for d in res.json()}
+
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Invalide", "template_id": 999999},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 400)
+
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        after = {d["id"] for d in res.json()}
+        self.assertEqual(before, after)
+
+    def test_non_manager_cannot_create_dataroom(self):
+        # Régression explicite : créer une dataroom (avec ou sans template) est
+        # réservé admin/superadmin, pas ouvert à tout membre de l'office.
+        host = self._host()
+
+        self.client.force_login(self.membre_user)
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Refusé"}, content_type="application/json", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.client_user)
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Refusé aussi"}, content_type="application/json", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.admin_user)
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Autorisé"}, content_type="application/json", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 201)
+
+
+class HyperadminTests(unittest.TestCase):
+    """Teste l'interface hyperadmin (01/09/2026, voir CLAUDE.md, "État réel du
+    code") : le rôle HyperadminAccess est TRANSVERSE à tous les offices, distinct
+    du rôle "superadmin" d'OfficeMembership (scopé à un office précis) — le gate
+    (_is_hyperadmin) ne dépend d'AUCUN request.office, les endpoints
+    /api/hyperadmin/... sont donc appelés ici via le Host d'un office de CONTRÔLE
+    qui n'est jamais celui testé.
+
+    Particularité de ce chantier par rapport à PathVisibilityTests/
+    RoleBasedDefaultAccessTests/DataroomTemplateTests : les tests eux-mêmes
+    déclenchent la création de NOUVEAUX offices/tenants (c'est le comportement
+    testé — POST /api/hyperadmin/offices/ provisionne une vraie base sqlite),
+    donc setUp prépare un office de contrôle séparé, jamais créé PAR un test,
+    et chaque test qui crée un office enregistre son subdomain pour un nettoyage
+    commun en fin de test (fermeture de connexion avant unlink, requis sous
+    Windows — même piège déjà documenté dans les classes précédentes)."""
+
+    CONTROL_SUBDOMAIN = "hyperadmintest"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.control_alias = ensure_tenant_registered(self.CONTROL_SUBDOMAIN)
+        call_command("migrate", database=self.control_alias, verbosity=0)
+        control_db_path = tenant_db_path(self.CONTROL_SUBDOMAIN)
+
+        def _cleanup_control_db():
+            connections[self.control_alias].close()
+            connections.databases.pop(self.control_alias, None)
+            control_db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_control_db)
+
+        self.control_office = Office.objects.create(
+            subdomain=self.CONTROL_SUBDOMAIN, name="Hyperadmin Control Office"
+        )
+        self.addCleanup(self.control_office.delete)
+
+        self.hyperadmin_user = User.objects.create_user(username="hat_hyperadmin", password="pw123456")
+        self.addCleanup(self.hyperadmin_user.delete)
+        HyperadminAccess.objects.create(user=self.hyperadmin_user)
+
+        self.regular_user = User.objects.create_user(username="hat_regular", password="pw123456")
+        self.addCleanup(self.regular_user.delete)
+        OfficeMembership.objects.create(user=self.regular_user, office=self.control_office, role="admin")
+
+        # Subdomains créés PAR les tests eux-mêmes (comportement testé) — purgés
+        # en fin de test, impossible de les connaître à l'avance.
+        self._created_office_subdomains = []
+        self.addCleanup(self._cleanup_created_offices)
+
+    def _cleanup_created_offices(self):
+        for subdomain in self._created_office_subdomains:
+            alias = tenant_alias(subdomain)
+            if alias in connections.databases:
+                connections[alias].close()
+                connections.databases.pop(alias, None)
+            tenant_db_path(subdomain).unlink(missing_ok=True)
+        Office.objects.filter(subdomain__in=self._created_office_subdomains).delete()
+
+    def _host(self):
+        return f"{self.CONTROL_SUBDOMAIN}.localhost:8000"
+
+    def test_non_hyperadmin_gets_403_on_all_endpoints(self):
+        # Un admin d'office "classique" (même role="admin"/"superadmin" sur son
+        # office) n'est PAS hyperadmin — rôles distincts, voir HyperadminAccess.
+        self.client.force_login(self.regular_user)
+        host = self._host()
+
+        res = self.client.get("/api/hyperadmin/offices/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 403)
+
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": "hatshouldnotexist", "name": "X",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertFalse(Office.objects.filter(subdomain="hatshouldnotexist").exists())
+
+        res = self.client.patch(
+            f"/api/hyperadmin/offices/{self.control_office.id}/",
+            {"is_active": False}, content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_creating_office_provisions_tenant_database(self):
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        subdomain = "hatneword"
+        self._created_office_subdomains.append(subdomain)
+
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": subdomain, "name": "Nouvel Office",
+                "admin_mode": "create", "admin_username": "hat_new_admin",
+                "admin_password": "S3curePassw0rd!",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["subdomain"], subdomain)
+        self.assertTrue(data["is_active"])
+        self.addCleanup(lambda: User.objects.filter(username="hat_new_admin").delete())
+
+        # Registre : l'office existe bien en base default, avec son premier
+        # admin rattaché DANS LE MÊME FLUX (pas un second appel séparé).
+        office = Office.objects.get(subdomain=subdomain)
+        membership = OfficeMembership.objects.get(office=office)
+        self.assertEqual(membership.user.username, "hat_new_admin")
+        self.assertEqual(membership.role, "admin")
+
+        # Base tenant réellement provisionnée : inspection DIRECTE du fichier
+        # .sqlite3 (aucune dépendance au routeur/ORM pour la preuve), même
+        # méthode que pour chaque modèle tenant précédent cette session.
+        db_path = tenant_db_path(subdomain)
+        self.assertTrue(db_path.exists())
+        con = sqlite3.connect(db_path)
+        try:
+            tables = {
+                row[0] for row in
+                con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+        finally:
+            con.close()
+        self.assertIn("datarooms_dataroom", tables)
+        self.assertIn("datarooms_template", tables)
+        # Table partagée (base default) : ne doit PAS exister dans la base tenant.
+        self.assertNotIn("datarooms_office", tables)
+
+    def test_deactivated_office_becomes_inaccessible(self):
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        subdomain = "hatdeactivate"
+        self._created_office_subdomains.append(subdomain)
+
+        # Rattachement d'un compte EXISTANT (hat_regular) plutôt qu'une création
+        # — varie le chemin par rapport au test précédent.
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": subdomain, "name": "À désactiver",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        office_id = res.json()["id"]
+        target_host = f"{subdomain}.localhost:8000"
+
+        # Avant désactivation : hat_regular (maintenant admin de ce nouvel
+        # office) y accède normalement.
+        self.client.force_login(self.regular_user)
+        res = self.client.get("/api/datarooms/", HTTP_HOST=target_host)
+        self.assertEqual(res.status_code, 200)
+
+        # Désactivation par le hyperadmin.
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.patch(
+            f"/api/hyperadmin/offices/{office_id}/",
+            {"is_active": False}, content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()["is_active"])
+
+        # Après désactivation : EXACTEMENT le même traitement qu'un sous-domaine
+        # jamais enregistré (404 "sous-domaine d'office non résolu"), pas un
+        # nouveau code d'erreur ad hoc — voir TenantResolutionMiddleware.
+        self.client.force_login(self.regular_user)
+        res = self.client.get("/api/datarooms/", HTTP_HOST=target_host)
+        self.assertEqual(res.status_code, 404)
+        self.assertEqual(res.json()["error"], "sous-domaine d'office non résolu")
+
+    def test_hyperadmin_manages_enabled_modules(self):
+        # Module vit dans la base default (SHARED_MODELS) — get_or_create plutôt
+        # que create : la base de test peut être fraîche (migrations seules) OU,
+        # en exécution isolée de cette seule classe, retomber sur la vraie base
+        # de démo où seed_demo a déjà créé ce module (même slug).
+        coffre_fort, created = Module.objects.get_or_create(
+            slug="coffre-fort", defaults={"name": "Coffre-fort"}
+        )
+        if created:
+            self.addCleanup(coffre_fort.delete)
+
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        subdomain = "hatmodules"
+        self._created_office_subdomains.append(subdomain)
+
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": subdomain, "name": "Modules",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        office_id = res.json()["id"]
+        self.assertEqual(res.json()["enabled_modules"], [])
+
+        res = self.client.patch(
+            f"/api/hyperadmin/offices/{office_id}/",
+            {"enabled_module_slugs": ["coffre-fort", "slug-inconnu"]},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 200)
+        # "coffre-fort" (créé par seed_demo, réutilisé ici) appliqué, le slug
+        # inconnu silencieusement ignoré — pas d'erreur bloquante.
+        self.assertEqual(res.json()["enabled_modules"], ["coffre-fort"])

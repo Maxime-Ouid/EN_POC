@@ -4,6 +4,7 @@ from urllib.parse import quote
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.http import FileResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import render
 
@@ -13,7 +14,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .mfa import qr_code_data_uri
-from .models import AccessRestriction, Dataroom, Document, Folder, Office, OfficeMembership
+from .models import (
+    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership,
+    Template, TemplateFolder,
+)
+from .tenancy.registry import ensure_tenant_registered
 from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import ThemeValidationError, clean_theme_payload, is_accepted_extension
 
@@ -31,6 +36,22 @@ def login_view(request):
     user = authenticate(request, username=username, password=password)
     if user is None:
         return Response({"error": "Identifiants incorrects"}, status=400)
+
+    # Identifiants valides, mais encore fallait-il que ce compte ait un motif de
+    # se connecter SUR CET OFFICE précis — avant le 01/09/2026, n'importe quel
+    # compte pouvait ouvrir une session sur n'importe quel sous-domaine d'office,
+    # même sans y être jamais rattaché (les endpoints de données revérifiaient
+    # bien l'appartenance ensuite, donc pas de fuite, mais la connexion elle-même
+    # n'aurait jamais dû aboutir). _is_hyperadmin en exception délibérée : un
+    # hyperadmin n'a par construction AUCUN OfficeMembership nulle part (voir
+    # HyperadminAccess) et doit pouvoir se connecter depuis n'importe quel
+    # sous-domaine d'office, conformément à la décision de ne pas lui dédier un
+    # sous-domaine séparé (voir CLAUDE.md).
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not user.memberships.filter(office=office).exists() and not _is_hyperadmin(user):
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     # Mot de passe validé, mais pas de session ouverte tant que la MFA n'est pas
     # passée — voir mfa_setup/mfa_verify. request.session['mfa_user_id'] atteste
@@ -395,10 +416,24 @@ def datarooms_view(request):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     if request.method == 'POST':
+        # Réservé admin/superadmin de l'office (même gate que la gestion des
+        # Templates et des utilisateurs) — créer une dataroom n'est pas ouvert à
+        # tout membre, contrairement à la lecture ci-dessous (_level_visible).
+        if _manager_role(request.user, office) is None:
+            return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
         name = (request.data.get('name') or '').strip()
         if not name:
             return Response({"error": "nom requis"}, status=400)
+        template = None
+        template_id = request.data.get('template_id')
+        if template_id:
+            try:
+                template = Template.objects.get(pk=template_id)
+            except Template.DoesNotExist:
+                return Response({"error": "modèle introuvable"}, status=400)
         dataroom = Dataroom.objects.create(name=name)
+        if template is not None:
+            _apply_template(dataroom, template, office)
         return Response({"id": dataroom.id, "name": dataroom.name}, status=201)
 
     datarooms = Dataroom.objects.order_by('-created_at')
@@ -407,6 +442,37 @@ def datarooms_view(request):
         for d in datarooms
         if _level_visible(request.user, office, d)
     ])
+
+def _apply_template(dataroom, template, office):
+    """Reproduit récursivement l'arborescence de TemplateFolder de `template` en
+    VRAIS Folder pour `dataroom`, et pour chaque TemplateFolder ayant un
+    visible_to_roles non vide, résout les rôles en utilisateurs réels de `office`
+    (via OfficeMembership — c'est ICI et seulement ici que les rôles deviennent
+    des ids concrets) et crée l'AccessRestriction correspondante sur le Folder
+    nouvellement créé. Un TemplateFolder sans visible_to_roles ne crée aucune
+    restriction : le Folder obtenu reste au comportement d'accès par défaut selon
+    le rôle (_user_can_access, changement du 01/09/2026).
+
+    Copie ponctuelle, jamais un lien vivant : aucune référence vers `template`/
+    ses TemplateFolder n'est conservée sur les Folder/AccessRestriction créés ici
+    — modifier le Template par la suite n'affecte donc jamais `dataroom`."""
+    def walk(template_parent, real_parent):
+        for tf in TemplateFolder.objects.filter(template=template, parent=template_parent):
+            folder = Folder.objects.create(dataroom=dataroom, parent=real_parent, name=tf.name)
+            if tf.visible_to_roles:
+                user_ids = list(
+                    OfficeMembership.objects.filter(
+                        office=office, role__in=tf.visible_to_roles
+                    ).values_list('user_id', flat=True)
+                )
+                # Liste vide après résolution (aucun membre de l'office n'a un de
+                # ces rôles) => pas de restriction créée, même invariant que
+                # _set_restriction : une AccessRestriction "restreint à personne"
+                # n'existe jamais.
+                if user_ids:
+                    AccessRestriction.objects.create(folder=folder, user_ids=user_ids)
+            walk(tf, folder)
+    walk(None, None)
 
 def _dataroom_or_404(dataroom_id):
     try:
@@ -802,3 +868,263 @@ def document_content_view(request, dataroom_id, document_id):
         f"inline; filename*=UTF-8''{quote(document.name)}"
     )
     return response
+
+def _serialize_template(t):
+    return {"id": t.id, "name": t.name, "description": t.description, "created_at": t.created_at}
+
+def _serialize_template_folder(f):
+    return {
+        "id": f.id, "name": f.name, "parent": f.parent_id, "visible_to_roles": f.visible_to_roles,
+    }
+
+def _template_or_404(template_id):
+    try:
+        return Template.objects.get(pk=template_id), None
+    except Template.DoesNotExist:
+        return None, Response({"error": "modèle introuvable"}, status=404)
+
+def _resolve_template_folder(template, raw_folder_id):
+    """Même patron que _resolve_folder, scopé à `template` au lieu de `dataroom` —
+    un id de TemplateFolder valide mais appartenant à un AUTRE Template n'est pas
+    accepté comme parent. None (id absent) = racine du template."""
+    if not raw_folder_id:
+        return None
+    try:
+        return TemplateFolder.objects.get(pk=raw_folder_id, template=template)
+    except TemplateFolder.DoesNotExist:
+        raise _FolderNotFound
+
+def _clean_roles(raw_roles):
+    """Filtre `raw_roles` aux seules clés valides de OfficeMembership.ROLE_RANK,
+    silencieusement (même défense en profondeur que _set_restriction pour
+    user_ids) — un rôle inconnu envoyé par erreur n'empêche pas la création, il
+    est juste ignoré plutôt que de faire échouer toute la requête."""
+    if not isinstance(raw_roles, list):
+        return []
+    seen = []
+    for role in raw_roles:
+        if role in OfficeMembership.ROLE_RANK and role not in seen:
+            seen.append(role)
+    return seen
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def templates_view(request):
+    """Gestion des modèles de dataroom de l'office courant — réservé aux
+    admins/superadmins, même gate que la gestion des utilisateurs (_manager_role).
+    Pas de filtre `office=` sur la requête ORM : Template vit dans la base tenant,
+    déjà scopée implicitement par la connexion (même patron que Dataroom dans
+    datarooms_view)."""
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    if request.method == 'POST':
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        description = request.data.get('description') or ''
+        template = Template.objects.create(name=name, description=description)
+        return Response(_serialize_template(template), status=201)
+
+    templates = Template.objects.order_by('name')
+    return Response([_serialize_template(t) for t in templates])
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def template_detail_view(request, template_id):
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    template, error = _template_or_404(template_id)
+    if error:
+        return error
+
+    if request.method == 'DELETE':
+        template.delete()
+        return Response(status=204)
+
+    if 'name' in request.data:
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        template.name = name
+    if 'description' in request.data:
+        template.description = request.data.get('description') or ''
+    template.save()
+    return Response(_serialize_template(template))
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def template_folders_view(request, template_id):
+    """Même patron que folders_view, mais un template n'a que des dossiers — pas
+    de "documents" dans la réponse GET."""
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    template, error = _template_or_404(template_id)
+    if error:
+        return error
+
+    if request.method == 'POST':
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        try:
+            parent = _resolve_template_folder(template, request.data.get('parent'))
+        except _FolderNotFound:
+            return Response({"error": "dossier parent introuvable"}, status=400)
+        visible_to_roles = _clean_roles(request.data.get('visible_to_roles') or [])
+        folder = TemplateFolder.objects.create(
+            template=template, parent=parent, name=name, visible_to_roles=visible_to_roles
+        )
+        return Response(_serialize_template_folder(folder), status=201)
+
+    try:
+        parent = _resolve_template_folder(template, request.GET.get('parent'))
+    except _FolderNotFound:
+        return Response({"error": "dossier introuvable"}, status=404)
+    folders = TemplateFolder.objects.filter(template=template, parent=parent).order_by('name')
+    return Response({"folders": [_serialize_template_folder(f) for f in folders]})
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def template_folder_detail_view(request, template_id, folder_id):
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    template, error = _template_or_404(template_id)
+    if error:
+        return error
+    try:
+        folder = TemplateFolder.objects.get(pk=folder_id, template=template)
+    except TemplateFolder.DoesNotExist:
+        return Response({"error": "dossier introuvable"}, status=404)
+
+    if request.method == 'DELETE':
+        folder.delete()
+        return Response(status=204)
+
+    if 'name' in request.data:
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        folder.name = name
+    if 'visible_to_roles' in request.data:
+        folder.visible_to_roles = _clean_roles(request.data.get('visible_to_roles') or [])
+    folder.save()
+    return Response(_serialize_template_folder(folder))
+
+def _is_hyperadmin(user):
+    """Rôle Notantis TRANSVERSE à tous les offices — voir HyperadminAccess
+    (models.py). Contrairement à _manager_role, ne dépend d'AUCUN office
+    précis : les routes /api/hyperadmin/... restent utilisables depuis
+    n'importe quel sous-domaine d'office où l'appelant a une session active,
+    volontairement (pas de sous-domaine dédié dans cette première version, voir
+    CLAUDE.md)."""
+    return HyperadminAccess.objects.filter(user=user).exists()
+
+def _serialize_office(o):
+    return {
+        "id": o.id,
+        "subdomain": o.subdomain,
+        "name": o.name,
+        "is_active": o.is_active,
+        "enabled_modules": list(o.enabled_modules.values_list("slug", flat=True)),
+    }
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def hyperadmin_offices_view(request):
+    """Interface hyperadmin — liste/crée des Office. Réservé aux hyperadmins
+    (_is_hyperadmin), pas aux superadmin d'office (rôle distinct, voir
+    HyperadminAccess)."""
+    if not _is_hyperadmin(request.user):
+        return Response({"error": "réservé aux hyperadmins Notantis"}, status=403)
+
+    if request.method == 'POST':
+        subdomain = (request.data.get('subdomain') or '').strip().lower()
+        name = (request.data.get('name') or '').strip()
+        admin_mode = request.data.get('admin_mode')
+        admin_username = (request.data.get('admin_username') or '').strip()
+        admin_password = request.data.get('admin_password') or ''
+
+        # Validation COMPLÈTE avant toute écriture — pas de création partielle
+        # (office sans admin, ou admin sans office) en cas d'erreur à mi-chemin.
+        office = Office(subdomain=subdomain, name=name)
+        try:
+            office.full_clean()
+        except ValidationError as exc:
+            # exc.messages aplatit déjà error_dict/error_list en une seule liste,
+            # peu importe la forme de l'erreur levée par full_clean().
+            return Response({"error": "; ".join(exc.messages)}, status=400)
+
+        if admin_mode not in ('create', 'attach'):
+            return Response({"error": "admin_mode invalide"}, status=400)
+        if not admin_username:
+            return Response({"error": "nom d'utilisateur de l'administrateur requis"}, status=400)
+
+        if admin_mode == 'create':
+            if User.objects.filter(username=admin_username).exists():
+                return Response({"error": "nom d'utilisateur déjà utilisé"}, status=400)
+            try:
+                validate_password(admin_password)
+            except ValidationError as exc:
+                return Response({"error": " ".join(exc.messages)}, status=400)
+            admin_user = None  # créé après l'office, voir plus bas
+        else:
+            admin_user = User.objects.filter(username=admin_username).first()
+            if admin_user is None:
+                # Message générique, comme attach_office_user_view : ne confirme
+                # ni n'infirme l'existence du compte ailleurs dans le système.
+                return Response({"error": "utilisateur introuvable"}, status=404)
+
+        office.save()
+        if admin_mode == 'create':
+            admin_user = User.objects.create_user(username=admin_username, password=admin_password)
+        OfficeMembership.objects.create(user=admin_user, office=office, role="admin")
+
+        # Provisionne + migre la base tenant de ce seul office — même corps que
+        # la boucle de migrate_all_tenants.py, appliqué à cet office précis.
+        alias = ensure_tenant_registered(office.subdomain)
+        call_command("migrate", database=alias, verbosity=0)
+
+        return Response(_serialize_office(office), status=201)
+
+    offices = Office.objects.order_by('name')
+    return Response([_serialize_office(o) for o in offices])
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def hyperadmin_office_detail_view(request, office_id):
+    """Active/désactive un office et/ou gère ses modules activés — réutilise
+    Office.is_active et Office.enabled_modules déjà existants, juste une
+    interface qui évite de passer par /admin/ Django."""
+    if not _is_hyperadmin(request.user):
+        return Response({"error": "réservé aux hyperadmins Notantis"}, status=403)
+
+    try:
+        office = Office.objects.get(pk=office_id)
+    except Office.DoesNotExist:
+        return Response({"error": "office introuvable"}, status=404)
+
+    if 'is_active' in request.data:
+        office.is_active = bool(request.data.get('is_active'))
+    if 'enabled_module_slugs' in request.data:
+        slugs = request.data.get('enabled_module_slugs') or []
+        # Slugs inconnus silencieusement ignorés (défense en profondeur, même
+        # patron que _clean_roles/_set_restriction) — pas de rejet bloquant.
+        office.enabled_modules.set(Module.objects.filter(slug__in=slugs))
+    office.save()
+    return Response(_serialize_office(office))

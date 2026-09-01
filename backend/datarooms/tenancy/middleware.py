@@ -8,8 +8,12 @@ class TenantResolutionMiddleware:
     (ex: officea.localhost:8000 -> subdomain "officea"). settings.ALLOWED_HOSTS
     garantit déjà que ce Host a une forme de confiance minimale ; ici on va plus loin
     en vérifiant que le premier label correspond à un Office réellement enregistré
-    avant de résoudre quoi que ce soit — un Host inconnu retombe simplement sur
-    request.office = None, jamais sur une identité devinée.
+    ET actif avant de résoudre quoi que ce soit — un Host inconnu OU un office
+    désactivé (Office.is_active=False, interface hyperadmin) retombent tous les
+    deux simplement sur request.office = None, jamais sur une identité devinée.
+    Un office désactivé n'est donc jamais distingué d'un sous-domaine inconnu en
+    aval : aucune vue n'a besoin de connaître is_active, elles traitent déjà
+    request.office is None comme "office non résolu".
     """
 
     def __init__(self, get_response):
@@ -24,7 +28,7 @@ class TenantResolutionMiddleware:
         if len(labels) >= 2 and labels[-1] == "localhost":
             subdomain = labels[0]
             office = Office.objects.filter(subdomain=subdomain).first()
-            if office is not None:
+            if office is not None and office.is_active:
                 alias = ensure_tenant_registered(office.subdomain)
                 token = set_current_tenant(TenantContext(office.subdomain, alias))
                 request.office = office
