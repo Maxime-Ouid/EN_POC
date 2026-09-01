@@ -918,16 +918,17 @@ session si le code a bougé.
     `useOfficeUsers.ts` (ces deux derniers **sans écran consommateur** — demande
     explicite : hooks prêts, UI de gestion des utilisateurs/restrictions d'accès
     reportée à un chantier séparé, voir juste en dessous).
-  - **⚠️ Régression assumée — UI de gestion des utilisateurs et de contrôle d'accès
-    disparue** : l'ancien `App.tsx` avait une `UsersPage` complète (liste/rôles/
-    création/rattachement) et un panneau "Accès" par dossier/document/dataroom
-    (entrées du 27/08/2026 et 28/08/2026 ci-dessus). Ces écrans n'existent **plus**
-    dans le nouveau frontend — remplacés par du code du collègue qui ne les avait
-    jamais eus. Le backend est intact (endpoints inchangés, testés), et les hooks
-    (`useAccessRestrictions`, `useOfficeUsers`) sont prêts côté front, mais il n'y a
-    aujourd'hui aucun écran pour les consommer. À reconstruire dans un chantier
-    séparé sur le modèle de ce qui a été fait ici pour Datarooms/dossiers (composer
-    depuis les organismes existants, pas réinventer).
+  - **⚠️ Régression assumée le 28/08/2026 — ✅ résolue le 30/08/2026** — UI de gestion
+    des utilisateurs et de contrôle d'accès disparue puis reconstruite : l'ancien
+    `App.tsx` avait une `UsersPage` complète (liste/rôles/création/rattachement) et
+    un panneau "Accès" par dossier/document/dataroom (entrées du 27/08/2026 et
+    28/08/2026 ci-dessus). Ces écrans avaient disparu dans le nouveau frontend —
+    remplacés par du code du collègue qui ne les avait jamais eus, avec `useAccessRestrictions`/
+    `useOfficeUsers` prêts côté front mais sans écran consommateur. Le collègue a
+    reconstruit les deux le 30/08/2026 (`OfficeUsersScreen.tsx`,
+    `AccessRestrictionModal.tsx`) sur sa branche — voir les entrées « UI reconstruite
+    le 30/08/2026 » dans "État actuel du POC" pour le détail, et l'entrée d'audit du
+    01/09/2026 juste en dessous pour la vérification indépendante de ce travail.
   - **Décision de conception clé — arbre de dossiers assemblé en amont, pas de
     chargement paresseux** : `organisms/Explorer.tsx` (composant du collègue,
     volontairement non modifié) attend un `tree: TreeNodeData[]` déjà complet, sans
@@ -965,6 +966,37 @@ session si le code a bougé.
     vrais `.click()` DOM via `javascript_tool` — fiable à chaque tentative,
     à privilégier pour toute vérification par clic dans ce projet si le problème
     se reproduit.
+- **✅ Audit du 01/09/2026 — état des 4 phases de fusion (backend, fondations
+  frontend, MFA, utilisateurs/droits) vérifié dans le code, pas seulement dans ce
+  fichier**. Contexte : la branche de travail courante est désormais
+  `back/EN_evolution_suite` (alignée sur `origin/front/design-system-suite`), 18
+  commits plus loin que les deux commits de fusion du 28/08/2026 décrits ci-dessus —
+  le collègue a continué depuis là (`979035f`, "Annuaire de l'étude et restrictions
+  d'accès : les deux UI manquantes du backend de Maxime", puis dev.ps1, aperçu de
+  document, icônes Phosphor, retrait de membre avec purge des restrictions, refonte
+  des statuts en OKLCH). `back_evolution` (branche d'origine de ce fichier) n'a pas
+  bougé depuis le 28/08/2026.
+  - **Backend (thème)** : `Office.theme` présent, `0006_office_theme.py` toujours
+    cohérente (`makemigrations --check --dry-run` → *No changes detected*), suite
+    complète **64/64 tests verts** — conforme à l'entrée du 28/08/2026.
+  - **Fondations frontend** : `AppShell`, `MfaScreen.tsx`, tous les `pages/*Screen.tsx`
+    et les 13 fonctions d'API du chantier du 28/08/2026 confirmés présents et câblés
+    (`grep` direct, pas une supposition). `npm run check:ds` → **147 fichiers
+    vérifiés, 0 écart nouveau** (56 hérités, inchangé) — le nombre de fichiers a monté
+    depuis les 140 du 28/08/2026 avec les écrans ajoutés par le collègue.
+  - **MFA** : `login_view`/`mfa_setup`/`mfa_verify` et `otp_totp` dans `SHARED_APPS`
+    toujours en place côté backend, `MfaScreen.tsx` toujours monté côté front —
+    inchangé depuis le 28/08/2026.
+  - **Utilisateurs/droits** : **la régression du 28/08/2026 est résolue** (voir
+    l'entrée mise à jour juste au-dessus) — `useOfficeUsers`/`useAccessRestrictions`
+    ont maintenant de vrais appelants (`App.tsx`, `OfficeUsersScreen.tsx`,
+    `AccessRestrictionModal.tsx`), montés sur du state réel et atteignables depuis la
+    nav (`NAV_SECTIONS` dans `data/demo.tsx`, entrée « Annuaire de l'étude »,
+    volontairement visible à tous — c'est le serveur qui répond `403`, pas l'UI qui
+    cache l'entrée). Détail dans "État actuel du POC" (entrées « UI reconstruite le
+    30/08/2026 »).
+  - Aucune régression détectée sur cette branche par rapport à ce que documentait
+    ce fichier avant le 30/08/2026.
 
 ## État actuel du POC
 
@@ -984,7 +1016,8 @@ session si le code a bougé.
       monolithique (nav locale `useState`, composants inline) décrit dans les
       entrées précédentes de cette liste est obsolète — voir "État réel du code"
       pour le détail de la fusion et de ce qui a été porté (MFA, dossiers imbriqués)
-      vs. régressé (UI utilisateurs/accès, voir plus bas).
+      vs. temporairement régressé puis reconstruit le 30/08/2026 (UI utilisateurs/
+      accès, voir plus bas et l'audit du 01/09/2026).
 - [x] Migrations + seed de démo (base `default`) — fait le 26/08/2026
 - [x] **Migration vers une base SQLite par office** (routeur de base de données) — fait le
       26/08/2026 (`datarooms/tenancy/`) ; isolation physique prouvée avec de vraies
