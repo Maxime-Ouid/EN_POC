@@ -166,6 +166,16 @@ export interface SearchHit {
   folder_id: number | null;
   /** Chemin lisible, ex. « Succession Dupont / Actes / compromis.pdf ». */
   path: string;
+  /**
+   * Le tag qui a fait remonter cet élément, quand ce n'est pas son nom qui
+   * correspond à la frappe — `null` sinon (et toujours `null` pour un
+   * sous-dossier ou une personne, qui ne portent pas de tags).
+   *
+   * Sans ce champ, un dossier « Succession Dupont » étiqueté « Vente » remonterait
+   * sur « vente » avec un nom où la frappe est introuvable : la palette a besoin de
+   * savoir quoi surligner pour que le résultat ne paraisse pas arbitraire.
+   */
+  matched_tag: TagSummary | null;
 }
 
 export interface SearchResponse {

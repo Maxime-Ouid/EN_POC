@@ -1091,6 +1091,38 @@ def _folder_path_labels(folder):
         node = node.parent
     return list(reversed(labels))
 
+# Les deux seuls types de résultats qui peuvent remonter par DEUX chemins (leur nom ou
+# un de leurs tags) : la construction du dict est factorisée pour que les deux passages
+# ne puissent pas diverger — un `path` calculé deux fois finirait par ne plus être le
+# même. `matched_tag` reste None sur une correspondance par nom : c'est la palette qui
+# décide d'afficher une justification, elle ne doit pas avoir à la deviner.
+def _dataroom_hit(dataroom, matched_tag=None):
+    return {
+        "kind": "dataroom",
+        "id": dataroom.id,
+        "name": dataroom.name,
+        "dataroom_id": dataroom.id,
+        "dataroom_name": dataroom.name,
+        "folder_id": None,
+        "path": dataroom.name,
+        "matched_tag": matched_tag,
+    }
+
+def _document_hit(document, matched_tag=None):
+    # `folder_id` pointe le dossier CONTENANT la pièce (None = racine) : c'est le
+    # niveau que l'interface doit ouvrir pour la montrer, pas la pièce elle-même.
+    path_labels = _folder_path_labels(document.folder) if document.folder else []
+    return {
+        "kind": "document",
+        "id": document.id,
+        "name": document.name,
+        "dataroom_id": document.dataroom_id,
+        "dataroom_name": document.dataroom.name,
+        "folder_id": document.folder_id,
+        "path": " / ".join([document.dataroom.name, *path_labels, document.name]),
+        "matched_tag": matched_tag,
+    }
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def search_view(request):
@@ -1111,7 +1143,13 @@ def search_view(request):
     révéler par un simple compteur l'existence d'une pièce restreinte.
 
     Correspondance : début de mot, pas sous-chaîne quelconque — voir
-    `_name_starts_with`.
+    `_name_starts_with`. Elle porte sur le nom des éléments ET sur le nom de leurs
+    TAGS : taper « vente » remonte les dossiers et pièces étiquetés « Vente » en plus
+    de ceux qui portent ce mot dans leur nom (01/09/2026 — jusque-là le filtre par tag
+    n'existait que dans le menu de la liste des dossiers, hors de portée de la
+    palette). Les éléments trouvés par leur tag portent `matched_tag` : sans lui, la
+    palette afficherait un nom où la frappe est introuvable, et le résultat paraîtrait
+    arbitraire.
 
     Limite connue : la casse n'est repliée que pour l'ASCII — « ERIC » trouve
     « eric », mais « ÉRIC » ne trouve pas « éric ». Accepté tel quel pour le POC
@@ -1159,16 +1197,7 @@ def search_view(request):
         lambda d: _level_visible(user, d),
     )
     truncated = truncated or cut
-    for d in matched_datarooms:
-        results.append({
-            "kind": "dataroom",
-            "id": d.id,
-            "name": d.name,
-            "dataroom_id": d.id,
-            "dataroom_name": d.name,
-            "folder_id": None,
-            "path": d.name,
-        })
+    results.extend(_dataroom_hit(d) for d in matched_datarooms)
 
     matched_folders, cut = take(
         Folder.objects.filter(name__iregex=name_pattern)
@@ -1186,6 +1215,10 @@ def search_view(request):
             "dataroom_name": f.dataroom.name,
             "folder_id": f.id,
             "path": " / ".join([f.dataroom.name, *_folder_path_labels(f)]),
+            # Toujours None : un Folder ne porte pas de tags (M2M déclarés côté
+            # Dataroom et Document seulement, voir models.py). Le champ est quand même
+            # présent pour que la forme d'un résultat ne dépende pas de son type.
+            "matched_tag": None,
         })
 
     matched_documents, cut = take(
@@ -1195,19 +1228,63 @@ def search_view(request):
         lambda d: _user_can_access(user, d.dataroom, folder=d.folder, document=d),
     )
     truncated = truncated or cut
-    for d in matched_documents:
-        # `folder_id` pointe le dossier CONTENANT la pièce (None = racine) : c'est le
-        # niveau que l'interface doit ouvrir pour la montrer, pas la pièce elle-même.
-        path_labels = _folder_path_labels(d.folder) if d.folder else []
-        results.append({
-            "kind": "document",
-            "id": d.id,
-            "name": d.name,
-            "dataroom_id": d.dataroom_id,
-            "dataroom_name": d.dataroom.name,
-            "folder_id": d.folder_id,
-            "path": " / ".join([d.dataroom.name, *path_labels, d.name]),
-        })
+    results.extend(_document_hit(d) for d in matched_documents)
+
+    # Correspondance par TAG, en second passage plutôt qu'en OR dans les requêtes
+    # ci-dessus : l'élément doit dire POURQUOI il remonte, et un OR rendrait la
+    # provenance indiscernable. Les `exclude(name__iregex=...)` garantissent qu'un
+    # élément ne remonte jamais deux fois — la correspondance par nom l'emporte, y
+    # compris quand elle a été coupée par la limite d'affichage (exclure les seuls
+    # éléments déjà émis laisserait ressortir un dossier tronqué du passage précédent).
+    #
+    # Seuls Dataroom et Document sont concernés : ni Folder ni OfficeMembership ne
+    # portent de tags. Et un élément ne remonte que par SES tags, pas par ceux du
+    # dossier qui le contient : « toutes les pièces d'un dossier Vente » est une
+    # question de navigation (ouvrir le dossier), pas de recherche.
+    #
+    # Limite par type propre à ce passage, non partagée avec celui par nom : une étude
+    # qui étiquette large ne doit pas pouvoir chasser de la palette les éléments dont
+    # c'est le nom même qui correspond.
+    matching_tags = list(Tag.objects.filter(name__iregex=name_pattern))
+    if matching_tags:
+        tag_ids = {t.id for t in matching_tags}
+
+        def justifying_tag(obj):
+            """Le tag à AFFICHER quand l'élément en porte plusieurs qui correspondent :
+            le premier par nom (Tag.Meta.ordering), pour que deux recherches identiques
+            n'affichent pas deux justifications différentes."""
+            for tag in obj.tags.all():
+                if tag.id in tag_ids:
+                    return _serialize_tag(tag)
+            # Inatteignable — l'élément vient d'un filtre sur ces mêmes tags. Retour
+            # explicite plutôt qu'un None implicite, pour que la palette reçoive au pire
+            # un résultat sans justification, pas une exception.
+            return None
+
+        tagged_datarooms, cut = take(
+            Dataroom.objects.filter(tags__in=matching_tags)
+            .exclude(name__iregex=name_pattern)
+            .prefetch_related('tags')
+            .distinct()
+            .order_by('name')[:scan_limit + 1],
+            lambda d: _level_visible(user, d),
+        )
+        truncated = truncated or cut
+        results.extend(_dataroom_hit(d, justifying_tag(d)) for d in tagged_datarooms)
+
+        tagged_documents, cut = take(
+            Document.objects.filter(tags__in=matching_tags)
+            .exclude(name__iregex=name_pattern)
+            .select_related('dataroom', 'folder')
+            .prefetch_related('tags')
+            .distinct()
+            .order_by('-uploaded_at')[:scan_limit + 1],
+            # Rigoureusement le même contrôle que le passage par nom : un tag ne doit
+            # pas devenir un chemin de traverse vers une pièce restreinte.
+            lambda d: _user_can_access(user, d.dataroom, folder=d.folder, document=d),
+        )
+        truncated = truncated or cut
+        results.extend(_document_hit(d, justifying_tag(d)) for d in tagged_documents)
 
     # Les personnes de l'étude. Volontairement soumises au MÊME gate et à la MÊME
     # visibilité hiérarchique que /api/office-users/ : réservé aux admins/superadmins
@@ -1238,6 +1315,9 @@ def search_view(request):
                 "dataroom_name": None,
                 "folder_id": None,
                 "path": f"{office.name} / {m.get_role_display()}",
+                # Toujours None, comme pour les sous-dossiers : une personne ne porte
+                # pas de tags.
+                "matched_tag": None,
             })
 
     return Response({"query": query, "results": results, "truncated": truncated})

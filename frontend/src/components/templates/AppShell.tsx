@@ -284,7 +284,7 @@ export function AppShell({
                 commandes. Toutes les actions de la barre sont désormais du
                 même côté, la gauche étant réservée au repère d'écran. */}
             <TopbarSearch
-              placeholder="Rechercher un dossier, une pièce, une personne, un écran…"
+              placeholder="Rechercher un dossier, une pièce, un tag, une personne, un écran…"
               shortcut="⌘K"
               onActivate={searchEnabled ? () => setSearchOpen(true) : undefined}
             />

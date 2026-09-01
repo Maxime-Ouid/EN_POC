@@ -831,6 +831,12 @@ select.control.control-sm{padding-right:26px;}
    (le dossier contenant) portant l'information utile pour se situer. */
 .search-hit-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;}
 .search-hit-kind{flex:none;}
+/* Pastille du tag ayant justifié la remontée. Le surlignage y repasse sur la couleur
+   du texte de la pastille : le violet de `.hl` serait illisible sur un fond de tag
+   rouge ou vert, et un tag dont on ne lit plus le nom ne justifie plus rien. Le
+   soulignement reprend le rôle que la couleur jouait, sans se battre avec le fond. */
+.search-hit-name .tag{margin-left:7px;vertical-align:1px;}
+.search-hit-name .tag .hl{color:currentColor;text-decoration:underline;text-underline-offset:2px;}
 /* Pastille « simulé » : reprend le vocabulaire de .proto-pill (la mention
    « Données partiellement simulées » de la topbar), en plus petit. Un résultat
    inventé doit se distinguer d'un vrai AVANT le clic, pas après. */

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch, SEARCH_MIN_LENGTH } from '../../hooks/useSearch';
 import { matchesWordStart } from '../../search/match';
 import { Highlight } from '../atoms/Highlight';
+import { Tag } from '../atoms/Tag';
 import type { LocalEntry } from '../../search/localEntries';
-import type { SearchHit } from '../../api/endpoints';
+import type { SearchHit, TagSummary } from '../../api/endpoints';
 
 export interface SearchPaletteProps {
   open: boolean;
@@ -44,6 +45,8 @@ interface PaletteItem {
   path: string;
   kindLabel: string;
   simulated?: boolean;
+  /** Tag ayant justifié la remontée, quand ce n'est pas le nom qui correspond. */
+  matchedTag?: TagSummary | null;
   query: string;
   activate: () => void;
 }
@@ -99,6 +102,7 @@ export function SearchPalette({ open, onClose, onSelect, localEntries = [] }: Se
       name: hit.name,
       path: hit.path,
       kindLabel: KIND_LABEL[hit.kind],
+      matchedTag: hit.matched_tag,
       query: resultQuery,
       activate: () => onSelect(hit),
     }));
@@ -184,7 +188,7 @@ export function SearchPalette({ open, onClose, onSelect, localEntries = [] }: Se
           <input
             ref={inputRef}
             type="text"
-            placeholder="Rechercher un dossier, une pièce, une personne, un écran…"
+            placeholder="Rechercher un dossier, une pièce, un tag, une personne, un écran…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             aria-label="Rechercher"
@@ -196,8 +200,8 @@ export function SearchPalette({ open, onClose, onSelect, localEntries = [] }: Se
         <div className="search-palette-results" id="search-palette-results" ref={listRef} role="listbox">
           {typed.length === 0 && (
             <div className="search-palette-empty dim tiny">
-              Cherchez un dossier, une pièce, une personne de l’étude — ou un écran de
-              l’application.
+              Cherchez un dossier, une pièce, un tag, une personne de l’étude — ou un
+              écran de l’application.
             </div>
           )}
 
@@ -236,6 +240,15 @@ export function SearchPalette({ open, onClose, onSelect, localEntries = [] }: Se
               <span className="search-hit-text">
                 <span className="search-hit-name">
                   <Highlight text={item.name} query={item.query} />
+                  {/* Le tag est affiché À CÔTÉ du nom, et c'est LUI qui porte le
+                      surlignage : sur une correspondance par tag, la frappe est
+                      absente du nom, et une ligne sans rien de surligné donnerait
+                      l'impression d'un résultat hors sujet. */}
+                  {item.matchedTag && (
+                    <Tag icon="tag" color={item.matchedTag.color}>
+                      <Highlight text={item.matchedTag.name} query={item.query} />
+                    </Tag>
+                  )}
                   {item.simulated && <span className="search-hit-sim">simulé</span>}
                 </span>
                 <span className="search-hit-path dim tiny">

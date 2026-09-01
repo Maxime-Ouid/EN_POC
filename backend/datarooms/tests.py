@@ -1230,13 +1230,18 @@ class SearchApiTests(unittest.TestCase):
     du choix de `unittest.TestCase` plutôt que `django.test.TestCase`.
 
     Arborescence construite dans setUp — tout contient « martin », pour que ce soit
-    bien le contrôle d'accès et non le filtre par nom qui trie les résultats :
-        Succession Martin (pas de restriction)
+    bien le contrôle d'accès et non le filtre par nom qui trie les résultats. Les tags
+    posés (colonne de droite) servent la recherche par tag : « Vente » est porté par un
+    dossier dont le NOM ne contient pas « vente » (c'est là tout l'intérêt) et par une
+    pièce dont le nom le contient (pour vérifier qu'elle ne remonte pas deux fois) ;
+    « Confidentiel » n'est porté que par des éléments restreints, pour vérifier qu'un
+    tag n'ouvre aucun contournement :
+        Succession Martin (pas de restriction)                    [Vente]
         ├── Actes Martin (pas de restriction)
-        │    ├── acte-vente-martin.pdf   (pas de restriction)
-        │    └── secret-martin.pdf       (restreint à {alice})
+        │    ├── acte-vente-martin.pdf   (pas de restriction)     [Vente]
+        │    └── secret-martin.pdf       (restreint à {alice})    [Confidentiel]
         └── Prive Martin (restreint à {alice})
-             └── note-martin.pdf         (pas de restriction propre → hérite)
+             └── note-martin.pdf         (pas de restriction propre → hérite) [Confidentiel]
     """
 
     SUBDOMAIN = "searchq"
@@ -1297,6 +1302,15 @@ class SearchApiTests(unittest.TestCase):
                 dataroom=self.dataroom, folder=self.prive,
                 name="note-martin.pdf", file="fake/note.pdf",
             )
+
+            self.tag_vente = Tag.objects.create(name="Vente", slug="vente", color="brass")
+            self.tag_confidentiel = Tag.objects.create(
+                name="Confidentiel", slug="confidentiel", color="critical"
+            )
+            self.dataroom.tags.set([self.tag_vente])
+            self.acte_doc.tags.set([self.tag_vente])
+            self.secret_doc.tags.set([self.tag_confidentiel])
+            self.note_doc.tags.set([self.tag_confidentiel])
         finally:
             reset_current_tenant(token)
 
@@ -1406,6 +1420,71 @@ class SearchApiTests(unittest.TestCase):
         names = self._names(self._search("searchq"), "person")
         self.assertIn("searchq_alice", names)
         self.assertNotIn("searchq_patronne", names)
+
+    def test_a_tag_finds_what_carries_it_even_when_the_name_says_nothing(self):
+        # Le cœur de la fonctionnalité : « Succession Martin » ne contient pas
+        # « vente », c'est son TAG qui correspond. Sans ce passage, le dossier serait
+        # introuvable autrement qu'en sachant déjà comment il s'appelle.
+        self.client.force_login(self.alice)
+        hits = [h for h in self._search("vente")["results"] if h["kind"] == "dataroom"]
+        self.assertEqual([h["name"] for h in hits], ["Succession Martin"])
+        self.assertEqual(hits[0]["matched_tag"]["name"], "Vente")
+
+    def test_a_result_found_by_its_name_carries_no_tag_justification(self):
+        # `matched_tag` répond à « pourquoi cet élément remonte-t-il ? ». Sur une
+        # correspondance par nom la question ne se pose pas, et une pastille de tag
+        # affichée là ferait croire à une correspondance qui n'a pas eu lieu.
+        self.client.force_login(self.alice)
+        hits = [
+            h for h in self._search("martin")["results"]
+            if h["kind"] == "dataroom" and h["name"] == "Succession Martin"
+        ]
+        self.assertEqual(len(hits), 1)
+        self.assertIsNone(hits[0]["matched_tag"])
+
+    def test_an_element_matching_by_both_name_and_tag_appears_once(self):
+        # « acte-vente-martin.pdf » porte le tag « Vente » ET « vente » dans son nom.
+        # Le nom l'emporte : un seul résultat, sans justification par tag.
+        self.client.force_login(self.alice)
+        hits = [
+            h for h in self._search("vente")["results"]
+            if h["kind"] == "document" and h["name"] == "acte-vente-martin.pdf"
+        ]
+        self.assertEqual(len(hits), 1)
+        self.assertIsNone(hits[0]["matched_tag"])
+
+    def test_a_tag_is_never_a_way_around_a_restriction(self):
+        # Le point qui compte, transposé aux tags : « Confidentiel » n'est porté que
+        # par une pièce restreinte à alice et par une pièce d'un dossier restreint à
+        # alice. Bob ne doit rien en apprendre — ni le nom, ni l'existence.
+        self.client.force_login(self.bob)
+        self.assertEqual(self._search("confidentiel")["results"], [])
+        # Et le tag ne rend pas trouvable non plus la pièce dont l'accès est hérité.
+        self.assertEqual(self._names(self._search("confidentiel")), set())
+
+        # Contre-épreuve : alice, elle, les trouve bien par ce tag — sinon le test
+        # ci-dessus passerait aussi avec une recherche par tag cassée.
+        self.client.force_login(self.alice)
+        self.assertEqual(
+            self._names(self._search("confidentiel"), "document"),
+            {"secret-martin.pdf", "note-martin.pdf"},
+        )
+
+    def test_tag_match_is_word_start_like_names(self):
+        # Même règle que pour les noms (voir _name_starts_with), pas une seconde
+        # sémantique à retenir : « vent » trouve « Vente », « ente » ne trouve rien.
+        self.client.force_login(self.alice)
+        self.assertIn("Succession Martin", self._names(self._search("vent"), "dataroom"))
+        self.assertEqual(self._names(self._search("ente"), "dataroom"), set())
+
+    def test_a_tag_on_the_dataroom_does_not_pull_up_its_content(self):
+        # « Vente » est posé sur le dossier, pas sur « Prive Martin » ni sur
+        # « note-martin.pdf ». Remonter tout le contenu d'un dossier étiqueté noierait
+        # la palette et répondrait à une question de navigation, pas de recherche.
+        self.client.force_login(self.alice)
+        names = self._names(self._search("vente"))
+        self.assertNotIn("Prive Martin", names)
+        self.assertNotIn("note-martin.pdf", names)
 
     def test_regex_metacharacters_in_the_query_are_escaped(self):
         # Une frappe passe par des motifs incomplets (« ( », « [ ») : le serveur doit

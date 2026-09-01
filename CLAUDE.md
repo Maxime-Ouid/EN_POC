@@ -1045,6 +1045,42 @@ session si le code a bougé.
   - **Reste à faire** : lancer `python manage.py migrate_all_tenants` (nouvelle
     migration `0008_tag` à appliquer à CHAQUE base d'office) avant toute démo.
 
+- **✅ Fait le 01/09/2026 — recherche par tag dans la palette globale (⌘K)** :
+  - **Le manque** : les tags n'étaient cherchables que par la barre de la liste des
+    dossiers. Depuis la palette globale, taper « prioritaire » ne ramenait rien — la
+    fonctionnalité paraissait absente à qui n'ouvre pas le menu « Tags ».
+  - **`GET /api/search/`** fait maintenant DEUX passages : les noms d'abord (inchangé),
+    puis les tags — `Dataroom` et `Document` uniquement, un `Folder` et une personne
+    n'en portant pas. Même règle de correspondance (début de mot, `_name_starts_with`),
+    et **rigoureusement les mêmes helpers d'accès** (`_level_visible`,
+    `_user_can_access`) : un tag ne doit pas devenir un chemin de traverse vers une
+    pièce restreinte.
+  - **Pourquoi deux passages et non un `OR`** : chaque résultat porte désormais
+    `matched_tag` (le tag qui l'a fait remonter, `null` sur une correspondance par nom).
+    Avec un `OR`, la provenance serait indiscernable, et la palette afficherait un nom
+    où la frappe est introuvable — un résultat qui a l'air arbitraire. Les
+    `exclude(name__iregex=...)` du second passage garantissent qu'un élément ne remonte
+    jamais deux fois, le nom l'emportant même quand il a été coupé par la limite.
+  - **Limite par type propre au passage par tag**, non partagée avec celui par nom : une
+    étude qui étiquette large ne doit pas chasser de la palette les éléments dont c'est
+    le nom même qui correspond.
+  - **Front** : la ligne de résultat affiche la pastille du tag (composant `Tag` du
+    design system, pas une classe maison — les couleurs vivent sur `.tag.tag-<clé>`), et
+    c'est ELLE qui porte le surlignage, la frappe étant absente du nom. Surlignage
+    repassé en `currentColor` + soulignement dans ce contexte : le violet de `.hl` est
+    illisible sur un fond de tag rouge ou vert. Placeholders de la palette et de la
+    topbar mis à jour (« …, un tag, … »).
+  - **Vérifications** : `python manage.py test datarooms` — 132 tests OK, dont 6 nouveaux
+    dans `SearchApiTests` (un tag trouve ce qui le porte quand le nom ne dit rien ; une
+    correspondance par nom ne porte pas de justification ; nom + tag = un seul résultat ;
+    un tag n'ouvre aucun contournement d'`AccessRestriction`, avec contre-épreuve sur
+    l'utilisateur autorisé ; correspondance début de mot ; le tag d'un dossier ne remonte
+    pas son contenu). `tsc -b` et `npm run lint` (0 erreur). **Non vérifié en
+    navigateur** — parcours à refaire à la main : ⌘K puis « prioritaire » (doit ramener
+    « Vente Guerin - 8 avenue Foch », dont le nom ne contient pas le mot, avec la
+    pastille « Prioritaire »), puis « signé » (deux pièces, par leur tag), puis « vente »
+    (le même dossier remonte par son NOM, donc sans pastille).
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
@@ -1129,8 +1165,10 @@ session si le code a bougé.
       recherche) — fait le 01/09/2026 : modèle `Tag` (cinquième modèle métier
       tenant), création à la volée dédupliquée sur le nom replié, filtre
       multi-sélection en OU, tags cherchés par la barre de recherche de la liste au
-      même titre que les noms. Renommage/suppression du catalogue réservés aux
-      admins. Non vérifié en navigateur (voir « État réel du code »).
+      même titre que les noms, **et par la palette globale ⌘K** (second passage de
+      `/api/search/`, résultat justifié par `matched_tag` — même date).
+      Renommage/suppression du catalogue réservés aux admins. Non vérifié en
+      navigateur (voir « État réel du code »).
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le
