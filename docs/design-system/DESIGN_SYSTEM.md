@@ -245,7 +245,27 @@ En-têtes en capitales, `--ink-400`, 11px. Lignes séparées par `--border-soft`
 
 <button class="toggle on" onclick="this.classList.toggle('on')"></button>
 ```
-Inputs/selects : fond `--surface`, bordure `--border`, `radius:8px`, focus = bordure `--brass-500` (pas d'anneau `outline`, sauf `:focus-visible` global à `--brass-500` 2px). `.toggle` est un interrupteur maison (36×20px, pastille blanche qui glisse), pas un `<input type="checkbox">` stylé — à garder à l'esprit pour l'accessibilité si vous le reproduisez (ajouter `role="switch"` + `aria-checked`).
+Inputs/selects : fond `--surface`, bordure `--border`, `radius:8px`, focus = bordure `--brass-500` + anneau `box-shadow` à 22 % (pas d'anneau `outline`, sauf `:focus-visible` global à `--brass-500` 2px). `.toggle` est un interrupteur maison (36×20px, pastille blanche qui glisse), pas un `<input type="checkbox">` stylé — à garder à l'esprit pour l'accessibilité si vous le reproduisez (ajouter `role="switch"` + `aria-checked`).
+
+**Le style vit sur le contrôle, pas sur son conteneur** (corrigé le 01/09/2026). Il était porté par `.field input, .field select` : un `<Select>` posé hors d'un `<Field>` — cellule de tableau, barre de filtres — retombait sur le rendu brut du navigateur. La classe est maintenant `.control`, posée par les atomes eux-mêmes ; les sélecteurs `.field *` restent dans la même règle pour les éléments écrits à la main. Variantes : `.control-sm` (compact) et `.control-auto` (largeur au contenu).
+
+```html
+<span class="select-wrap" style="width:160px">
+  <select class="control"><option>Membre</option></select>
+  <svg class="icon"><use href="#i-chevd"/></svg>
+</span>
+
+<span class="number-field number-sm">
+  <input type="number" min="0" max="100" value="100" aria-label="Opacité en pourcentage">
+  <span class="number-unit">%</span>
+  <span class="number-steps">
+    <button type="button" class="number-step"><svg><use href="#i-up"/></svg></button>
+    <button type="button" class="number-step"><svg><use href="#i-down"/></svg></button>
+  </span>
+</span>
+```
+
+Deux contrôles natifs sont repris à la main parce qu'ils ne sont pas stylables de façon identique d'un navigateur à l'autre : la **flèche du select** (`appearance:none` + chevron du sprite, décoratif et `pointer-events:none` pour que la cible du clic reste le `<select>`), et les **compteurs du champ numérique** (masqués sur WebKit et Firefox, remplacés par deux boutons `.number-step` ; les flèches du clavier restent gérées par l'`<input>`). Côté React, `<Select>` place le `style` de l'appelant sur l'enveloppe et non sur le `<select>` : une largeur imposée doit cadrer le chevron avec le champ. `<NumberField>` prend `value`/`onChange` et un `onCommit` optionnel, pour persister à la validation plutôt qu'à chaque frappe.
 
 ### 6.7 Onglets — `.tabstrip`
 
@@ -416,7 +436,7 @@ La première version (26/08/2026 matin) limitait l'édition à 2 couleurs ancres
 Deux changements en ont découlé :
 
 1. **Correction du bug** : `#app-main` et `.card`/`.stat-card` consomment désormais réellement des variables CSS (`--app-grad-base-from/to`, `--app-grad-1..4`, `--card-bg`, `--card-border`) au lieu de couleurs figées dans les règles — ces fonds sont maintenant pilotables, ce qu'ils n'ont jamais été avant cette révision.
-2. **Changement d'architecture** : abandon complet de la dérivation HSL au profit d'un **schéma plat et déclaratif** (`TOKEN_SCHEMA`, 55 variables) où chaque couleur — y compris les 4 couleurs de statut (succès/alerte/bloquant/info) — est éditable indépendamment, par thème clair/sombre, sans aucun calcul dérivé entre tokens. Il n'y a donc plus de garde-fou de cohérence automatique : une étude peut en théorie choisir des couleurs peu contrastées. C'est un compromis assumé et explicitement demandé par l'utilisateur, à mettre en balance avec un contrôle éditorial (charte imposée par Notantis) si le produit réel l'exige.
+2. **Changement d'architecture** : abandon complet de la dérivation HSL au profit d'un **schéma plat et déclaratif** (`TOKEN_SCHEMA`, 58 variables) où chaque couleur — y compris les 4 couleurs de statut (succès/alerte/bloquant/info) — est éditable indépendamment, par thème clair/sombre, sans aucun calcul dérivé entre tokens. Il n'y a donc plus de garde-fou de cohérence automatique : une étude peut en théorie choisir des couleurs peu contrastées. C'est un compromis assumé et explicitement demandé par l'utilisateur, à mettre en balance avec un contrôle éditorial (charte imposée par Notantis) si le produit réel l'exige.
 
 ### 9.2 Le schéma de tokens (`TOKEN_SCHEMA`)
 
@@ -428,7 +448,7 @@ Chaque entrée du schéma décrit une variable CSS éditable :
 - `type` — `hex` (couleur opaque, un seul input couleur), `rgba` (couleur + input d'opacité en %, recomposé en `rgba()` si l'opacité est < 100 %), ou `orb` (halo radial à 2 arrêts — seule la teinte est éditable ; l'écart d'opacité centre/bord `a_from`/`a_to` reste fixe par thème pour préserver l'effet de lueur, ce n'est pas une dérivation entre tokens mais une simple recomposition de format).
 - `light` / `dark` — valeurs par défaut (celles de la palette Notantis d'origine) pour chaque thème.
 
-Les 55 variables couvrent : fonds et surfaces, dégradé de fond du tableau de bord (`#app-main`), cartes (effet verre), toutes les couleurs de texte (`--ink-*`, y compris les icônes qui héritent de `--ink-400`/`--ink-500`), marque et accent, barre latérale, les 4 couleurs de statut (texte + fond de chacune), et l'écran de connexion. Typographie et forme des coins restent des préréglages (3 chacun) plutôt que des variables libres — ce sont des choix de composition typographique/géométrique, pas des couleurs, et un curseur libre par variable n'y apporterait pas de valeur perçue supplémentaire.
+Les 58 variables couvrent : fonds et surfaces, dégradé de fond du tableau de bord (`#app-main`), cartes (effet verre), toutes les couleurs de texte (`--ink-*`, y compris les icônes qui héritent de `--ink-400`/`--ink-500`), marque et accent, barre latérale, les 4 couleurs de statut (texte + fond de chacune), les deux couleurs de variation `--positive`/`--caution` (delta vert / delta orange), et l'écran de connexion. Typographie et forme des coins restent des préréglages (3 chacun) plutôt que des variables libres — ce sont des choix de composition typographique/géométrique, pas des couleurs, et un curseur libre par variable n'y apporterait pas de valeur perçue supplémentaire.
 
 ### 9.3 Persistance et propagation (prototype)
 
@@ -440,7 +460,7 @@ Les 55 variables couvrent : fonds et surfaces, dégradé de fond du tableau de b
 - `reset()` — efface le `localStorage` et revient aux valeurs Notantis par défaut.
 - `parseColor(str)` / `composeColor(hex, a)` — conversion entre une valeur CSS couleur (hex 3/6/8, `rgb()`/`rgba()` en syntaxe virgules OU syntaxe moderne espaces + `/ alpha%`) et une paire `{hex, a}` pour piloter les deux inputs (couleur + opacité) d'un token `rgba`.
 
-L'écran Apparence (bas de fichier, IIFE scopée à `#screen-settings`) génère dynamiquement la liste des 55 champs à partir de `TOKEN_SCHEMA`/`GROUPS` (plus de markup statique par champ) dans un conteneur défilant (`.token-groups-scroll`), avec un **bouton bascule clair/sombre** (`.theme-edit-toggle`) qui, en plus de changer le thème affecté par les modifications, force l'attribut `data-theme` sur `<html>` pour que **toute l'application** (pas seulement l'écran de réglages) reflète en direct le thème en cours d'édition. Chaque champ applique en direct sur `input` et persiste + flash de confirmation sur `change`.
+L'écran Apparence (bas de fichier, IIFE scopée à `#screen-settings`) génère dynamiquement la liste des 58 champs à partir de `TOKEN_SCHEMA`/`GROUPS` (plus de markup statique par champ) dans un conteneur défilant (`.token-groups-scroll`), avec un **bouton bascule clair/sombre** (`.theme-edit-toggle`) qui, en plus de changer le thème affecté par les modifications, force l'attribut `data-theme` sur `<html>` pour que **toute l'application** (pas seulement l'écran de réglages) reflète en direct le thème en cours d'édition. Chaque champ applique en direct sur `input` et persiste + flash de confirmation sur `change`.
 
 ### 9.4 Portage Python (`tokens.py`)
 

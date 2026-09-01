@@ -43,14 +43,16 @@
      donc le token le plus libre de la liste : un office peut le pousser loin
      sans rien rendre illisible. */
   --icon-accent:#9668f4;
-  --success:#2f8f5b;
-  --success-bg:#e4f5ec;
-  --warning:#b9820f;
-  --warning-bg:#fbf0d6;
-  --critical:#c13f3f;
-  --critical-bg:#fbe6e6;
-  --info:#5b7bfb;
-  --info-bg:#e9edfe;
+  --success:#00692c;
+  --success-bg:#d3f8db;
+  --warning:#834300;
+  --warning-bg:#ffe7c6;
+  --critical:#992220;
+  --critical-bg:#ffe0d9;
+  --info:#00579c;
+  --info-bg:#d2f1ff;
+  --positive:#00692c;
+  --caution:#834300;
   --shadow-sm:0 1px 2px rgba(26,18,88,.06);
   --shadow-md:0 8px 24px rgba(26,18,88,.10);
   --shadow-lg:0 24px 56px rgba(26,18,88,.16);
@@ -150,14 +152,16 @@
        donc le token le plus libre de la liste : un office peut le pousser loin
        sans rien rendre illisible. */
     --icon-accent:#9668f4;
-    --success:#7fbf9c;
-    --success-bg:rgba(47,143,91,.18);
-    --warning:#e3b25b;
-    --warning-bg:rgba(185,130,15,.20);
-    --critical:#e08a8a;
-    --critical-bg:rgba(193,63,63,.20);
-    --info:#8fa8ff;
-    --info-bg:rgba(91,123,251,.20);
+    --success:#87e5a2;
+    --success-bg:#194025;
+    --warning:#ffbc67;
+    --warning-bg:#4c3009;
+    --critical:#ffaa9e;
+    --critical-bg:#532824;
+    --info:#88d2ff;
+    --info-bg:#1a3957;
+    --positive:#87e5a2;
+    --caution:#ffbc67;
     --shadow-sm:0 1px 2px rgba(0,0,0,.4);
     --shadow-md:0 8px 24px rgba(0,0,0,.45);
     --shadow-lg:0 24px 56px rgba(0,0,0,.6);
@@ -221,14 +225,16 @@
      donc le token le plus libre de la liste : un office peut le pousser loin
      sans rien rendre illisible. */
   --icon-accent:#9668f4;
-  --success:#7fbf9c;
-  --success-bg:rgba(47,143,91,.18);
-  --warning:#e3b25b;
-  --warning-bg:rgba(185,130,15,.20);
-  --critical:#e08a8a;
-  --critical-bg:rgba(193,63,63,.20);
-  --info:#8fa8ff;
-  --info-bg:rgba(91,123,251,.20);
+  --success:#87e5a2;
+  --success-bg:#194025;
+  --warning:#ffbc67;
+  --warning-bg:#4c3009;
+  --critical:#ffaa9e;
+  --critical-bg:#532824;
+  --info:#88d2ff;
+  --info-bg:#1a3957;
+  --positive:#87e5a2;
+  --caution:#ffbc67;
   --shadow-sm:0 1px 2px rgba(0,0,0,.4);
   --shadow-md:0 8px 24px rgba(0,0,0,.45);
   --shadow-lg:0 24px 56px rgba(0,0,0,.6);

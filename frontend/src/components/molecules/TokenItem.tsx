@@ -1,3 +1,4 @@
+import { NumberField } from '../atoms/NumberField';
 import { parseColor } from '../../theme/color';
 import { useTenantTheme } from '../../theme/useTenantTheme';
 import type { TokenDef } from '../../theme/schema';
@@ -33,21 +34,17 @@ export function TokenItem({ token }: TokenItemProps) {
         <div className="token-item-sub">
           <span className="token-item-hex">{parsed.hex}</span>
           {hasOpacity && (
-            <>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                className="token-item-opacity"
-                value={opacityPercent}
-                title="Opacité (%)"
-                aria-label={`${token.label} — opacité en pourcentage`}
-                onChange={e => push(parsed.hex, parseFloat(e.target.value) || 0)}
-                onBlur={commit}
-              />
-              <span className="token-item-hex">%</span>
-            </>
+            <NumberField
+              small
+              unit="%"
+              min={0}
+              max={100}
+              step={1}
+              value={opacityPercent}
+              label={`${token.label} — opacité en pourcentage`}
+              onChange={percent => push(parsed.hex, percent)}
+              onCommit={commit}
+            />
           )}
         </div>
       </div>

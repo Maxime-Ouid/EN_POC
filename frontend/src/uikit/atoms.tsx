@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Avatar, Badge, BarTrack, Button, Card, Decor, Grid, Icon, IconButton, ICON_IDS,
-  Nav, NavGroup, NavItem, Pill, ProtoPill, RowIcon, RowMenu, Screen, Select,
+  Nav, NavGroup, NavItem, NumberField, Pill, ProtoPill, RowIcon, RowMenu, Screen, Select,
   ShapeSwatch, SoField, Subscreen, SubscreenPanel, Tag, TextInput, Textarea,
   Toggle, TopbarRight, TypographySample, Field,
 } from '../components';
@@ -37,6 +37,26 @@ function ShellBox({ children }: { children: React.ReactNode }) {
     <div style={{ width: 236, background: 'var(--shell-bg)', borderRadius: 'var(--radius-md)', padding: 8 }}>
       {children}
     </div>
+  );
+}
+
+function NumberFieldDemo({ small }: { small?: boolean }) {
+  const [value, setValue] = useState(small ? 12 : 100);
+  return (
+    <Row>
+      <NumberField
+        small={small}
+        unit={small ? undefined : '%'}
+        min={0}
+        max={small ? 64 : 100}
+        value={value}
+        label={small ? 'Rayon en pixels' : 'Opacité en pourcentage'}
+        onChange={setValue}
+      />
+      <span className="tiny dim">
+        {small ? 'compteurs maison — les flèches du clavier marchent aussi' : `valeur : ${value}`}
+      </span>
+    </Row>
   );
 }
 
@@ -214,17 +234,46 @@ export function AtomSpecimens() {
 
       <Specimen
         name="Select"
-        variants={[{ label: 'Dans un Field', node: (
-          <div style={{ maxWidth: 320 }}>
-            <Field label="Portefeuille">
-              <Select defaultValue="ivry">
-                <option value="">Aucun</option>
-                <option value="ivry">Opération Ivry — Le Monde Commerce</option>
-                <option value="jo">JO 2024 — Parc immobilier</option>
-              </Select>
-            </Field>
-          </div>
-        )}]}
+        variants={[
+          { label: 'Dans un Field', node: (
+            <div style={{ maxWidth: 320 }}>
+              <Field label="Portefeuille">
+                <Select defaultValue="ivry">
+                  <option value="">Aucun</option>
+                  <option value="ivry">Opération Ivry — Le Monde Commerce</option>
+                  <option value="jo">JO 2024 — Parc immobilier</option>
+                </Select>
+              </Field>
+            </div>
+          )},
+          { label: 'Seul, largeur imposée — cellule de tableau', node: (
+            <Select defaultValue="membre" aria-label="Rôle" style={{ width: 160 }}>
+              <option value="client">Client</option>
+              <option value="membre">Membre</option>
+              <option value="superadmin">Superadmin</option>
+            </Select>
+          )},
+          { label: 'Compact, largeur au contenu — barre de filtres', node: (
+            <Select small auto defaultValue="25" aria-label="Éléments par page">
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </Select>
+          )},
+          { label: 'Désactivé', node: (
+            <Select disabled defaultValue="client" aria-label="Rôle verrouillé" style={{ width: 160 }}>
+              <option value="client">Client</option>
+            </Select>
+          )},
+        ]}
+      />
+
+      <Specimen
+        name="NumberField"
+        variants={[
+          { label: 'Avec unité — opacité d’un token', node: <NumberFieldDemo /> },
+          { label: 'Compact, sans unité', node: <NumberFieldDemo small /> },
+        ]}
       />
 
       <Specimen

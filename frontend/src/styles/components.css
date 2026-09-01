@@ -340,22 +340,39 @@ html,body,#root{height:100%;}
 .stat-value{font-family:var(--font-display);font-size:27px;font-weight:600;margin-top:12px;}
 .stat-label{font-size:12.5px;color:var(--ink-500);margin-top:2px;}
 .stat-delta{font-size:11.5px;font-weight:600;margin-top:8px;display:inline-flex;gap:4px;align-items:center;}
-.up{color:var(--success);}
-.warn-delta{color:var(--warning);}
+/* Tokens dédiés : les couleurs de statut sont une famille construite
+   ensemble, une variation chiffrée garde son vert et son orange même si
+   la famille bouge. */
+.up{color:var(--positive);}
+.warn-delta{color:var(--caution);}
 
 /* progress / gauge */
 .bar-track{height:7px;border-radius:99px;background:#bdbfc36e;overflow:hidden;}
 .bar-fill{height:100%;border-radius:99px;background:var(--brass-500);}
-.bar-fill.success{background:var(--success);}
-.bar-fill.warn{background:var(--warning);}
+.bar-fill.success{background:var(--positive);}
+.bar-fill.warn{background:var(--caution);}
 
 /* pills / chips / tags */
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;}
-.pill.success{background:var(--success-bg);color:var(--success);}
-.pill.warning{background:var(--warning-bg);color:var(--warning);}
-.pill.critical{background:var(--critical-bg);color:var(--critical);}
-.pill.info{background:var(--info-bg);color:var(--info);}
-.pill.neutral{background:var(--surface-alt);color:var(--ink-500);border:1px solid var(--border);}
+/* Liseré et pastille sont DÉRIVÉS de la couleur de statut (color-mix /
+   currentColor) : aucun token supplémentaire à tenir en cohérence, et le
+   contour suit automatiquement le thème sombre. */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 10px 3px 8px;border-radius:99px;border:1px solid transparent;}
+.pill::before{content:'';flex:none;width:6px;height:6px;border-radius:50%;background:currentColor;}
+/* Variante à glyphe : la pastille devient le fond de l'icône. Le disque est
+   peint en currentColor (donc la couleur du statut) et le glyphe en
+   var(--surface) — qui est blanc en clair et sombre en sombre, ce qui garde
+   le contraste dans les deux thèmes sans second token. */
+.pill.with-icon{padding:2px 10px 2px 3px;}
+.pill.with-icon::before{display:none;}
+.pill .pill-ico{flex:none;width:16px;height:16px;border-radius:50%;background:currentColor;display:flex;align-items:center;justify-content:center;}
+.pill .pill-ico svg{width:9px;height:9px;color:var(--surface);}
+.pill.success{background:var(--success-bg);color:var(--success);border-color:color-mix(in srgb,var(--success) 45%,transparent);}
+.pill.warning{background:var(--warning-bg);color:var(--warning);border-color:color-mix(in srgb,var(--warning) 45%,transparent);}
+.pill.critical{background:var(--critical-bg);color:var(--critical);border-color:color-mix(in srgb,var(--critical) 45%,transparent);}
+.pill.info{background:var(--info-bg);color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,transparent);}
+/* --ink-700 et pas --ink-500 : sur --surface-alt, ink-500 tombe à 3.8:1,
+   sous le seuil RGAA 3.2 (4.5:1 pour du texte de moins de 24px). */
+.pill.neutral{background:var(--surface-alt);color:var(--ink-700);border-color:var(--border);}
 .tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 8px 3px 6px;border-radius:6px;background:var(--brass-100);color:var(--brass-700);}
 .tag svg{width:10px;height:10px;}
 .tag.plain{background:var(--surface-alt);color:var(--ink-700);border:1px solid var(--border);}
@@ -453,16 +470,78 @@ tbody tr:last-child td{border-bottom:none;}
    endpoint d'écriture) : il doit se voir comme tel, sinon on clique en boucle. */
 .toggle:disabled{opacity:.55;cursor:not-allowed;}
 
-/* form-ish */
+/* form-ish
+   =========================================================================
+   Le style vit sur le CONTRÔLE (`.control`), pas sur son conteneur. Il a
+   longtemps été porté par `.field input, .field select` : un Select posé
+   ailleurs que dans un <Field> — une cellule de tableau, une barre de filtres
+   — retombait alors sur le rendu du navigateur. Les sélecteurs `.field *`
+   restent dans la liste pour les éléments bruts écrits à la main dans un
+   Field, mais les atomes posent maintenant `.control` eux-mêmes.
+   ========================================================================= */
 .field{margin-bottom:14px;}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-700);margin-bottom:6px;}
-.field input, .field select{
+.control,
+.field input, .field select, .field textarea{
   width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);
-  font-family:inherit;font-size:13px;color:var(--ink-900);
+  font-family:inherit;font-size:13px;color:var(--ink-900);transition:border-color .12s,box-shadow .12s;
 }
-.field input:focus,.field select:focus{outline:none;border-color:var(--brass-500);}
+.control:hover:not(:disabled),
+.field input:hover:not(:disabled),.field select:hover:not(:disabled){border-color:var(--brass-400);}
+.control:focus,
+.field input:focus,.field select:focus,.field textarea:focus{
+  outline:none;border-color:var(--brass-500);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--brass-500) 22%,transparent);
+}
+.control:disabled{background:var(--surface-alt);color:var(--ink-700);cursor:not-allowed;}
+.control::placeholder{color:var(--ink-700);opacity:.7;}
+.control-sm{padding:5px 9px;font-size:12.5px;border-radius:7px;}
+.control-auto{width:auto;}
+textarea.control{resize:vertical;}
 .field-row{display:flex;gap:14px;}
 .field-row .field{flex:1;}
+
+/* Select — la flèche native est remplacée par le chevron du sprite, sinon le
+   contrôle change de tête à chaque navigateur. Le chevron est décoratif et
+   ne capte pas le clic : c'est le <select> dessous qui reste la cible. */
+.select-wrap{position:relative;display:inline-flex;width:100%;}
+.select-wrap.control-auto{width:auto;}
+select.control{appearance:none;-webkit-appearance:none;padding-right:30px;cursor:pointer;}
+select.control.control-sm{padding-right:26px;}
+.select-wrap>svg.icon{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  width:13px;height:13px;pointer-events:none;color:var(--ink-500);
+}
+.select-wrap.control-auto>svg.icon{right:9px;}
+
+/* Champ numérique à unité — compteurs natifs masqués (ils ne sont stylables
+   ni sur Firefox ni sur Safari) et remplacés par deux boutons du DS. Les
+   flèches du clavier continuent de fonctionner sur l'input. */
+.number-field{
+  display:inline-flex;align-items:stretch;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface);overflow:hidden;transition:border-color .12s,box-shadow .12s;
+}
+.number-field:hover{border-color:var(--brass-400);}
+.number-field:focus-within{border-color:var(--brass-500);box-shadow:0 0 0 3px color-mix(in srgb,var(--brass-500) 22%,transparent);}
+.number-field input{
+  border:none;background:none;width:46px;padding:6px 0 6px 9px;text-align:right;
+  font-family:inherit;font-size:13px;color:var(--ink-900);
+}
+.number-field input:focus{outline:none;}
+.number-field input::-webkit-outer-spin-button,
+.number-field input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.number-field input[type="number"]{-moz-appearance:textfield;appearance:textfield;}
+.number-unit{display:flex;align-items:center;padding:0 7px 0 4px;font-size:12px;color:var(--ink-700);}
+.number-steps{display:flex;flex-direction:column;border-left:1px solid var(--border);}
+.number-step{
+  display:flex;align-items:center;justify-content:center;flex:1;
+  width:20px;padding:0;border:none;background:var(--surface-alt);color:var(--ink-700);cursor:pointer;
+}
+.number-step:hover{background:var(--brass-100);color:var(--brass-700);}
+.number-step:first-child{border-bottom:1px solid var(--border);}
+.number-step svg{width:9px;height:9px;}
+.number-field.number-sm input{width:40px;padding:4px 0 4px 8px;font-size:12.5px;}
+.number-field.number-sm .number-step{width:17px;}
 .help{font-size:11.5px;color:var(--ink-400);margin-top:5px;}
 
 /* modal overlay */

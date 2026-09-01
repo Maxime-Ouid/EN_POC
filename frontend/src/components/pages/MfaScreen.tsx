@@ -1,4 +1,5 @@
 import notantisLogo from '../../assets/notantis-logo.png';
+import { TextInput } from '../atoms/TextInput';
 import { Button } from '../atoms/Button';
 import { Decor } from '../atoms/Decor';
 import type { FormEvent } from 'react';
@@ -99,7 +100,7 @@ export function MfaScreen({ mode, qrCode, secret, onSubmit, error, logoUrl = not
             <form onSubmit={handleSubmit}>
               <div className="field" style={{ marginTop: 22 }}>
                 <label>Code de vérification</label>
-                <input type="text" name="token" placeholder="123456" inputMode="numeric" autoFocus />
+                <TextInput name="token" placeholder="123456" inputMode="numeric" autoFocus />
               </div>
               {error && (
                 <div className="tiny" style={{ color: 'var(--critical)', marginBottom: 10 }}>

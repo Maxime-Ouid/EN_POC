@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Select } from '../atoms/Select';
 import { Field } from '../molecules/Field';
 import { FieldRow } from '../molecules/FieldRow';
 import { TemplateOption } from '../molecules/TemplateOption';
@@ -57,23 +58,23 @@ export function NewDataroomModal({
       </Field>
       <FieldRow>
         <Field label="Portefeuille">
-          <select value={portfolioId} onChange={e => setPortfolioId(e.target.value)}>
+          <Select value={portfolioId} onChange={e => setPortfolioId(e.target.value)}>
             <option value="">Aucun</option>
             {portfolioOptions.map(o => (
               <option key={o.id} value={o.id}>
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Espace client">
-          <select value={clientSpaceId} onChange={e => setClientSpaceId(e.target.value)}>
+          <Select value={clientSpaceId} onChange={e => setClientSpaceId(e.target.value)}>
             {clientSpaceOptions.map(o => (
               <option key={o.id} value={o.id}>
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
       </FieldRow>
       <Field label="Partir d'un modèle">
