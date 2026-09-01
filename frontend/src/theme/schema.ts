@@ -50,13 +50,13 @@ export const TOKEN_SCHEMA: readonly TokenDef[] = [
   { key: 'border', group: 'surfaces', label: 'Bordure standard', type: 'hex', light: '#e5e2f0', dark: '#332a5e' },
   { key: 'border-soft', group: 'surfaces', label: 'Séparateur discret', type: 'hex', light: '#eeecf7', dark: '#2a2350' },
 
-  { key: 'app-grad-base-from', group: 'appbg', label: 'Dégradé — départ', type: 'hex', light: '#f2eeff', dark: '#100d1f' },
-  { key: 'app-grad-base-to', group: 'appbg', label: 'Dégradé — arrivée', type: 'hex', light: '#ecf1ff', dark: '#1c1740' },
+  { key: 'app-grad-base-from', group: 'appbg', label: 'Base — départ', type: 'hex', light: '#f2eeff', dark: '#100d1f' },
+  { key: 'app-grad-base-to', group: 'appbg', label: 'Base — arrivée', type: 'hex', light: '#ecf1ff', dark: '#1c1740' },
   { key: 'app-grad-1', group: 'appbg', label: 'Halo haut-gauche', type: 'rgba', light: '#ede4ff', dark: 'rgba(150,104,244,.16)' },
   { key: 'app-grad-2', group: 'appbg', label: 'Halo haut-droite', type: 'rgba', light: '#b8cdff', dark: 'rgba(91,123,251,.14)' },
   { key: 'app-grad-3', group: 'appbg', label: 'Halo bas-droite', type: 'rgba', light: 'rgba(166,140,255,.369)', dark: 'rgba(150,104,244,.10)' },
   { key: 'app-grad-4', group: 'appbg', label: 'Halo bas-gauche', type: 'rgba', light: '#c8e2f2', dark: 'rgba(80,208,253,.08)' },
-  { key: 'app-orb', group: 'appbg', label: 'Formes flottantes', type: 'orb', light: '#ffffff', dark: '#ffffff', aFromLight: 0.55, aToLight: 0.04, aFromDark: 0.22, aToDark: 0.02 },
+  { key: 'app-pattern', group: 'appbg', label: 'Filet / grain', type: 'rgba', light: 'rgba(107,63,212,.10)', dark: 'rgba(185,156,247,.10)' },
 
   { key: 'card-bg', group: 'cards', label: 'Fond des cartes', type: 'rgba', light: 'rgba(255,255,255,.5)', dark: 'rgba(23,19,48,.55)' },
   { key: 'card-border', group: 'cards', label: 'Bordure des cartes', type: 'rgba', light: 'rgba(255,255,255,.65)', dark: 'rgba(255,255,255,.08)' },
@@ -133,7 +133,7 @@ export const TOKEN_SCHEMA: readonly TokenDef[] = [
 
 export const TOKEN_GROUPS: readonly TokenGroup[] = [
   { id: 'surfaces', label: 'Fonds & surfaces' },
-  { id: 'appbg', label: 'Dégradé de fond (tableau de bord)' },
+  { id: 'appbg', label: "Fond de l'application" },
   { id: 'cards', label: 'Cartes (effet verre)' },
   { id: 'text', label: 'Texte' },
   { id: 'brand', label: 'Marque & accent' },
@@ -194,8 +194,52 @@ export const SHAPE: Record<ShapeKey, ShapePreset> = {
   arrondi: { label: 'Arrondi', sm: '8px', md: '14px', lg: '22px', swatchRadius: '15px' },
 };
 
+export type AppBgKey = 'degrade' | 'uni' | 'quadrillage' | 'halo' | 'grain';
+
+export interface AppBgPreset {
+  label: string;
+  desc: string;
+  /** Tokens du groupe `appbg` que ce fond consomme réellement — l'écran
+   *  Apparence n'affiche que ceux-là, pour ne pas proposer des réglages sans
+   *  effet visible (le piège déjà rencontré avec `shell-bg`, voir §9). */
+  uses: readonly string[];
+}
+
+/* Fonds de l'espace connecté. Chacun est une simple règle CSS sélectionnée par
+   `data-appbg` sur <html> (voir engine.ts) : un fond ne peut pas se réduire à
+   des variables, il change la NATURE de l'image de fond — dégradés radiaux,
+   filet répété, grain. Les couleurs, elles, restent des tokens éditables. */
+export const APP_BG: Record<AppBgKey, AppBgPreset> = {
+  degrade: {
+    label: 'Dégradé',
+    desc: 'Quatre halos sur une base en diagonale — le fond historique',
+    uses: ['app-grad-base-from', 'app-grad-base-to', 'app-grad-1', 'app-grad-2', 'app-grad-3', 'app-grad-4'],
+  },
+  uni: {
+    label: 'Uni',
+    desc: 'Une seule surface plate, sans dégradé',
+    uses: ['app-grad-base-from'],
+  },
+  quadrillage: {
+    label: 'Quadrillage',
+    desc: 'Filet régulier de 24 px, comme un papier de plan',
+    uses: ['app-grad-base-from', 'app-pattern'],
+  },
+  halo: {
+    label: 'Halo',
+    desc: 'Un seul halo doux dans l’angle haut-droit',
+    uses: ['app-grad-base-from', 'app-grad-base-to', 'app-grad-2'],
+  },
+  grain: {
+    label: 'Grain',
+    desc: 'Fond plat et pointillé très fin, évoque le papier',
+    uses: ['app-grad-base-from', 'app-pattern'],
+  },
+};
+
 export const TYPOGRAPHY_KEYS = Object.keys(TYPOGRAPHY) as TypographyKey[];
 export const SHAPE_KEYS = Object.keys(SHAPE) as ShapeKey[];
+export const APP_BG_KEYS = Object.keys(APP_BG) as AppBgKey[];
 
 /* ===========================================================================
    Disposition et style de la navigation.

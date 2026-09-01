@@ -241,6 +241,26 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
   `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
   « restreint à personne ».
+- `Tag` : cinquième modèle métier tenant (fait le 01/09/2026) — même patron que
+  `Dataroom`/`Folder`/`Document`/`AccessRestriction` (absent de `SHARED_MODELS`). C'est
+  le **catalogue de tags de l'office** : deux offices peuvent avoir un tag « Vente » sans
+  aucun rapport, et `slug` n'a besoin d'être unique que dans la base tenant — l'isolation
+  est physique, pas une colonne `office_id`. Champs : `name`, `slug`, `color`,
+  `created_at`. `Dataroom` et `Document` gagnent chacun un `ManyToManyField(Tag)` ; les
+  deux tables pivot implicites sont, comme leurs deux extrémités, des tables tenant —
+  **rien à ajouter à `SHARED_MODELS`**, contrairement à `office_enabled_modules` qui,
+  lui, relie deux modèles partagés (piège déjà rencontré, voir `tenancy/router.py`).
+  - `slug` est le nom **replié** (accents et casse écrasés — `validators.tag_slug`) et
+    sert de clé de déduplication : créer « Vente » quand « vente » existe rend le tag
+    existant plutôt qu'un doublon. C'est ce qui rend la création à la volée depuis un
+    dossier sûre sans imposer un catalogue verrouillé.
+  - `color` est une **clé sémantique** (`brass`, `info`, `success`, `warning`,
+    `critical`, `neutral`), pas un hexadécimal : la couleur affichée est résolue par le
+    thème de l'office côté front (`components/atoms/Tag.tsx`, propriétaire de la
+    palette ; `validators.TAG_COLORS` en est le miroir qui borne). Un office qui
+    personnalise sa palette voit ses tags suivre — ce qu'un `#7c3aed` figé en base
+    empêcherait. Même parti pris que `Office.theme` : le catalogue vit côté front, le
+    backend stocke et borne.
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -966,6 +986,65 @@ session si le code a bougé.
     à privilégier pour toute vérification par clic dans ce projet si le problème
     se reproduit.
 
+- **✅ Fait le 01/09/2026 — tags : catalogue d'office, pose sur dossiers ET pièces,
+  filtre et recherche** :
+  - **Backend** : modèle `Tag` (voir « Modèle de données clé »), migration
+    `0008_tag.py`, M2M vers `Dataroom` et `Document`. Endpoints : `GET/POST /api/tags/`
+    (catalogue + `usage` = nombre d'éléments portant le tag, dossiers et pièces
+    confondus), `PATCH/DELETE /api/tags/<id>/`, `PUT /api/datarooms/<id>/tags/`,
+    `PUT /api/datarooms/<id>/documents/<id>/tags/`. `GET /api/datarooms/` accepte
+    `?tags=1,2` (**OU** — au moins un des tags) et renvoie désormais les tags de chaque
+    dossier ; `folders_view`/`documents_view` renvoient ceux de chaque pièce.
+  - **Droits volontairement asymétriques** : tout membre peut créer un tag et en
+    poser/retirer (sans quoi le tagging meurt d'attendre un admin) ; seuls
+    admin/superadmin peuvent **renommer ou supprimer** une entrée du catalogue, les deux
+    seules actions qui touchent d'un coup tous les éléments déjà tagués. Renommer vers un
+    nom déjà pris est refusé (409) plutôt que de fusionner deux entrées en silence.
+  - **Affectation par `PUT` idempotent** (la sélection COMPLÈTE, pas un delta) : l'interface
+    manipule une sélection entière (on coche/décoche), et il n'y a rien à réconcilier
+    entre deux ordres d'arrivée concurrents. Un id de tag inconnu dans la base tenant est
+    rejeté en 400 — un id valide dans l'office voisin ne doit pas passer, même règle que
+    `_resolve_folder` pour un dossier d'une autre dataroom.
+  - **`?tags=` illisible → liste vide, pas liste complète** : `?tags=abc` doit dire que le
+    filtre a joué. Répondre « tout » ferait passer un filtre cassé pour une absence de
+    filtre.
+  - **Front** : `Tag` gagne une couleur et une croix de retrait ; deux composants
+    nouveaux — `TagFilter` (molécule : menu multi-sélection, décompte visible menu fermé)
+    et `TagPicker` (organisme : pastilles + « + », recherche repliée accents/casse comme
+    `tag_slug`, création à la volée avec choix de la couleur). Montés dans la colonne
+    « Tags » de la liste des dossiers, dans l'en-tête du dossier ouvert, et par pièce dans
+    l'explorateur ; le volet document les rappelle en lecture seule (un même réglage offert
+    à deux endroits finit par diverger). Hook `useTags` pour le catalogue.
+  - **Deux filtrages, deux endroits, pour une raison** : la liste des dossiers filtre côté
+    SERVEUR (le décompte affiché doit rester celui de l'office, pas celui de la page
+    chargée) ; les pièces d'un dossier filtrent côté CLIENT (`useDataroomTree` a déjà
+    chargé toute l'arborescence, un aller-retour par case cochée n'ajouterait qu'un délai).
+    La barre de recherche de la liste, elle, cherche aussi dans les **noms de tags** :
+    taper « vente » doit ramener les dossiers tagués Vente, pas seulement ceux qui portent
+    le mot dans leur intitulé.
+  - **Décompte sous le tableau** : sous filtre par tag, on n'annonce plus « x sur y » — le
+    total de l'office n'est plus connu du client, et l'annoncer serait inventer un chiffre.
+  - **Correction au passage dans `scripts/check-design-system.mjs`** : la règle
+    `composant-recopie` cherchait `\btag\b`, qui matche aussi `tag-menu`, `tag-dot`,
+    `tag-list`… Un `\b` s'arrête au tiret ; passé en `\btag(?![\w-])`, sans quoi 21 faux
+    positifs poussaient à ajouter des exemptions plutôt qu'à lire la sortie.
+  - **`seed_office_content`** pose maintenant un catalogue de six tags et tague le contenu
+    de démonstration. Le catalogue est créé même quand le contenu existe déjà : sans lui,
+    le menu « Tags » s'ouvre vide et la fonctionnalité passe pour absente.
+  - **Vérifications** : `python manage.py test` — 126 tests OK, dont 21 nouveaux
+    (`TagValidatorTests`, `TagRouterTests`, `TagApiTests` : repliage du slug, dédup à la
+    création, usage cumulé dossiers+pièces, droits admin, refus du renommage en doublon,
+    suppression qui retire le tag partout, OU du filtre, filtre illisible, id inconnu,
+    aller-retour sur une pièce, création de dossier avec tags, non-membre refusé).
+    `npm run lint` (0 erreur), `tsc -b` (0 erreur), `vite build` OK, `npm run check:ds`
+    (0 écart nouveau). **Non vérifié en navigateur** — la session de travail n'avait pas
+    accès au serveur de dev de cette machine ; le parcours à refaire à la main est :
+    créer un tag depuis la colonne « Tags » d'un dossier, le retrouver dans le menu de
+    filtre, filtrer, taguer une pièce, vérifier que le tag survit à un changement de
+    rubrique.
+  - **Reste à faire** : lancer `python manage.py migrate_all_tenants` (nouvelle
+    migration `0008_tag` à appliquer à CHAQUE base d'office) avant toute démo.
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
@@ -1046,6 +1125,12 @@ session si le code a bougé.
       `GET /api/access-restrictions/`) n'est **pas** reconstruit : le hook reste sans
       écran consommateur. **Vérifié : `tsc -b` et `check:ds` ; pas encore exercé
       dans un navigateur réel** (même raison que ci-dessus).
+- [x] **Tags** (catalogue par office, pose sur dossiers ET pièces, filtre et
+      recherche) — fait le 01/09/2026 : modèle `Tag` (cinquième modèle métier
+      tenant), création à la volée dédupliquée sur le nom replié, filtre
+      multi-sélection en OU, tags cherchés par la barre de recherche de la liste au
+      même titre que les noms. Renommage/suppression du catalogue réservés aux
+      admins. Non vérifié en navigateur (voir « État réel du code »).
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le

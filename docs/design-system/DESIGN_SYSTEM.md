@@ -70,6 +70,8 @@ Chargées via Google Fonts (`preconnect` + `<link>` — à servir localement ou 
 
 ## 3. Couleurs
 
+Les quatre couleurs de statut sont construites ensemble en OKLCH — même clarté (L 0,45) et même intensité (C 0,135), seule la teinte tourne (152, 70, 27, 250) — et se tiennent à plus de 45° du violet de marque : un statut ne doit jamais ressembler à un bouton. En retoucher une seule casse la famille ; les recalculer toutes.
+
 Toutes les couleurs passent par des custom properties. Le thème sombre s'active soit automatiquement (`prefers-color-scheme: dark`), soit explicitement via `data-theme="dark"` posé sur `<html>` — utile pour un switch piloté par préférence utilisateur côté serveur (voir §8).
 
 ### Neutres / surfaces
@@ -99,10 +101,11 @@ Toutes les couleurs passent par des custom properties. Le thème sombre s'active
 | `--brand-ink` | `#1a1258` | `#1a1258` (fixe) | bouton primaire, ligne active de l'arborescence |
 | `--brand-ink-hover` | `#241a63` | `#241a63` (fixe) | survol du bouton primaire |
 | `--brass-700`→`--brass-100` | `#6b3fd4` → `#f0e9fc` | `#b99cf7` → `rgba(150,104,244,.16)` | violet accent — CTA secondaire, badges, focus ring, icônes actives |
-| `--success` / `-bg` | `#2f8f5b` / `#e4f5ec` | `#7fbf9c` / `rgba(47,143,91,.18)` | statut positif |
-| `--warning` / `-bg` | `#b9820f` / `#fbf0d6` | `#e3b25b` / `rgba(185,130,15,.20)` | statut d'attention |
-| `--critical` / `-bg` | `#c13f3f` / `#fbe6e6` | `#e08a8a` / `rgba(193,63,63,.20)` | statut bloquant |
-| `--info` / `-bg` | `#5b7bfb` / `#e9edfe` | `#8fa8ff` / `rgba(91,123,251,.20)` | statut neutre informatif |
+| `--success` / `-bg` | `#00692c` / `#d3f8db` | `#87e5a2` / `#194025` | statut positif |
+| `--warning` / `-bg` | `#834300` / `#ffe7c6` | `#ffbc67` / `#4c3009` | statut d'attention |
+| `--critical` / `-bg` | `#992220` / `#ffe0d9` | `#ffaa9e` / `#532824` | statut bloquant |
+| `--info` / `-bg` | `#00579c` / `#d2f1ff` | `#88d2ff` / `#1a3957` | statut neutre informatif |
+| `--positive` / `--caution` | `#00692c` / `#834300` | `#87e5a2` / `#ffbc67` | variation chiffrée (delta d'une statistique), indépendante des statuts |
 
 ### Coquille (sidebar) — palette fixe, indépendante du thème de contenu
 
@@ -199,10 +202,15 @@ Traitement « verre dépoli » : fond blanc à 50 % + flou + bordure blanche tra
 <span class="pill info">…</span>
 <span class="pill neutral">Clôturé</span>
 
-<span class="tag"><svg><use href="#i-tag"/></svg>Vente</span>
-<span class="tag plain">Prioritaire</span>
+<span class="tag tag-brass"><svg><use href="#i-tag"/></svg>Vente</span>
+<span class="tag tag-critical"><svg><use href="#i-tag"/></svg>Prioritaire</span>
+<span class="tag tag-neutral">Immobilier commercial</span>
 ```
-`.pill` = statut sémantique (couleur + fond pâle assortis, voir §3). `.tag` = classification libre (fond accent violet par défaut, ou `.plain` neutre). Les deux sont des capsules, taille de texte ~11.5px, très utilisées ensemble dans les tableaux.
+`.pill` = statut sémantique (couleur + fond pâle assortis, voir §3). `.tag` = classification libre. Les deux sont des capsules, taille de texte ~11.5px, très utilisées ensemble dans les tableaux.
+
+**Couleurs de tag** (ajoutées le 01/09/2026) : `tag-brass` (défaut, l'accent de l'office), `tag-info`, `tag-success`, `tag-warning`, `tag-critical`, `tag-neutral`. Elles reprennent les **paires de tokens des statuts** (`--info-bg`/`--info`…) plutôt que des valeurs propres : mêmes contrastes déjà vérifiés, et un office qui personnalise son thème voit ses tags suivre. La palette est un ensemble fermé dont le design system est propriétaire (`components/atoms/Tag.tsx`) ; `validators.TAG_COLORS` côté Django n'en est que le garde-fou. `.plain` reste l'ancien nom de `tag-neutral`, conservé pour les libellés qui ne sont **pas** des tags du catalogue (le groupe d'un membre, par exemple).
+
+**Pastille éditable** : `.tag-remove` ajoute une croix de retrait (cible de 16px, pas la taille du glyphe). Les deux composants qui l'entourent sont `TagFilter` (menu de filtre multi-sélection, en OU) et `TagPicker` (pastilles posées + « + » ouvrant le catalogue, avec création à la volée) ; leur panneau flottant `.tag-menu` s'ancre **à gauche** de son déclencheur, contrairement à `.navbar-menu` qui s'ancre à droite.
 
 ### 6.4 Avatars — `.avatar`, `.avatar-stack`
 
@@ -266,6 +274,16 @@ Inputs/selects : fond `--surface`, bordure `--border`, `radius:8px`, focus = bor
 ```
 
 Deux contrôles natifs sont repris à la main parce qu'ils ne sont pas stylables de façon identique d'un navigateur à l'autre : la **flèche du select** (`appearance:none` + chevron du sprite, décoratif et `pointer-events:none` pour que la cible du clic reste le `<select>`), et les **compteurs du champ numérique** (masqués sur WebKit et Firefox, remplacés par deux boutons `.number-step` ; les flèches du clavier restent gérées par l'`<input>`). Côté React, `<Select>` place le `style` de l'appelant sur l'enveloppe et non sur le `<select>` : une largeur imposée doit cadrer le chevron avec le champ. `<NumberField>` prend `value`/`onChange` et un `onCommit` optionnel, pour persister à la validation plutôt qu'à chaque frappe.
+
+### 6.6 bis Fond de l'espace connecté — `data-appbg`
+
+Cinq fonds au choix de l'office, sélectionnés par l'attribut `data-appbg` sur `<html>` (posé par `applyTheme`, voir `theme/engine.ts`) : `degrade` (historique, valeur par défaut), `uni`, `quadrillage`, `halo`, `grain`. Un fond ne peut pas se réduire à des variables : il change la **nature** de l'image de fond, pas seulement sa couleur — d'où l'attribut plutôt qu'un token. Les couleurs, elles, restent éditables (`--app-grad-base-from/to`, `--app-grad-1..4`, `--app-pattern`).
+
+Chaque fond est écrit **une seule fois** dans `components.css`, pour `#app-main` ET pour sa vignette `.appbg-swatch` : un aperçu qui diverge du rendu réel ne sert à rien. Le bloc sans attribut reste le dégradé, pour que tout thème enregistré avant l'arrivée des fonds s'affiche à l'identique — même raison côté serveur, où `appBg` absent du payload est normal et n'est pas ajouté d'office (`clean_theme_payload`).
+
+`APP_BG[key].uses` liste les tokens que chaque fond consomme réellement ; l'onglet Fond n'affiche que ceux-là. C'est la parade au piège documenté en §9 : un réglage visible mais sans effet (le cas `shell-bg`) coûte plus cher qu'un réglage absent.
+
+**Les formes flottantes ont été retirées de l'espace connecté le 01/09/2026.** `<Decor>` ne sert plus qu'aux écrans de connexion (`login-story`, `login-panel`) ; le preset `app`, les règles `.app-orb`/`.ao*` et le token `--app-orb` ont disparu, ce dernier remplacé par `--app-pattern`.
 
 ### 6.7 Onglets — `.tabstrip`
 

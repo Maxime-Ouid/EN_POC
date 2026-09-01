@@ -16,7 +16,7 @@ import {
   type ThemeState,
   type ThemeTransport,
 } from './engine';
-import type { LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
+import type { AppBgKey, LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
 import { TenantThemeContext, type TenantThemeContextValue } from './context';
 
 const SAVE_FLASH_MS = 1600;
@@ -140,6 +140,17 @@ export function ThemeProvider({
     [save],
   );
 
+  const setAppBg = useCallback(
+    (key: AppBgKey) => {
+      setState(prev => {
+        const next = { ...prev, appBg: key };
+        save(next);
+        return next;
+      });
+    },
+    [save],
+  );
+
   const setLayout = useCallback(
     (patch: Partial<LayoutState>) => {
       setState(prev => {
@@ -197,6 +208,7 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setAppBg,
       setLayout,
       reset,
       justSaved,
@@ -211,6 +223,7 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setAppBg,
       setLayout,
       reset,
       justSaved,

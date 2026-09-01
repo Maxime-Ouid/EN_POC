@@ -6,6 +6,9 @@ import { createRoot } from 'react-dom/client'
 // qui bridait l'app en colonne centrée et entrait en collision avec les tokens.)
 import './styles/tokens.css'
 import './styles/components.css'
+// dashboard.css vient en dernier : il consomme les tokens et s'appuie sur les
+// classes de components.css (.icon, .bar-track…) sans jamais les redéfinir.
+import './styles/dashboard.css'
 import App from './App.tsx'
 import { PrototypeDemo } from './PrototypeDemo'
 import { UiKit } from './uikit/UiKit'

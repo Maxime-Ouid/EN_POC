@@ -35,24 +35,35 @@ export interface DataroomsState {
 // await, pour que l'effet de montage ne déclenche pas de rendu en cascade.
 // L'état « en chargement » initial est porté par useState.
 
-/** Liste des datarooms de l'office courant — GET /api/datarooms/. */
-export function useDatarooms(enabled: boolean) {
+/**
+ * Liste des datarooms de l'office courant — GET /api/datarooms/.
+ *
+ * `tagIds` filtre côté serveur en OU (au moins un des tags). Le tableau de
+ * dépendances utilise sa forme sérialisée et non la référence : l'appelant
+ * reconstruit sa sélection à chaque rendu, et dépendre du tableau lui-même
+ * relancerait la requête en boucle.
+ */
+export function useDatarooms(enabled: boolean, tagIds: number[] = []) {
   const [state, setState] = useState<DataroomsState>({ loading: enabled, error: null, items: [] });
+  const tagKey = tagIds.join(',');
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const items = await api.listDatarooms(signal);
-      if (signal?.aborted) return;
-      setState({ loading: false, error: null, items });
-    } catch (err) {
-      if (signal?.aborted) return;
-      setState({
-        loading: false,
-        error: err instanceof Error ? err.message : 'Chargement impossible',
-        items: [],
-      });
-    }
-  }, []);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const items = await api.listDatarooms(tagKey ? tagKey.split(',').map(Number) : [], signal);
+        if (signal?.aborted) return;
+        setState({ loading: false, error: null, items });
+      } catch (err) {
+        if (signal?.aborted) return;
+        setState({
+          loading: false,
+          error: err instanceof Error ? err.message : 'Chargement impossible',
+          items: [],
+        });
+      }
+    },
+    [tagKey],
+  );
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,14 +78,23 @@ export function useDatarooms(enabled: boolean) {
   }, [load]);
 
   const create = useCallback(
-    async (name: string) => {
-      await api.createDataroom(name);
+    async (name: string, tagIdsForNew?: number[]) => {
+      await api.createDataroom(name, tagIdsForNew);
       await refresh();
     },
     [refresh],
   );
 
-  return { ...state, refresh, create };
+  /** Pose la sélection de tags reçue sur un dossier, puis recharge la liste. */
+  const setTags = useCallback(
+    async (dataroomId: number, nextTagIds: number[]) => {
+      await api.setDataroomTags(dataroomId, nextTagIds);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  return { ...state, refresh, create, setTags };
 }
 
 /**

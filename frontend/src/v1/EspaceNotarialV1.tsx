@@ -15,6 +15,7 @@ import {
   V1TransfertDataScreen,
   type ModulesTabProps,
   type OfficeContent,
+  type TenantOption,
   type V1AdminDelegueRow,
   type V1ConnecteRow,
   type V1DossierRow,
@@ -62,7 +63,10 @@ export interface EspaceNotarialV1Props {
   onCreateDossier?: () => void;
   onOpenDossier?: (id: string) => void;
   onLogout?: () => void;
-  onSwitchOffice?: () => void;
+  /** Offices disponibles pour le sélecteur du rail (voir TenantSwitcher). */
+  offices?: TenantOption[];
+  officeSubdomain?: string;
+  onSelectOffice?: (subdomain: string) => void;
   noticeLabel?: string | null;
   /** Écran ouvert au montage — sert au partage d'un lien et aux tests de rendu. */
   initialScreen?: V1ScreenKey;
@@ -90,7 +94,9 @@ export function EspaceNotarialV1(props: EspaceNotarialV1Props) {
       hideSectionLabels
       activeScreen={screen}
       onNavigate={key => setScreen(key as V1ScreenKey)}
-      onSwitchOffice={props.onSwitchOffice}
+      offices={props.offices}
+      officeSubdomain={props.officeSubdomain}
+      onSelectOffice={props.onSelectOffice}
       userInitials={props.userInitials}
       userName={props.userName}
       userRole={props.userRole}

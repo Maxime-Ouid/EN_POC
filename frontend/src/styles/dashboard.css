@@ -1,0 +1,319 @@
+/* ===========================================================================
+   Tableau de bord modulable.
+
+   Deux blocs bien séparés :
+
+     1. les classes du projet (.dash-*, .widget-*, .w-*, .wlib-*, .tpl-gallery*)
+     2. le minimum vital de react-grid-layout (.react-grid-*, .react-resizable-*)
+
+   Le CSS de la librairie n'est PAS importé depuis node_modules : il pose des
+   couleurs et une poignée en image de fond en dur, que la personnalisation par
+   office ne peut pas atteindre. Ce qui suit reprend uniquement ce dont le
+   positionnement a besoin, avec les tokens du design system — et la poignée est
+   dessinée en bordures plutôt qu'en data-URI, pour qu'elle suive le thème.
+
+   DEUX CONSÉQUENCES À CONNAÎTRE :
+
+   1. Une montée de version de react-grid-layout qui changerait ses noms de
+      classes casserait le rendu sans casser le build. Les noms utilisés ici
+      sont ceux de la 1.5.
+
+   2. Recopier « le strict minimum » se paie en oublis silencieux. La librairie
+      ne retire pas les poignées de redimensionnement hors édition : elle pose
+      une classe et compte sur SA feuille pour les masquer. La règle manquait,
+      les poignées restaient visibles en consultation (corrigé le 31/08/2026).
+      Avant d'ajouter une option de react-grid-layout, vérifier si elle s'appuie
+      sur une règle de `node_modules/react-grid-layout/css/styles.css` absente
+      d'ici. Les seules règles volontairement écartées sont celles des poignées
+      autres que « se » (non utilisées) et `.dropping` (glisser-déposer depuis
+      l'extérieur de la grille, non utilisé).
+   =========================================================================== */
+
+/* ============ BARRE D'OUTILS ET ONGLETS ============ */
+.dash-screen{display:flex;flex-direction:column;}
+.dash-toolbar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  min-height:32px;
+}
+.dash-toolbar-spacer{flex:1;}
+.dash-message-row{display:flex;align-items:center;gap:12px;margin-top:8px;}
+.dash-state{font-size:11.5px;color:var(--ink-500);}
+.dash-warn{font-size:11.5px;color:var(--caution);font-weight:600;}
+.dash-error{font-size:11.5px;color:var(--critical);font-weight:600;}
+
+/* La grille occupe la place restante sous la barre : sa hauteur est mesurée en
+   JS (useAvailableHeight) et non héritée d'une chaîne de `height:100%`, qu'il
+   aurait fallu poser sur tous les écrans de l'app pour n'en servir qu'un. */
+.dash-canvas{margin-top:16px;}
+
+.dash-tabs{display:flex;align-items:center;gap:2px;flex-wrap:wrap;}
+.dash-tab{
+  display:flex;align-items:center;
+  border-bottom:2px solid transparent;margin-right:14px;
+}
+.dash-tab.is-active{border-color:var(--brass-500);}
+.dash-tab-label{
+  border:none;background:none;font:inherit;cursor:pointer;
+  padding:8px 2px;font-size:13.5px;font-weight:600;color:var(--ink-500);
+  display:flex;align-items:center;gap:7px;
+}
+.dash-tab-label:hover{color:var(--ink-800);}
+.dash-tab.is-active .dash-tab-label{color:var(--ink-900);}
+.dash-tab-empty{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--ink-400);border:1px solid var(--border);border-radius:99px;padding:0 6px;
+}
+.dash-tab-remove{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;margin-left:4px;border-radius:99px;cursor:pointer;
+  border:none;background:none;color:var(--ink-400);
+}
+.dash-tab-remove:hover{color:var(--critical);background:var(--surface-alt);}
+.dash-tab-remove > .icon{width:10px;height:10px;}
+.dash-tab-input{
+  font:inherit;font-size:13.5px;font-weight:600;color:var(--ink-900);
+  padding:6px 8px;margin-right:14px;width:11ch;
+  border:1px solid var(--brass-500);border-radius:var(--radius-sm);
+  background:var(--surface);
+}
+.dash-tab-add{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:99px;cursor:pointer;
+  border:1px dashed var(--border);background:none;color:var(--ink-500);
+}
+.dash-tab-add:hover{border-color:var(--brass-500);color:var(--brass-600);}
+.dash-tab-add > .icon{width:12px;height:12px;}
+
+.dash-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  height:100%;min-height:280px;padding:56px 24px;text-align:center;
+  border:1px dashed var(--border);border-radius:var(--radius-lg);
+  background:var(--surface-alt);
+}
+.dash-empty-title{font-family:var(--font-display);font-size:16px;color:var(--ink-900);}
+.dash-empty-desc{font-size:12.5px;color:var(--ink-500);max-width:34ch;}
+
+/* ============ CADRE D'UN WIDGET ============ */
+.widget{
+  display:flex;flex-direction:column;height:100%;overflow:hidden;
+  border-radius:var(--radius-lg);
+  background:var(--card-bg);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+  backdrop-filter:blur(18px) saturate(160%);
+  border:1px solid var(--card-border);
+  box-shadow:var(--shadow-sm);
+}
+/* Le contenu porte déjà sa carte (StatCard) : ce cadre-ci ne doit rien peindre. */
+.widget-bare{background:none;border:none;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;}
+.widget-bare > .widget-body{padding:0;}
+.widget-bare > .widget-body > *{height:100%;}
+/* Une carte de chiffre-clé ne défile JAMAIS : elle tient un libellé, une valeur
+   et une ligne de contexte. Si ça ne rentre pas, c'est que la case est trop
+   petite — et c'est réglé par la taille minimale du gabarit (registry.tsx) plus
+   le plancher de hauteur de ligne (types.ts), pas par une barre de défilement
+   dans une case de tableau de bord. */
+.widget-bare > .widget-body{overflow:hidden;}
+
+.widget-head{
+  display:flex;align-items:center;gap:8px;
+  padding:14px 18px 10px;
+}
+.widget-icon{width:14px;height:14px;color:var(--ink-500);flex:none;}
+.widget-title{
+  font-size:13.5px;font-weight:600;font-family:var(--font-ui);color:var(--ink-900);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.widget-link{
+  margin-left:auto;flex:none;border:none;background:none;cursor:pointer;
+  font:inherit;font-size:11.5px;font-weight:600;color:var(--brass-600);padding:0;
+}
+.widget-link:hover{color:var(--brass-700);}
+
+.widget-body{flex:1;min-height:0;overflow:auto;padding:0 18px 14px;}
+
+/* --- Couche d'édition ----------------------------------------------------
+   En édition, la carte ENTIÈRE est la poignée de déplacement (sélecteur
+   `.widget-editing` passé à draggableHandle) : le curseur et l'absence de
+   sélection de texte doivent donc porter sur toute la carte, pas seulement sur
+   sa barre de titre. Celle-ci reste, mais comme signal visuel « ce bloc se
+   déplace », plus comme unique zone de saisie. */
+.widget-editing{
+  border-color:var(--brass-400);box-shadow:var(--shadow-md);
+  cursor:grab;user-select:none;
+}
+.widget-editing:active{cursor:grabbing;}
+.widget-handle{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 12px 10px 14px;
+  background:var(--brass-100);color:var(--brass-700);
+  border-bottom:1px solid var(--card-border);
+}
+/* Le corps ne défile plus en édition : un glissement dans une liste ferait
+   défiler au lieu de déplacer, et on ne comprendrait pas pourquoi la carte
+   « ne se prend pas » à cet endroit-là. */
+.widget-editing > .widget-body{overflow:hidden;}
+.widget-remove{cursor:pointer;}
+.widget-handle > .icon{width:13px;height:13px;flex:none;}
+.widget-handle-title{
+  font-size:12.5px;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.widget-remove{
+  margin-left:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);color:var(--ink-500);
+}
+.widget-remove:hover{color:var(--critical);border-color:var(--critical);}
+.widget-remove > .icon{width:11px;height:11px;}
+/* Une carte de chiffre en édition : elle n'a pas de cadre, il lui faut le sien. */
+.widget-bare.widget-editing{background:var(--card-bg);border:1px solid var(--brass-400);}
+
+/* ============ CONTENU DES WIDGETS ============ */
+.w-list{display:flex;flex-direction:column;gap:2px;}
+.w-row{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:8px 8px;border-radius:var(--radius-md);
+  border:none;background:none;font:inherit;color:inherit;
+}
+.w-row-clickable{cursor:pointer;}
+.w-row-clickable:hover{background:var(--surface-alt);}
+.w-row-main{flex:1;min-width:0;}
+.w-row-name{
+  font-size:12.5px;font-weight:600;color:var(--ink-900);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.w-row-meta{
+  font-size:11px;color:var(--ink-500);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.w-row-side{flex:none;}
+.w-row-icon{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:var(--radius-sm);
+}
+.w-row-icon > .icon{width:13px;height:13px;}
+.w-empty{
+  display:flex;align-items:center;justify-content:center;height:100%;
+  font-size:12px;color:var(--ink-500);text-align:center;padding:16px 0;
+}
+.w-unit{font-size:15px;font-weight:500;color:var(--ink-500);}
+.w-bar-legend{font-size:11px;color:var(--ink-500);margin-top:5px;}
+.w-amount{font-size:12.5px;font-weight:600;color:var(--ink-900);}
+
+.w-usage{padding:8px 8px;}
+.w-usage-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;}
+.w-usage-pct{font-size:11.5px;font-weight:600;color:var(--ink-500);font-family:var(--font-mono);}
+.w-usage-warn{color:var(--caution);}
+
+.w-shortcuts{display:flex;flex-direction:column;gap:4px;}
+.w-shortcut{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;cursor:pointer;
+  padding:9px 10px;border-radius:var(--radius-md);
+  border:1px solid transparent;background:none;font:inherit;
+  font-size:12.5px;font-weight:600;color:var(--ink-800);
+}
+.w-shortcut:hover{background:var(--surface-alt);border-color:var(--border-soft);}
+.w-shortcut > .icon{width:14px;height:14px;color:var(--brass-600);flex:none;}
+
+/* ============ BIBLIOTHÈQUE DE WIDGETS ============ */
+.wlib-group{margin-bottom:18px;}
+.wlib-group-title{
+  font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-400);margin-bottom:8px;
+}
+.wlib-item{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  padding:10px;margin-bottom:6px;border-radius:var(--radius-md);
+  border:1px solid var(--border-soft);background:var(--surface);font:inherit;
+}
+.wlib-item:hover{border-color:var(--brass-400);}
+.wlib-item-added{background:var(--surface-alt);}
+.wlib-icon{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:var(--radius-sm);
+  background:var(--brass-100);color:var(--brass-700);
+}
+.wlib-icon > .icon{width:14px;height:14px;}
+.wlib-text{flex:1;min-width:0;}
+.wlib-name{font-size:12.5px;font-weight:600;color:var(--ink-900);}
+.wlib-desc{font-size:11px;color:var(--ink-500);margin-top:2px;}
+.wlib-action{flex:none;color:var(--ink-400);}
+.wlib-item-added .wlib-action{color:var(--positive);}
+.wlib-action > .icon{width:14px;height:14px;}
+
+/* ============ GALERIE DE DISPOSITIONS ============ */
+.tpl-gallery-intro{font-size:12.5px;color:var(--ink-500);margin:0 0 16px;}
+.tpl-gallery-group{margin-bottom:18px;}
+.tpl-gallery-group-title{
+  font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-400);margin-bottom:10px;
+}
+.tpl-gallery{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.tpl-gallery-card{
+  display:block;width:100%;text-align:left;cursor:pointer;font:inherit;
+  padding:12px;border-radius:var(--radius-md);
+  border:1px solid var(--border-soft);background:var(--surface);
+}
+.tpl-gallery-card:hover{border-color:var(--brass-400);}
+.tpl-gallery-card.is-active{border-color:var(--brass-600);box-shadow:var(--shadow-sm);}
+.tpl-preview{
+  display:grid;gap:3px;height:74px;margin-bottom:10px;
+  padding:6px;border-radius:var(--radius-sm);background:var(--surface-alt);
+}
+.tpl-preview-cell{border-radius:2px;background:var(--brass-400);opacity:.55;}
+.tpl-gallery-card.is-active .tpl-preview-cell{opacity:1;}
+.tpl-gallery-head{display:flex;align-items:center;gap:7px;}
+.tpl-gallery-icon{width:13px;height:13px;color:var(--brass-600);flex:none;}
+.tpl-gallery-name{font-size:13px;font-weight:600;color:var(--ink-900);}
+.tpl-gallery-desc{font-size:11.5px;color:var(--ink-500);margin-top:4px;}
+.tpl-gallery-count{font-size:10.5px;color:var(--ink-400);margin-top:6px;}
+
+@media (max-width:720px){.tpl-gallery{grid-template-columns:1fr;}}
+
+/* ============ REACT-GRID-LAYOUT (strict minimum) ============ */
+/* Repère de mesure pixels → cases (gridGeometry.ts). Il coïncide avec la
+   grille : `containerPadding` vaut zéro. */
+.dash-frame{position:relative;}
+
+/* Conteneur intérieur à chaque case, à NOUS. react-grid-layout positionne la
+   case ; nous décalons son contenu pour montrer l'échange avant qu'il ait lieu.
+   Il faut un niveau à part : écraser la transformation de la librairie
+   casserait le placement. La transition est ce qui rend l'aperçu lisible —
+   sans elle, la carte visée sauterait d'un coup et on ne verrait pas qu'elle
+   prend la place libérée. */
+.dash-slot{height:100%;}
+.dash-slot.is-swapping{
+  transition:transform 160ms ease;
+  z-index:4;position:relative;
+}
+.dash-grid{position:relative;}
+.react-grid-layout{position:relative;transition:height 200ms ease;}
+.react-grid-item{transition:all 200ms ease;transition-property:left,top,width,height;}
+.react-grid-item.cssTransforms{transition-property:transform,width,height;}
+.react-grid-item.resizing{transition:none;z-index:1;will-change:width,height;}
+.react-grid-item.react-draggable-dragging{transition:none;z-index:3;will-change:transform;}
+/* Le glisser natif d'une image vole le geste à react-draggable : la carte reste
+   sur place et c'est l'image qu'on traîne. Aucun widget ne porte d'<img>
+   aujourd'hui (les icônes sont des <svg>), la règle est là pour le jour où. */
+.react-grid-item img{pointer-events:none;user-select:none;}
+.react-grid-item.react-grid-placeholder{
+  z-index:2;border-radius:var(--radius-lg);
+  background:var(--brass-400);opacity:.25;transition-duration:100ms;
+  user-select:none;
+}
+.react-grid-item.react-grid-placeholder.placeholder-resizing{transition:none;}
+/* Hors édition, react-grid-layout ne RETIRE pas les poignées : il pose la classe
+   `react-resizable-hide` sur la case et compte sur cette règle pour les masquer
+   (GridItem.js : `className: isResizable ? undefined : "react-resizable-hide"`).
+   Sans elle, les deux traits du coin restent visibles en consultation — c'était
+   le cas jusqu'au 31/08/2026. Toute règle omise de la feuille d'origine se paie
+   comme ça : rien ne casse, quelque chose reste allumé. */
+.react-resizable-hide > .react-resizable-handle{display:none;}
+
+/* Poignée de redimensionnement : deux traits dans le coin, pas une image. */
+.react-grid-item > .react-resizable-handle{
+  position:absolute;right:3px;bottom:3px;width:14px;height:14px;
+  cursor:se-resize;border-right:2px solid var(--brass-600);border-bottom:2px solid var(--brass-600);
+  border-bottom-right-radius:3px;opacity:.5;
+}
+.react-grid-item > .react-resizable-handle:hover{opacity:1;}

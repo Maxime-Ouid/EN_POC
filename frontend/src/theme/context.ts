@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 import type { ThemeState } from './engine';
-import type { LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
+import type { AppBgKey, LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
 
 export interface TenantThemeContextValue {
   /** État courant du thème (couleurs par mode + presets typo/formes). */
@@ -14,6 +14,7 @@ export interface TenantThemeContextValue {
   commit: () => void;
   setTypography: (key: TypographyKey) => void;
   setShape: (key: ShapeKey) => void;
+  setAppBg: (key: AppBgKey) => void;
   /**
    * Modifie un ou plusieurs réglages de navigation et enregistre.
    * Un patch partiel, pas un état complet : l'écran Apparence ne touche jamais

@@ -1,9 +1,11 @@
 import { Icon } from '../atoms/Icon';
 import { Pill } from '../atoms/Pill';
 import { SoField } from '../atoms/SoField';
+import { Tag } from '../atoms/Tag';
 import { FeedItem } from '../molecules/FeedItem';
 import { Slideover } from './Slideover';
 import type { PillKind } from '../atoms/Pill';
+import type { TagRef } from './TagPicker';
 
 /** Ton sémantique d'une action, mappé sur les paires de tokens de statut. */
 export type ActivityTone = 'info' | 'success' | 'warning' | 'critical' | 'accent';
@@ -39,6 +41,13 @@ export interface DocumentSlideoverData {
   addedBy: string;
   date: string;
   size: string;
+  /**
+   * Tags posés sur la pièce, en LECTURE seule ici : l'édition se fait dans la
+   * colonne « Tags » du tableau, un même réglage offert à deux endroits finit
+   * par diverger. Le volet les rappelle parce qu'on l'ouvre justement pour
+   * savoir ce qu'est cette pièce.
+   */
+  tags?: TagRef[];
   /** Métadonnées libres de l'office — la brique « champs personnalisés » de la V2. */
   customFields?: DocumentCustomField[];
   activity?: DocumentActivityEntry[];
@@ -69,6 +78,20 @@ export function DocumentSlideover({ doc, onClose, onDownload, preview }: Documen
           <SoField label="Statut" value={<Pill kind={doc.status.kind}>{doc.status.label}</Pill>} />
           <SoField label="Ajouté par" value={`${doc.addedBy} — ${doc.date}`} />
           <SoField label="Poids" value={<span className="mono">{doc.size}</span>} />
+          {doc.tags && doc.tags.length > 0 && (
+            <SoField
+              label="Tags"
+              value={
+                <span className="tag-list">
+                  {doc.tags.map(tag => (
+                    <Tag key={tag.id} color={tag.color} icon="tag">
+                      {tag.name}
+                    </Tag>
+                  ))}
+                </span>
+              }
+            />
+          )}
 
           {doc.customFields && doc.customFields.length > 0 && (
             <>

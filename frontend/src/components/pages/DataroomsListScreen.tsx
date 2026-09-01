@@ -1,13 +1,16 @@
 import { Button } from '../atoms/Button';
 import { Pill } from '../atoms/Pill';
 import { RowMenu } from '../atoms/RowMenu';
-import { Tag } from '../atoms/Tag';
 import { AvatarStack } from '../molecules/AvatarStack';
 import { ButtonRow } from '../molecules/ButtonRow';
 import { RowName } from '../molecules/RowName';
+import { TagFilter } from '../molecules/TagFilter';
 import { TopbarSearch } from '../molecules/TopbarSearch';
 import { TableCard } from '../organisms/TableCard';
+import { TagPicker } from '../organisms/TagPicker';
 import type { PillKind } from '../atoms/Pill';
+import type { TagColor } from '../atoms/Tag';
+import type { TagRef } from '../organisms/TagPicker';
 
 export interface DataroomRow {
   id: string;
@@ -17,7 +20,7 @@ export interface DataroomRow {
   muted?: boolean;
   name: string;
   portfolio?: string;
-  tags: Array<{ label: string; plain?: boolean }>;
+  tags: TagRef[];
   members: Array<{ label: string; gray?: boolean }>;
   storage: string;
   activity: string;
@@ -31,6 +34,23 @@ export interface DataroomsListScreenProps {
   onCreate: () => void;
   onSearch?: (value: string) => void;
   displayRange: string; // ex. "1–6 sur 245 dossiers"
+  /**
+   * Catalogue de tags de l'office — alimente à la fois le menu de filtre et,
+   * ligne par ligne, le sélecteur de la colonne « Tags ». Absent = l'écran se
+   * comporte comme avant l'arrivée des tags (colonne en lecture seule, bouton
+   * de filtre inerte), ce qui garde les aperçus du kit d'interface valides.
+   */
+  tagCatalog?: TagRef[];
+  /** Ids cochés dans le menu de filtre — sémantique OU (au moins un). */
+  selectedTagIds?: number[];
+  onTagFilterChange?: (tagIds: number[]) => void;
+  /**
+   * Pose la sélection COMPLÈTE de tags sur un dossier. Absent = la colonne
+   * « Tags » reste en lecture seule.
+   */
+  onRowTagsChange?: (dataroomId: string, tagIds: number[]) => void | Promise<void>;
+  /** Création à la volée depuis la colonne « Tags ». Absent = catalogue figé. */
+  onCreateTag?: (name: string, color: TagColor) => Promise<TagRef>;
 }
 
 // Écran "Dossiers" (liste) — index_16.html #screen-datarooms.
@@ -41,6 +61,11 @@ export function DataroomsListScreen({
   onCreate,
   onSearch,
   displayRange,
+  tagCatalog = [],
+  selectedTagIds = [],
+  onTagFilterChange,
+  onRowTagsChange,
+  onCreateTag,
 }: DataroomsListScreenProps) {
   return (
     <section className="screen is-active">
@@ -69,12 +94,11 @@ export function DataroomsListScreen({
           Portefeuille
         </Button>
         <Button size="sm">Statut</Button>
-        <Button size="sm">
-          <svg className="icon">
-            <use href="#i-tag" />
-          </svg>
-          Tags
-        </Button>
+        <TagFilter
+          options={tagCatalog}
+          selected={selectedTagIds}
+          onChange={next => onTagFilterChange?.(next)}
+        />
         <div style={{ marginLeft: 'auto' }} className="dim tiny">
           Tri par activité récente
         </div>
@@ -88,13 +112,17 @@ export function DataroomsListScreen({
             </RowName>
             <td className="dim">{row.portfolio ?? '—'}</td>
             <td>
-              {row.tags.length
-                ? row.tags.map((t, i) => (
-                    <Tag key={i} icon={t.plain ? undefined : 'tag'} plain={t.plain}>
-                      {t.label}
-                    </Tag>
-                  ))
-                : '—'}
+              {/* Le sélecteur est monté même sur une ligne sans tag : c'est le
+                  bouton « + » qui rend le tagging découvrable, et une colonne
+                  qui n'affiche « — » qu'en lecture ne dit jamais qu'on peut y
+                  poser quelque chose. */}
+              <TagPicker
+                value={row.tags}
+                catalog={tagCatalog}
+                readOnly={!onRowTagsChange}
+                onChange={tagIds => onRowTagsChange?.(row.id, tagIds)}
+                onCreate={onCreateTag}
+              />
             </td>
             <td>{row.members.length ? <AvatarStack avatars={row.members} /> : <span className="dim">—</span>}</td>
             <td className="mono">{row.storage}</td>

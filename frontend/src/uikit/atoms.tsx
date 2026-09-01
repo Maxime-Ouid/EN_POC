@@ -2,7 +2,8 @@ import { useState } from 'react';
 import {
   Avatar, Badge, BarTrack, Button, Card, Decor, Grid, Icon, IconButton, ICON_IDS,
   Nav, NavGroup, NavItem, NumberField, Pill, ProtoPill, RowIcon, RowMenu, Screen, Select,
-  ShapeSwatch, SoField, Subscreen, SubscreenPanel, Tag, TextInput, Textarea,
+  ShapeSwatch, SoField, Subscreen, SubscreenPanel, Tag, TAG_COLORS, TAG_COLOR_LABELS,
+  TextInput, Textarea,
   Toggle, TopbarRight, TypographySample, Field,
 } from '../components';
 import { Specimen } from './Specimen';
@@ -165,10 +166,23 @@ export function AtomSpecimens() {
       <Specimen
         name="Tag"
         variants={[
-          { label: 'Accent et neutre', node: (
+          { label: 'Palette — six intentions du thème', node: (
             <Row>
-              <Tag icon="tag">Vente</Tag>
-              <Tag icon="tag">APUI</Tag>
+              {TAG_COLORS.map(color => (
+                <Tag key={color} icon="tag" color={color}>
+                  {TAG_COLOR_LABELS[color]}
+                </Tag>
+              ))}
+            </Row>
+          )},
+          { label: 'Éditable — la croix retire le tag de l\'élément', node: (
+            <Row>
+              <Tag icon="tag" onRemove={() => {}}>Vente</Tag>
+              <Tag icon="tag" color="critical" onRemove={() => {}}>Prioritaire</Tag>
+            </Row>
+          )},
+          { label: 'plain — libellé qui n\'est PAS un tag du catalogue (groupe d\'un membre…)', node: (
+            <Row>
               <Tag plain>Immobilier commercial</Tag>
             </Row>
           )},
@@ -408,13 +422,8 @@ export function AtomSpecimens() {
 
       <Specimen
         name="Decor"
-        note="Couche décorative (halos et carrés flottants) posée derrière le contenu. Elle n'est jamais interactive et se règle entièrement depuis Personnalisation → Apparence."
+        note="Couche décorative (halos et carrés flottants) réservée aux écrans de connexion depuis le 01/09/2026 — l'espace connecté n'en porte plus, son fond se choisit dans Personnalisation → Apparence."
         variants={[
-          { label: 'preset « app »', node: (
-            <div style={{ position: 'relative', height: 180, borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--bg)' }}>
-              <Decor preset="app" />
-            </div>
-          )},
           { label: 'preset « login-story » (sur le fond foncé de la colonne narrative)', node: (
             <div style={{ position: 'relative', height: 180, borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--shell-bg)' }}>
               <Decor preset="login-story" />

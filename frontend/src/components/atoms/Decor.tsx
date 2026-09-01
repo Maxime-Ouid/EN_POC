@@ -1,7 +1,7 @@
 // Formes décoratives flottantes (orbes, carrés arrondis, grilles de points) —
 // §6.15. Purement esthétique : peut être omis sans casser aucune mise en page.
 // Les tailles/positions ci-dessous sont extraites verbatim de components.css
-// (règles .so*/.ssq*/.sdg*, .lo*/.lsq*/.ldg*, .ao*/.asq*/.adg*) pour garder la
+// (règles .so… .ssq… .sdg… et .lo… .lsq… .ldg…) pour garder la
 // fidélité visuelle exacte du prototype ; `<Decor preset="..."/>` regroupe le
 // bon jeu de formes pour chaque zone (`prefers-reduced-motion` désactive déjà
 // l'animation via components.css, rien à faire ici).
@@ -14,10 +14,6 @@ function StoryOrb({ style }: { style: Pos }) {
 
 function LoginOrb({ style }: { style: Pos }) {
   return <div className="login-orb" style={style} aria-hidden="true" />;
-}
-
-function AppOrb({ style }: { style: Pos }) {
-  return <div className="app-orb" style={style} aria-hidden="true" />;
 }
 
 function AccentSq({ color, style }: { color: 'cyan' | 'purple' | 'blue' | 'white'; style: Pos }) {
@@ -68,37 +64,12 @@ const LOGIN_DOTS: Array<{ color: 'purple' | 'cyan' | 'blue' | 'white'; style: Po
   { color: 'cyan', style: { width: '70px', height: '20px', bottom: '36%', left: '6%' } },
 ];
 
-const APP_ORBS: Pos[] = [
-  { width: '16rem', height: '16rem', top: '-5%', right: '-4%' },
-  { width: '10rem', height: '10rem', bottom: '-6%', left: '-3%' },
-  { width: '4.5rem', height: '4.5rem', top: '58%', right: '2%' },
-];
-
-const APP_SQUARES: Array<{ color: 'cyan' | 'purple' | 'blue' | 'white'; style: Pos }> = [
-  { color: 'cyan', style: { width: '14px', height: '14px', top: '14%', right: '16%' } },
-  { color: 'purple', style: { width: '18px', height: '18px', bottom: '18%', left: '11%' } },
-  { color: 'blue', style: { width: '9px', height: '9px', top: '9%', right: '34%' } },
-  { color: 'purple', style: { width: '26px', height: '26px', top: '40%', right: '-1%' } },
-  { color: 'cyan', style: { width: '12px', height: '12px', bottom: '6%', right: '22%' } },
-  { color: 'blue', style: { width: '20px', height: '20px', top: '76%', left: '20%' } },
-  { color: 'purple', style: { width: '8px', height: '8px', top: '30%', left: '6%' } },
-  { color: 'white', style: { width: '60px', height: '60px', top: '20%', right: '8%' } },
-  { color: 'white', style: { width: '392px', height: '392px', bottom: '-13%', left: '50%' } },
-];
-
-const APP_DOTS: Array<{ color: 'purple' | 'cyan' | 'blue' | 'white'; style: Pos }> = [
-  { color: 'purple', style: { width: '400px', height: '400px', top: '15%', left: '44%' } },
-  { color: 'cyan', style: { width: '45px', height: '45px', bottom: '24%', right: '14%' } },
-  { color: 'blue', style: { width: '23px', height: '23px', top: '64%', right: '26%' } },
-  { color: 'white', style: { width: '80px', height: '24px', top: '4%', left: '18%' } },
-  { color: 'purple', style: { width: '34px', height: '57px', bottom: '12%', left: '6%' } },
-];
-
 export interface DecorProps {
-  preset: 'login-story' | 'login-panel' | 'app';
+  preset: 'login-story' | 'login-panel';
 }
 
-// Monter une fois par zone (`.login-story`, `.login-panel`, `.main` de l'app) —
+// Monter une fois par zone (`.login-story`, `.login-panel`) — l'espace connecté
+// n'en porte plus depuis le 01/09/2026, son fond se règle dans Apparence. —
 // ces conteneurs doivent être `position:relative` (ou `absolute`) pour que les
 // formes s'y ancrent, voir components.css.
 export function Decor({ preset }: DecorProps) {
@@ -111,21 +82,12 @@ export function Decor({ preset }: DecorProps) {
       </>
     );
   }
-  if (preset === 'login-panel') {
-    return (
-      <>
-        <div className="login-bg-anim" aria-hidden="true" />
-        {LOGIN_ORBS.map((s, i) => <LoginOrb key={i} style={s} />)}
-        {LOGIN_SQUARES.map((s, i) => <AccentSq key={i} color={s.color} style={s.style} />)}
-        {LOGIN_DOTS.map((s, i) => <DotGrid key={i} color={s.color} style={s.style} />)}
-      </>
-    );
-  }
   return (
     <>
-      {APP_ORBS.map((s, i) => <AppOrb key={i} style={s} />)}
-      {APP_SQUARES.map((s, i) => <AccentSq key={i} color={s.color} style={s.style} />)}
-      {APP_DOTS.map((s, i) => <DotGrid key={i} color={s.color} style={s.style} />)}
+      <div className="login-bg-anim" aria-hidden="true" />
+      {LOGIN_ORBS.map((s, i) => <LoginOrb key={i} style={s} />)}
+      {LOGIN_SQUARES.map((s, i) => <AccentSq key={i} color={s.color} style={s.style} />)}
+      {LOGIN_DOTS.map((s, i) => <DotGrid key={i} color={s.color} style={s.style} />)}
     </>
   );
 }

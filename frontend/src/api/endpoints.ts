@@ -13,6 +13,13 @@
    =========================================================================== */
 
 import { apiFetch, apiFetchBlob } from './client';
+// La palette de tags appartient au design system, pas à l'API : elle est
+// déclarée avec le composant qui la rend (même parti pris que le catalogue de
+// tokens dans theme/schema.ts) et seulement RÉ-EXPORTÉE ici pour que les
+// appelants n'aient pas à connaître les deux chemins.
+import type { TagColor } from '../components/atoms/Tag';
+
+export type { TagColor };
 
 export interface WhoAmI {
   username: string;
@@ -45,10 +52,64 @@ export interface TenantThemePayload {
   shape: string;
 }
 
+/**
+ * Disposition d'accueil d'un membre (GET/PUT/DELETE /api/dashboard/).
+ *
+ * `widgets[].id` est volontairement une chaîne libre côté API : le catalogue
+ * des widgets vit dans src/dashboard/registry.tsx et le serveur ne le connaît
+ * pas (voir OfficeMembership.dashboard côté Django). Un identifiant retiré du
+ * catalogue est donc écarté à la lecture, pas rejeté à l'écriture.
+ */
+export interface DashboardWidgetPayload {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  options?: Record<string, string | number | boolean>;
+}
+
+export interface DashboardPagePayload {
+  id: string;
+  name: string;
+  widgets: DashboardWidgetPayload[];
+}
+
+export interface DashboardPayload {
+  template: string | null;
+  /**
+   * Les onglets. Le serveur convertit les dispositions enregistrées AVANT les
+   * onglets (forme `{template, widgets}`) en un onglet unique — voir
+   * validators.clean_dashboard_payload : le front n'a donc jamais à connaître
+   * l'ancienne forme, et personne ne perd son rangement au déploiement.
+   */
+  pages: DashboardPagePayload[];
+}
+
+/**
+ * Une entrée du catalogue de tags de l'office (GET /api/tags/).
+ *
+ * `color` est une CLÉ sémantique, pas un hexadécimal : la couleur affichée est
+ * résolue par le thème de l'office (voir components/atoms/Tag.tsx). Un office
+ * qui personnalise sa palette voit ses tags suivre.
+ *
+ * `usage` (nombre d'éléments portant le tag) n'est renseigné que par les
+ * endpoints du catalogue — les tags portés par un dossier ou une pièce ne le
+ * transportent pas, ce compte n'ayant aucun sens à cet endroit.
+ */
+export interface TagSummary {
+  id: number;
+  name: string;
+  slug: string;
+  color: TagColor;
+  usage?: number;
+}
+
 export interface DataroomSummary {
   id: number;
   name: string;
   created_at: string;
+  tags: TagSummary[];
 }
 
 export interface DocumentSummary {
@@ -56,6 +117,7 @@ export interface DocumentSummary {
   name: string;
   file: string;
   uploaded_at: string;
+  tags: TagSummary[];
 }
 
 export interface FolderSummary {
@@ -83,6 +145,34 @@ export interface AccessRestrictionSummary {
   target_id: number;
   label: string;
   user_ids: number[];
+}
+
+/**
+ * Un résultat de recherche globale — GET /api/search/.
+ *
+ * `folder_id` désigne le dossier À OUVRIR pour montrer le résultat, pas le
+ * résultat lui-même : pour un `document` c'est son dossier contenant (`null` =
+ * racine de la dataroom), pour un `folder` c'est lui-même, pour une `dataroom`
+ * c'est `null`. L'interface peut donc naviguer sans retraiter les trois cas.
+ */
+export interface SearchHit {
+  kind: 'dataroom' | 'folder' | 'document' | 'person';
+  /** Pour une `person`, l'id du MEMBERSHIP (celui de /api/office-users/<id>/). */
+  id: number;
+  name: string;
+  /** `null` pour une `person` : elle n'appartient à aucune dataroom. */
+  dataroom_id: number | null;
+  dataroom_name: string | null;
+  folder_id: number | null;
+  /** Chemin lisible, ex. « Succession Dupont / Actes / compromis.pdf ». */
+  path: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchHit[];
+  /** Vrai si des résultats ont été coupés : inviter à préciser, pas afficher « tout ». */
+  truncated: boolean;
 }
 
 export interface OfficeUserRow {
@@ -136,6 +226,21 @@ export const api = {
     apiFetch<TenantThemePayload>('/api/tenant-theme/', { method: 'PUT', body: theme }),
 
   /**
+   * Tableau de bord de l'appelant dans l'office courant.
+   * `undefined` = 204, ce membre n'a jamais réorganisé son accueil : le front
+   * applique alors le template déduit de son rôle (src/dashboard/templates.ts).
+   */
+  dashboard: (signal?: AbortSignal) =>
+    apiFetch<DashboardPayload | undefined>('/api/dashboard/', { signal }),
+
+  /** Ouvert à tout membre : chacun range SON accueil, personne ne range celui d'un autre. */
+  saveDashboard: (dashboard: DashboardPayload) =>
+    apiFetch<DashboardPayload>('/api/dashboard/', { method: 'PUT', body: dashboard }),
+
+  /** Efface la personnalisation — l'accueil repart du template. */
+  resetDashboard: () => apiFetch<void>('/api/dashboard/', { method: 'DELETE' }),
+
+  /**
    * Contenu servi par un module activé pour l'office.
    *
    * Une seule route existe aujourd'hui côté Django (`coffre-fort`) : tout autre
@@ -151,10 +256,68 @@ export const api = {
   issueSsoTicket: (target: string) =>
     apiFetch<{ ticket: string }>('/api/sso/issue/', { method: 'POST', body: { target } }),
 
-  listDatarooms: (signal?: AbortSignal) => apiFetch<DataroomSummary[]>('/api/datarooms/', { signal }),
+  /**
+   * Recherche globale sur les dossiers, sous-dossiers et pièces de l'office
+   * courant. Le serveur applique exactement les mêmes restrictions d'accès que
+   * les écrans de consultation, et renvoie une liste vide en dessous de deux
+   * caractères — le front n'a pas à connaître ce seuil.
+   */
+  search: (query: string, signal?: AbortSignal) =>
+    apiFetch<SearchResponse>(`/api/search/?q=${encodeURIComponent(query)}`, { signal }),
 
-  createDataroom: (name: string) =>
-    apiFetch<{ id: number; name: string }>('/api/datarooms/', { method: 'POST', body: { name } }),
+  /** Catalogue de tags de l'office, avec le nombre d'éléments portant chacun. */
+  listTags: (signal?: AbortSignal) => apiFetch<TagSummary[]>('/api/tags/', { signal }),
+
+  /**
+   * Ajoute un tag au catalogue. Le serveur déduplique sur le nom replié
+   * (« Vente » / « vente » / « VENTE » = une seule entrée) et renvoie alors le
+   * tag existant plutôt qu'une erreur — c'est ce qui rend la création à la
+   * volée depuis un dossier sans danger pour le catalogue.
+   */
+  createTag: (name: string, color: TagColor = 'brass') =>
+    apiFetch<TagSummary>('/api/tags/', { method: 'POST', body: { name, color } }),
+
+  /** Renommer/recolorer — réservé aux admins de l'office (403 sinon). */
+  updateTag: (tagId: number, patch: { name?: string; color?: TagColor }) =>
+    apiFetch<TagSummary>(`/api/tags/${tagId}/`, { method: 'PATCH', body: patch }),
+
+  /**
+   * Retire le tag du catalogue ET de tous les éléments qui le portaient.
+   * Réservé aux admins de l'office. Ne supprime aucun dossier ni document.
+   */
+  deleteTag: (tagId: number) => apiFetch<void>(`/api/tags/${tagId}/`, { method: 'DELETE' }),
+
+  /**
+   * Liste des dossiers. `tagIds` non vide filtre côté serveur en OU (un dossier
+   * remonte s'il porte AU MOINS UN des tags demandés) — le filtrage n'est pas
+   * fait côté client parce que le décompte affiché sous le tableau doit rester
+   * celui de l'office, pas celui de la page déjà chargée.
+   */
+  listDatarooms: (tagIds?: number[], signal?: AbortSignal) =>
+    apiFetch<DataroomSummary[]>(
+      `/api/datarooms/${tagIds?.length ? `?tags=${tagIds.join(',')}` : ''}`,
+      { signal },
+    ),
+
+  createDataroom: (name: string, tagIds?: number[]) =>
+    apiFetch<{ id: number; name: string; tags: TagSummary[] }>('/api/datarooms/', {
+      method: 'POST',
+      body: { name, tags: tagIds ?? [] },
+    }),
+
+  /** Remplace l'ensemble des tags du dossier (PUT idempotent, pas d'ajout unitaire). */
+  setDataroomTags: (dataroomId: number, tagIds: number[]) =>
+    apiFetch<{ id: number; tags: TagSummary[] }>(`/api/datarooms/${dataroomId}/tags/`, {
+      method: 'PUT',
+      body: { tags: tagIds },
+    }),
+
+  /** Idem pour une pièce. */
+  setDocumentTags: (dataroomId: number, documentId: number, tagIds: number[]) =>
+    apiFetch<{ id: number; tags: TagSummary[] }>(
+      `/api/datarooms/${dataroomId}/documents/${documentId}/tags/`,
+      { method: 'PUT', body: { tags: tagIds } },
+    ),
 
   /** `folderId` omis = dépose à la racine de la dataroom. */
   uploadDocument: (dataroomId: number, file: File, folderId?: number) => {

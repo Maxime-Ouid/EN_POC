@@ -1,4 +1,5 @@
 import mimetypes
+import re
 from urllib.parse import quote
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
@@ -13,9 +14,13 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .mfa import qr_code_data_uri
-from .models import AccessRestriction, Dataroom, Document, Folder, Office, OfficeMembership
+from .models import AccessRestriction, Dataroom, Document, Folder, Office, OfficeMembership, Tag
 from .tenancy.sso import consume_ticket, issue_ticket
-from .validators import ThemeValidationError, clean_theme_payload, is_accepted_extension
+from .validators import (
+    DashboardValidationError, TagValidationError, ThemeValidationError,
+    clean_dashboard_payload, clean_tag_ids, clean_tag_payload, clean_theme_payload,
+    is_accepted_extension, tag_slug,
+)
 
 User = get_user_model()
 
@@ -170,6 +175,80 @@ def tenant_theme(request):
     if not office.theme:
         return Response(status=204)
     return Response(office.theme)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def dashboard_view(request):
+    """Disposition de l'écran d'accueil de l'appelant dans l'office courant.
+
+    GET    → 200 avec la disposition enregistrée, 204 si ce membre n'a jamais
+             réorganisé son accueil (le front applique alors le template déduit
+             de son rôle).
+    PUT    → 200 avec la disposition normalisée telle qu'elle vient d'être
+             stockée.
+    DELETE → 204, retour au template : la personnalisation est effacée.
+
+    Contrairement à `tenant_theme`, l'écriture n'est réservée à personne : ce
+    que chacun range sur SON accueil ne regarde que lui, et un client qui
+    déplace ses widgets ne change rien pour l'étude. Il n'y a donc pas non plus
+    de chemin pour écrire la disposition d'un autre membre — l'objet modifié est
+    toujours le membership de `request.user`, jamais un identifiant reçu du
+    client.
+    """
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    membership = request.user.memberships.filter(office=office).first()
+    if membership is None:
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    if request.method == 'PUT':
+        try:
+            dashboard = clean_dashboard_payload(request.data)
+        except DashboardValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
+        membership.dashboard = dashboard
+        membership.save(update_fields=['dashboard'])
+        return Response(dashboard)
+
+    if request.method == 'DELETE':
+        # `update_fields` plutôt qu'un save complet : le rôle du membership est
+        # géré ailleurs (office_user_detail_view) et ne doit pas être réécrit au
+        # passage par une valeur lue avant une modification concurrente.
+        membership.dashboard = None
+        membership.save(update_fields=['dashboard'])
+        return Response(status=204)
+
+    if not membership.dashboard:
+        return Response(status=204)
+    return Response(_dashboard_with_pages(membership.dashboard))
+
+
+def _dashboard_with_pages(stored):
+    """Rend une disposition lisible par le front actuel, quelle que soit son âge.
+
+    Les dispositions enregistrées avant les onglets ont la forme
+    `{"template": ..., "widgets": [...]}`. Sans cette conversion À LA LECTURE, le
+    front n'y trouverait pas de `pages`, retomberait sur le template du rôle, et
+    l'utilisateur verrait son rangement disparaître — pour de bon, puisque le
+    premier déplacement suivant écraserait l'ancien contenu.
+
+    La conversion n'écrit RIEN : la ligne reste à l'ancienne forme jusqu'au
+    prochain enregistrement, qui la normalisera (clean_dashboard_payload). Une
+    migration de données serait plus propre, mais elle devrait tourner sur la
+    base « default » de chaque déploiement pour un format vieux de quelques
+    jours ; ce repli-ci coûte six lignes et se supprime le jour où plus aucune
+    ligne n'a l'ancienne forme.
+    """
+    if not isinstance(stored, dict) or "pages" in stored:
+        return stored
+    widgets = stored.get("widgets")
+    if not isinstance(widgets, list):
+        return stored
+    return {
+        "template": stored.get("template"),
+        "pages": [{"id": "accueil", "name": "Accueil", "widgets": widgets}],
+    }
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -385,6 +464,212 @@ def consume_sso_ticket(request):
     login(request, user)
     return HttpResponseRedirect(f"https://{request.office.subdomain}.localhost:5173/")
 
+# ---------------------------------------------------------------------------
+# Tags — catalogue de l'office (modèle Tag) et affectation aux dossiers/pièces.
+#
+# Deux niveaux de droits, volontairement asymétriques : TOUT membre peut créer un tag
+# et en poser/retirer sur un élément (c'est la « création à la volée » — sans elle, le
+# tagging meurt d'attendre un admin), mais seuls admin/superadmin peuvent RENOMMER ou
+# SUPPRIMER une entrée du catalogue, ces deux actions étant les seules à toucher tous
+# les éléments déjà tagués d'un coup.
+# ---------------------------------------------------------------------------
+
+def _office_member_guard(request):
+    """(office, None) si l'appelant est membre de l'office résolu, (None, Response)
+    sinon — exactement les deux mêmes réponses que les vues existantes, factorisées
+    ici parce que les quatre vues de tags les répètent à l'identique."""
+    office = request.office
+    if office is None:
+        return None, Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
+        return None, Response({"error": "accès non autorisé à cet office"}, status=403)
+    return office, None
+
+def _serialize_tag(tag, *, usage=None):
+    data = {"id": tag.id, "name": tag.name, "slug": tag.slug, "color": tag.color}
+    if usage is not None:
+        data["usage"] = usage
+    return data
+
+def _tags_of(obj):
+    """Tags d'une dataroom/d'un document, ordonnés par nom (Tag.Meta.ordering) pour
+    que la colonne « Tags » ne change pas d'ordre d'un rafraîchissement à l'autre."""
+    return [_serialize_tag(t) for t in obj.tags.all()]
+
+def _get_or_create_tag(name, color):
+    """Retourne (tag, created). Déduplique sur le slug : demander « Vente » quand
+    « vente » existe rend le tag existant SANS toucher à sa couleur — deux membres qui
+    tapent le même mot le même jour doivent atterrir sur la même entrée, pas se voler
+    la couleur à tour de rôle."""
+    slug = tag_slug(name)
+    existing = Tag.objects.filter(slug=slug).first()
+    if existing is not None:
+        return existing, False
+    return Tag.objects.create(name=name, slug=slug, color=color), True
+
+def _resolve_tag_ids(raw_ids):
+    """Résout des ids de tags dans la base tenant courante.
+
+    Lève TagValidationError si l'un d'eux n'y est pas : un id parfaitement valide dans
+    l'office voisin ne doit pas passer en silence — même règle que `_resolve_folder`
+    pour les dossiers d'une autre dataroom.
+    """
+    ids = clean_tag_ids(raw_ids)
+    tags = list(Tag.objects.filter(id__in=ids))
+    if len(tags) != len(ids):
+        raise TagValidationError("tag introuvable")
+    return tags
+
+def _requested_tag_filter(request):
+    """Ids de tags demandés en filtre via `?tags=1,2`. Retourne None si le paramètre
+    est absent (pas de filtre) et [] s'il est présent mais vide/illisible — un filtre
+    illisible ne doit pas se transformer en « tout afficher », qui donnerait
+    l'impression que le filtre ne marche pas plutôt qu'une liste vide explicite."""
+    raw = request.GET.get('tags')
+    if raw is None:
+        return None
+    ids = []
+    for chunk in raw.split(','):
+        chunk = chunk.strip()
+        if chunk.isdigit():
+            value = int(chunk)
+            if value not in ids:
+                ids.append(value)
+    return ids
+
+def _matches_tag_filter(obj, wanted_ids):
+    """Sémantique OU (au moins un des tags cochés) — décidée le 01/09/2026. Le ET
+    n'est pas une variante d'implémentation à laisser traîner ici : le jour où il est
+    demandé, il arrive avec son propre paramètre (`?tags_mode=all`) et son propre
+    contrôle côté interface."""
+    if wanted_ids is None:
+        return True
+    if not wanted_ids:
+        return False
+    return any(t.id in wanted_ids for t in obj.tags.all())
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def tags_view(request):
+    """GET : catalogue de l'office, avec le nombre d'éléments portant chaque tag.
+    POST : crée un tag (ou rend l'existant si le slug est déjà pris, cf.
+    _get_or_create_tag) — 201 pour une vraie création, 200 pour un tag rendu tel quel,
+    ce qui permet au front de distinguer « ajouté au catalogue » de « existait déjà »
+    sans second appel."""
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+
+    if request.method == 'POST':
+        try:
+            payload = clean_tag_payload(request.data)
+        except TagValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
+        tag, created = _get_or_create_tag(payload["name"], payload["color"])
+        return Response(_serialize_tag(tag, usage=0 if created else _tag_usage(tag)),
+                        status=201 if created else 200)
+
+    return Response([_serialize_tag(t, usage=_tag_usage(t)) for t in Tag.objects.all()])
+
+def _tag_usage(tag):
+    """Nombre d'éléments portant ce tag, dossiers et pièces confondus. Sert à afficher
+    « Vente (12) » dans le menu de filtre et à avertir avant une suppression — pas à
+    trier : un catalogue qui se réordonne à chaque dépôt de document est illisible."""
+    return tag.datarooms.count() + tag.documents.count()
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def tag_detail_view(request, tag_id):
+    """Renommer/recolorer (PATCH) ou supprimer (DELETE) une entrée du catalogue —
+    admin/superadmin de CET office uniquement (voir _manager_role). La suppression
+    retire le tag de tous les éléments qui le portaient (cascade de la table pivot),
+    elle ne supprime évidemment aucun dossier ni document."""
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "action réservée aux administrateurs de l'office"}, status=403)
+
+    try:
+        tag = Tag.objects.get(pk=tag_id)
+    except Tag.DoesNotExist:
+        return Response({"error": "tag introuvable"}, status=404)
+
+    if request.method == 'DELETE':
+        tag.delete()
+        return Response(status=204)
+
+    try:
+        payload = clean_tag_payload(request.data, partial=True)
+    except TagValidationError as exc:
+        return Response({"error": str(exc)}, status=400)
+
+    if "name" in payload:
+        new_slug = tag_slug(payload["name"])
+        # Renommer vers un nom déjà pris fusionnerait deux entrées sans le dire :
+        # on refuse, à charge de l'appelant de supprimer l'une des deux.
+        if Tag.objects.filter(slug=new_slug).exclude(pk=tag.pk).exists():
+            return Response({"error": "un tag porte déjà ce nom"}, status=409)
+        tag.name = payload["name"]
+        tag.slug = new_slug
+    if "color" in payload:
+        tag.color = payload["color"]
+    tag.save()
+    return Response(_serialize_tag(tag, usage=_tag_usage(tag)))
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def dataroom_tags_view(request, dataroom_id):
+    """Remplace l'ensemble des tags du dossier par la liste reçue (`{"tags": [id, …]}`).
+
+    Remplacement et non ajout/retrait unitaire : l'interface manipule une sélection
+    entière (on coche/décoche dans un menu), et un PUT idempotent évite d'avoir à
+    réconcilier deux ordres d'arrivée concurrents.
+    """
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+    dataroom, not_found = _dataroom_or_404(dataroom_id)
+    if not_found:
+        return not_found
+    # Même garde que l'upload : on ne modifie pas un dossier qu'on ne peut pas voir,
+    # et on répond 404 plutôt que 403 pour ne pas confirmer son existence.
+    if not _user_can_access(request.user, dataroom):
+        return Response({"error": "dossier introuvable"}, status=404)
+
+    try:
+        tags = _resolve_tag_ids(request.data.get('tags'))
+    except TagValidationError as exc:
+        return Response({"error": str(exc)}, status=400)
+
+    dataroom.tags.set(tags)
+    return Response({"id": dataroom.id, "tags": _tags_of(dataroom)})
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def document_tags_view(request, dataroom_id, document_id):
+    """Même contrat que dataroom_tags_view, pour une pièce."""
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+    dataroom, not_found = _dataroom_or_404(dataroom_id)
+    if not_found:
+        return not_found
+    try:
+        document = dataroom.documents.get(pk=document_id)
+    except Document.DoesNotExist:
+        return Response({"error": "document introuvable"}, status=404)
+    if not _user_can_access(request.user, dataroom, folder=document.folder, document=document):
+        return Response({"error": "document introuvable"}, status=404)
+
+    try:
+        tags = _resolve_tag_ids(request.data.get('tags'))
+    except TagValidationError as exc:
+        return Response({"error": str(exc)}, status=400)
+
+    document.tags.set(tags)
+    return Response({"id": document.id, "tags": _tags_of(document)})
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def datarooms_view(request):
@@ -398,14 +683,27 @@ def datarooms_view(request):
         name = (request.data.get('name') or '').strip()
         if not name:
             return Response({"error": "nom requis"}, status=400)
+        # `tags` est optionnel à la création : la modale « Nouveau dossier » peut en
+        # poser d'emblée, mais un client d'API qui l'ignore crée un dossier sans tag
+        # exactement comme avant.
+        try:
+            tags = _resolve_tag_ids(request.data['tags']) if 'tags' in request.data else []
+        except TagValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
         dataroom = Dataroom.objects.create(name=name)
-        return Response({"id": dataroom.id, "name": dataroom.name}, status=201)
+        if tags:
+            dataroom.tags.set(tags)
+        return Response(
+            {"id": dataroom.id, "name": dataroom.name, "tags": _tags_of(dataroom)}, status=201
+        )
 
-    datarooms = Dataroom.objects.order_by('-created_at')
+    # `?tags=1,2` : au moins un des tags demandés (OU). Absent = pas de filtre.
+    wanted_tags = _requested_tag_filter(request)
+    datarooms = Dataroom.objects.order_by('-created_at').prefetch_related('tags')
     return Response([
-        {"id": d.id, "name": d.name, "created_at": d.created_at}
+        {"id": d.id, "name": d.name, "created_at": d.created_at, "tags": _tags_of(d)}
         for d in datarooms
-        if _level_visible(request.user, d)
+        if _level_visible(request.user, d) and _matches_tag_filter(d, wanted_tags)
     ])
 
 def _dataroom_or_404(dataroom_id):
@@ -658,7 +956,10 @@ def documents_view(request, dataroom_id):
         if not _user_can_access(request.user, dataroom, folder=folder):
             return Response({"error": "dossier introuvable"}, status=404)
         document = Document.objects.create(dataroom=dataroom, folder=folder, name=upload.name, file=upload)
-        return Response({"id": document.id, "name": document.name, "file": document.file.url}, status=201)
+        return Response(
+            {"id": document.id, "name": document.name, "file": document.file.url, "tags": []},
+            status=201,
+        )
 
     # Sans ?folder=, ne liste que les documents à la racine de la dataroom (folder=None)
     # — pas tous les documents de la dataroom quel que soit leur dossier. Voir
@@ -672,11 +973,14 @@ def documents_view(request, dataroom_id):
     # seul (voir _level_visible).
     if not _level_visible(request.user, dataroom, folder=folder):
         return Response({"error": "dossier introuvable"}, status=404)
-    documents = dataroom.documents.filter(folder=folder).order_by('-uploaded_at')
+    wanted_tags = _requested_tag_filter(request)
+    documents = dataroom.documents.filter(folder=folder).order_by('-uploaded_at').prefetch_related('tags')
     return Response([
-        {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at}
+        {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at,
+         "tags": _tags_of(d)}
         for d in documents
         if _user_can_access(request.user, dataroom, folder=folder, document=d)
+        and _matches_tag_filter(d, wanted_tags)
     ])
 
 @api_view(['GET', 'POST'])
@@ -722,7 +1026,7 @@ def folders_view(request, dataroom_id):
     if not _level_visible(request.user, dataroom, folder=parent):
         return Response({"error": "dossier introuvable"}, status=404)
     folders = Folder.objects.filter(dataroom=dataroom, parent=parent).order_by('name')
-    documents = dataroom.documents.filter(folder=parent).order_by('-uploaded_at')
+    documents = dataroom.documents.filter(folder=parent).order_by('-uploaded_at').prefetch_related('tags')
     return Response({
         "folders": [
             {"id": f.id, "name": f.name, "created_at": f.created_at}
@@ -733,11 +1037,210 @@ def folders_view(request, dataroom_id):
             if _level_visible(request.user, dataroom, folder=f)
         ],
         "documents": [
-            {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at}
+            {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at,
+             "tags": _tags_of(d)}
             for d in documents
             if _user_can_access(request.user, dataroom, folder=parent, document=d)
         ],
     })
+
+# Recherche globale. Le seuil est à 1 : on cherche dès la première lettre (demandé le
+# 31/08/2026 — attendre le deuxième caractère donnait l'impression d'un champ mort).
+# Seul le vide est écarté, sans quoi ouvrir la palette listerait tout l'office. Ce qui
+# protège la lisibilité, ce n'est donc pas le seuil mais la limite par type : au-delà
+# de 10 résultats la palette cesse d'être lisible, et le drapeau `truncated` dit à
+# l'interface d'inviter à préciser plutôt que de laisser croire à une liste complète.
+SEARCH_MIN_LENGTH = 1
+SEARCH_LIMIT_PER_KIND = 10
+
+def _name_starts_with(query):
+    """Filtre « le nom contient un MOT qui commence par `query` » (décidé le
+    31/08/2026, en remplacement d'un `icontains` qui faisait remonter « Succession
+    Martin » pour la lettre « e »).
+
+    Début de mot et pas début du nom complet : les pièces notariales s'appellent
+    « Acte de notoriete.pdf » ou « Vente Guerin - 8 avenue Foch », et exiger le
+    premier mot obligerait à connaître le début exact du nom pour retrouver quoi que
+    ce soit. Taper « notoriete » ou « foch » doit marcher.
+
+    Implémenté en `iregex` plutôt qu'en Python : le filtrage doit rester en base,
+    sinon la fenêtre de scan (voir `scan_limit`) se remplirait de noms qui seront
+    ensuite écartés, et des résultats valides tomberaient hors fenêtre. Django
+    fournit bien REGEXP à SQLite (fonction Python enregistrée sur la connexion) —
+    lent en théorie, sans conséquence à l'échelle d'un office de POC.
+
+    La classe de séparateurs est définie en NÉGATIF (tout ce qui n'est ni lettre ni
+    chiffre ni accent) : les noms de fichiers séparent les mots par espace, tiret,
+    underscore, point, apostrophe... les énumérer serait en oublier.
+    """
+    return r'(^|[^0-9A-Za-zÀ-ÖØ-öø-ÿ])' + re.escape(query)
+
+def _folder_path_labels(folder):
+    """Noms des dossiers de la racine de la dataroom jusqu'à `folder` inclus.
+
+    Garde-fou `seen` : `Folder.parent` est une FK vers self sans contrainte
+    anti-cycle en base — un cycle introduit à la main (shell Django, fixture) ferait
+    boucler la remontée à l'infini et gèlerait la requête plutôt que d'échouer.
+    """
+    labels = []
+    node = folder
+    seen = set()
+    while node is not None and node.id not in seen:
+        seen.add(node.id)
+        labels.append(node.name)
+        node = node.parent
+    return list(reversed(labels))
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def search_view(request):
+    """Recherche par nom sur les dossiers (Dataroom), sous-dossiers (Folder), pièces
+    (Document) et personnes (OfficeMembership) de l'office courant.
+
+    Portée : la base du tenant résolu par le sous-domaine, comme tout modèle métier —
+    aucun paramètre d'entrée ne permet de désigner un autre office, l'isolation vient
+    du routeur de base de données, pas d'un filtre applicatif (voir CLAUDE.md,
+    « Architecture multi-tenant »).
+
+    Contrôle d'accès : STRICTEMENT les mêmes helpers que les endpoints de lecture
+    existants, pas une seconde implémentation qui pourrait diverger —
+    `_level_visible` pour les datarooms et les dossiers (visibilité de chemin
+    incluse : un dossier de transit vers un contenu accordé plus profond reste
+    trouvable), `_user_can_access` pour les documents (accès direct seul). Une
+    recherche ne doit jamais servir de contournement à une AccessRestriction, ni
+    révéler par un simple compteur l'existence d'une pièce restreinte.
+
+    Correspondance : début de mot, pas sous-chaîne quelconque — voir
+    `_name_starts_with`.
+
+    Limite connue : la casse n'est repliée que pour l'ASCII — « ERIC » trouve
+    « eric », mais « ÉRIC » ne trouve pas « éric ». Accepté tel quel pour le POC
+    (une vraie insensibilité aux accents demanderait une collation personnalisée ou
+    un index de recherche dédié).
+    """
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if not request.user.memberships.filter(office=office).exists():
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    query = (request.GET.get('q') or '').strip()
+    if len(query) < SEARCH_MIN_LENGTH:
+        # Pas une erreur : la frappe passe forcément par 1 caractère. Réponse vide
+        # explicite, l'interface n'a pas à connaître le seuil pour se taire.
+        return Response({"query": query, "results": [], "truncated": False})
+
+    user = request.user
+    name_pattern = _name_starts_with(query)
+    results = []
+    truncated = False
+
+    # Le filtrage d'accès se fait en Python : les restrictions ne sont pas
+    # exprimables en SQL ici (`user_ids` est un JSONField, et l'héritage remonte la
+    # hiérarchie des dossiers). On ne peut donc pas trancher en base — on borne large,
+    # puis on coupe après filtrage.
+    scan_limit = SEARCH_LIMIT_PER_KIND * 5
+
+    def take(rows, is_visible):
+        """Filtre par accès, coupe à la limite d'affichage, et dit s'il MANQUE des
+        résultats — deux raisons possibles, toutes deux signalées : plus d'éléments
+        accessibles que la limite, ou fenêtre de scan déjà pleine avant filtrage.
+        Sans ce second cas, une recherche large annoncerait une liste complète alors
+        que la coupe a eu lieu en base, avant même de regarder les droits."""
+        rows = list(rows)
+        window_full = len(rows) > scan_limit
+        visible = [row for row in rows[:scan_limit] if is_visible(row)]
+        return visible[:SEARCH_LIMIT_PER_KIND], window_full or len(visible) > SEARCH_LIMIT_PER_KIND
+
+    # scan_limit + 1 : la ligne excédentaire n'est jamais affichée, elle sert
+    # uniquement à savoir que la fenêtre était pleine.
+    matched_datarooms, cut = take(
+        Dataroom.objects.filter(name__iregex=name_pattern).order_by('name')[:scan_limit + 1],
+        lambda d: _level_visible(user, d),
+    )
+    truncated = truncated or cut
+    for d in matched_datarooms:
+        results.append({
+            "kind": "dataroom",
+            "id": d.id,
+            "name": d.name,
+            "dataroom_id": d.id,
+            "dataroom_name": d.name,
+            "folder_id": None,
+            "path": d.name,
+        })
+
+    matched_folders, cut = take(
+        Folder.objects.filter(name__iregex=name_pattern)
+        .select_related('dataroom', 'parent')
+        .order_by('name')[:scan_limit + 1],
+        lambda f: _level_visible(user, f.dataroom, folder=f),
+    )
+    truncated = truncated or cut
+    for f in matched_folders:
+        results.append({
+            "kind": "folder",
+            "id": f.id,
+            "name": f.name,
+            "dataroom_id": f.dataroom_id,
+            "dataroom_name": f.dataroom.name,
+            "folder_id": f.id,
+            "path": " / ".join([f.dataroom.name, *_folder_path_labels(f)]),
+        })
+
+    matched_documents, cut = take(
+        Document.objects.filter(name__iregex=name_pattern)
+        .select_related('dataroom', 'folder')
+        .order_by('-uploaded_at')[:scan_limit + 1],
+        lambda d: _user_can_access(user, d.dataroom, folder=d.folder, document=d),
+    )
+    truncated = truncated or cut
+    for d in matched_documents:
+        # `folder_id` pointe le dossier CONTENANT la pièce (None = racine) : c'est le
+        # niveau que l'interface doit ouvrir pour la montrer, pas la pièce elle-même.
+        path_labels = _folder_path_labels(d.folder) if d.folder else []
+        results.append({
+            "kind": "document",
+            "id": d.id,
+            "name": d.name,
+            "dataroom_id": d.dataroom_id,
+            "dataroom_name": d.dataroom.name,
+            "folder_id": d.folder_id,
+            "path": " / ".join([d.dataroom.name, *path_labels, d.name]),
+        })
+
+    # Les personnes de l'étude. Volontairement soumises au MÊME gate et à la MÊME
+    # visibilité hiérarchique que /api/office-users/ : réservé aux admins/superadmins
+    # de cet office, et un admin ne voit pas les superadmins. Un non-gestionnaire ne
+    # reçoit simplement aucune personne — pas un 403 sur toute la recherche, qui
+    # priverait un membre ordinaire de la recherche de ses propres dossiers.
+    caller_role = _manager_role(user, office)
+    if caller_role is not None:
+        visible_roles = _roles_at_or_below(OfficeMembership.ROLE_RANK[caller_role])
+        matched_people, cut = take(
+            OfficeMembership.objects.filter(
+                office=office, role__in=visible_roles, user__username__iregex=name_pattern
+            ).select_related('user').order_by('user__username')[:scan_limit + 1],
+            # Le filtre d'accès est déjà entièrement exprimé en SQL ici (office + rang),
+            # contrairement aux modèles tenant dont les restrictions ne le sont pas.
+            lambda m: True,
+        )
+        truncated = truncated or cut
+        for m in matched_people:
+            results.append({
+                "kind": "person",
+                # L'id du MEMBERSHIP, pas celui du User : c'est la clé que manipule
+                # déjà /api/office-users/<id>/, et un compte peut appartenir à
+                # plusieurs offices.
+                "id": m.id,
+                "name": m.user.username,
+                "dataroom_id": None,
+                "dataroom_name": None,
+                "folder_id": None,
+                "path": f"{office.name} / {m.get_role_display()}",
+            })
+
+    return Response({"query": query, "results": results, "truncated": truncated})
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

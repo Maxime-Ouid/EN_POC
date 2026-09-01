@@ -111,7 +111,7 @@
   --card-border:rgba(255,255,255,0.65);
   --card-glass-bg:rgb(255 255 255 / 85%);
   --card-glass-border:rgba(255,255,255,.7);
-  --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), rgba(255,255,255,.04));
+  --app-pattern:rgba(107,63,212,.10);
   --nav-dim:#2f206f;
   --nav-label-c:#372979;
   --brand-strong:#2a1c66;
@@ -184,7 +184,7 @@
     --card-border:rgba(255,255,255,.08);
     --card-glass-bg:rgba(28,23,64,.75);
     --card-glass-border:rgba(255,255,255,.12);
-    --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.02));
+    --app-pattern:rgba(185,156,247,.10);
     --nav-dim:#a89ed4;
     --nav-label-c:#a89ed4;
     --brand-strong:#ffffff;
@@ -257,7 +257,7 @@
   --card-border:rgba(255,255,255,.08);
   --card-glass-bg:rgba(28,23,64,.75);
   --card-glass-border:rgba(255,255,255,.12);
-  --app-orb:radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.02));
+  --app-pattern:rgba(185,156,247,.10);
   --nav-dim:#a89ed4;
   --nav-label-c:#a89ed4;
   --brand-strong:#ffffff;

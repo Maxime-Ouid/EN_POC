@@ -119,16 +119,75 @@ html,body,#root{height:100%;}
 .sidebar .brand-name{color:var(--brand-strong);}
 .sidebar .brand-sub{color:var(--brand-soft);}
 
+/* Le sélecteur d'office est un bouton qui ouvre la liste des offices ; le
+   conteneur .tenant-picker porte les marges ET l'ancrage du panneau, sinon le
+   panneau se positionnerait par rapport au bouton marges comprises. */
+.tenant-picker{position:relative;margin:12px 14px 6px;}
 .tenant-switcher{
-  margin:12px 14px 6px;padding:9px 10px;border-radius:var(--radius-md);
+  width:100%;margin:0;padding:9px 10px;border-radius:var(--radius-md);
   background:var(--shell-bg-2);border:1px solid var(--shell-border);
   display:flex;align-items:center;gap:9px;
+  font-family:inherit;text-align:left;
 }
 .tenant-switcher .tsicon{width:26px;height:26px;border-radius:6px;background:var(--brass-100);color:var(--brass-700);display:flex;align-items:center;justify-content:center;flex:none;}
 .tenant-switcher .tsicon svg{width:14px;height:14px;}
-.tenant-name{font-size:12.5px;font-weight:600;color:#fff;line-height:1.2;}
-.tenant-role{font-size:10.5px;color:var(--shell-text-dim);}
-.tenant-switcher svg.chev{margin-left:auto;color:var(--shell-text-dim);width:14px;height:14px;}
+.tenant-text{min-width:0;}
+.tenant-name{font-size:12.5px;font-weight:600;color:#fff;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tenant-role{font-size:10.5px;color:var(--shell-text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tenant-switcher svg.chev{margin-left:auto;color:var(--shell-text-dim);width:14px;height:14px;transition:transform .12s;}
+.tenant-switcher[aria-expanded="true"] svg.chev{transform:rotate(180deg);}
+
+/* La liste est un TIROIR : elle s'ouvre dans le rail et pousse la navigation
+   vers le bas, exactement comme le sous-menu d'une rubrique (.nav-sub) — pas
+   un panneau flottant qui recouvre ce qu'il y a dessous. Elle prend donc les
+   couleurs du rail, et non celles de la surface : ce qui vit dans la colonne
+   sombre ressemble à la colonne sombre. */
+.tenant-menu{
+  margin:3px 0 0 12px;padding-left:10px;
+  /* --shell-border est un blanc translucide : invisible dès qu'un office
+     personnalise --nav-bg en clair. Le filet se déduit donc de la couleur de
+     texte du rail, qui suit ce fond. */
+  border-left:1px solid color-mix(in srgb, var(--nav-dim) 22%, transparent);
+  max-height:230px;overflow-y:auto;
+}
+/* Le repos prend --nav-dim, PAS --shell-text-dim : ce dernier est calibré pour
+   le violet sombre du rail par défaut, et devient illisible sur un rail clair
+   (--nav-bg est personnalisable par l'office). --nav-dim est la couleur de
+   texte qui suit ce fond — c'est déjà celle des entrées de navigation. */
+.tenant-menu-item{
+  display:flex;align-items:center;gap:8px;width:100%;
+  padding:6px 10px;border-radius:7px;border:1px solid transparent;
+  background:none;font-family:inherit;text-align:left;
+  color:var(--nav-dim);margin-bottom:1px;
+}
+.tenant-menu-item:hover{background:var(--shell-bg-2);color:var(--shell-text);}
+.tenant-menu-item.active{background:var(--shell-active);color:var(--shell-text);border-color:var(--shell-border);}
+.tenant-menu-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.tenant-menu-name{font-size:12.4px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tenant-menu-role{font-size:10.5px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tenant-menu-check{width:13px;height:13px;flex:none;}
+
+/* Deux contextes n'ont PAS de colonne où pousser quoi que ce soit : la topbar
+   (une rangée horizontale) et le rail réduit (~54px de large, où les noms
+   d'office seraient illisibles). Là, et seulement là, la liste redevient un
+   panneau flottant, sur les couleurs de surface comme les menus de la barre
+   d'onglets. */
+.topbar-right .tenant-menu,
+[data-nav-size="rail"] .tenant-menu{
+  position:absolute;top:calc(100% + 6px);z-index:120;
+  width:max-content;max-width:280px;max-height:320px;
+  margin:0;padding:6px;border-left:0;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-md);
+}
+.topbar-right .tenant-menu-item,
+[data-nav-size="rail"] .tenant-menu-item{color:var(--ink-800);}
+.topbar-right .tenant-menu-item:hover,
+[data-nav-size="rail"] .tenant-menu-item:hover{background:var(--surface-alt);color:var(--ink-900);}
+.topbar-right .tenant-menu-item.active,
+[data-nav-size="rail"] .tenant-menu-item.active{
+  background:var(--brass-100);color:var(--brass-700);border-color:transparent;
+}
 
 .nav{flex:1;overflow-y:auto;padding:10px 10px;}
 .nav-group{margin-bottom:14px;}
@@ -181,7 +240,17 @@ html,body,#root{height:100%;}
    comme les autres tokens de couleur, donc une seule règle suffit pour les deux
    thèmes — plus besoin de bloc @media/[data-theme] dédié ici. C'est ce qui rend ce
    fond enfin éditable depuis Personnalisation → Apparence — voir DESIGN_SYSTEM.md §9. */
-#app-main{
+/* Cinq fonds, sélectionnés par data-appbg sur <html> (theme/engine.ts). Un fond
+   ne peut pas se réduire à des variables : il change la NATURE de l'image de
+   fond — halos, filet, grain. Les couleurs, elles, restent des tokens.
+
+   Chaque fond est écrit UNE fois, pour `#app-main` et pour sa vignette
+   d'aperçu : un aperçu qui diverge du rendu réel ne sert à rien. Le bloc sans
+   attribut reste le dégradé, pour que tout thème enregistré avant l'arrivée
+   des fonds continue de s'afficher à l'identique. */
+#app-main,
+:root[data-appbg="degrade"] #app-main,
+.appbg-swatch[data-appbg="degrade"]{
   background:
     radial-gradient(circle at 20% 20%, var(--app-grad-1) 0%, transparent 55%),
     radial-gradient(circle at 80% 10%, var(--app-grad-2) 0%, transparent 55%),
@@ -189,11 +258,35 @@ html,body,#root{height:100%;}
     radial-gradient(circle at 15% 85%, var(--app-grad-4) 0%, transparent 50%),
     linear-gradient(135deg, var(--app-grad-base-from) 0%, var(--app-grad-base-to) 100%);
 }
-.app-orb{ position:absolute; z-index:-1; border-radius:26%; background:var(--app-orb); animation:loginFloat 12s ease-in-out infinite; pointer-events:none; filter:blur(1px); }
-.ao1{ width:16rem; height:16rem; top:-5%; right:-4%; }
-.ao2{ width:10rem; height:10rem; bottom:-6%; left:-3%; animation-delay:-4s; animation-duration:14s; }
-.ao3{ width:4.5rem; height:4.5rem; top:58%; right:2%; animation-delay:-2s; animation-duration:9s; border-radius:22%;
-      background:radial-gradient(circle at 30% 30%, rgba(143,227,248,.4), rgba(80,208,253,.06)); }
+:root[data-appbg="uni"] #app-main,
+.appbg-swatch[data-appbg="uni"]{
+  background:var(--app-grad-base-from);
+}
+:root[data-appbg="quadrillage"] #app-main,
+.appbg-swatch[data-appbg="quadrillage"]{
+  background-color:var(--app-grad-base-from);
+  background-image:
+    linear-gradient(var(--app-pattern) 1px, transparent 1px),
+    linear-gradient(90deg, var(--app-pattern) 1px, transparent 1px);
+  background-size:24px 24px;
+}
+:root[data-appbg="halo"] #app-main,
+.appbg-swatch[data-appbg="halo"]{
+  background:
+    radial-gradient(circle at 88% -6%, var(--app-grad-2) 0%, transparent 62%),
+    linear-gradient(135deg, var(--app-grad-base-from) 0%, var(--app-grad-base-to) 100%);
+}
+:root[data-appbg="grain"] #app-main,
+.appbg-swatch[data-appbg="grain"]{
+  background-color:var(--app-grad-base-from);
+  background-image:radial-gradient(var(--app-pattern) .5px, transparent .5px);
+  background-size:3px 3px;
+}
+/* La vignette est douze fois plus petite que l'écran : à l'échelle 1 le filet
+   n'y montrerait qu'une seule ligne et le grain rien du tout. */
+.appbg-swatch{width:100%;height:46px;border-radius:var(--radius-sm);border:1px solid var(--border);}
+.appbg-swatch[data-appbg="quadrillage"]{background-size:11px 11px;}
+.appbg-swatch[data-appbg="grain"]{background-size:2px 2px;}
 .accent-sq{ position:absolute; z-index:-1; border-radius:18%; pointer-events:none; animation:loginFloat 9s ease-in-out infinite; box-shadow:0 2px 10px -2px rgba(20,23,26,.18); }
 .accent-sq--cyan{ background:rgba(80,208,253,.85); }
 .accent-sq--purple{ background:rgba(150,104,244,.85); }
@@ -224,7 +317,7 @@ html,body,#root{height:100%;}
 .adg4{ width:80px; height:24px; top:4%; left:18%; animation-delay:-3.8s; animation-duration:16s; }
 .adg5{ width:34px; height:57px; bottom:12%; left:6%; animation-delay:-1.4s; animation-duration:11.5s; }
 @media (prefers-reduced-motion:reduce){ .dot-grid{ animation:none !important; } }
-@media (prefers-reduced-motion:reduce){ .app-orb,.accent-sq{ animation:none !important; } }
+@media (prefers-reduced-motion:reduce){ .accent-sq{ animation:none !important; } }
 .topbar{
   height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
   border-bottom:1px solid var(--border);
@@ -250,8 +343,32 @@ html,body,#root{height:100%;}
 .breadcrumb svg{width:13px;height:13px;color:var(--ink-400);}
 .topbar-search{
   flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--surface-alt);
-  border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--ink-500);margin-left:8px;
+  border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--ink-500);
 }
+/* Le retrait de 8px sépare le champ du fil d'Ariane. Il ne s'applique que
+   derrière lui : première dans la barre, la recherche doit s'aligner sur le
+   padding de celle-ci. */
+.breadcrumb+.topbar-search{margin-left:8px;}
+/* Depuis le 01/09/2026 la recherche vit dans le groupe de droite. Elle y perd
+   son `flex:1` : ce groupe se dimensionne sur son contenu, et une base nulle y
+   aurait fait mesurer le champ sur la longueur de son texte d'invite — 380px
+   fixes, qui se resserrent avec la fenêtre plutôt que d'écraser les onglets. */
+.topbar-right .topbar-search{flex:0 1 380px;width:380px;min-width:0;}
+@media (max-width:1200px){.topbar-right .topbar-search{width:260px;}}
+@media (max-width:980px){.topbar-right .topbar-search kbd{display:none;}}
+/* Emplacements prêtés aux écrans (voir templates/topbarSlots.ts). `:empty` les
+   efface : sans cela, le `gap` de la barre creuserait un trou sur tous les
+   écrans qui n'y projettent rien — c'est-à-dire presque tous. */
+.topbar-slot{display:flex;align-items:center;gap:8px;min-width:0;}
+.topbar-slot:empty{display:none;}
+/* Les onglets d'écrans portent leur soulignement actif : ils doivent occuper
+   toute la hauteur de la barre pour que le trait tombe au bon endroit. */
+.topbar-slot-start{align-self:stretch;flex:0 1 auto;overflow:hidden;}
+.topbar-slot-start .dash-tabs{flex-wrap:nowrap;}
+.topbar-slot-start .dash-tab{margin-right:10px;}
+/* La barre a déjà 12px entre ses éléments de droite ; les boutons de l'écran
+   se serrent un peu plus entre eux pour rester lus comme un groupe. */
+.topbar-slot-end{gap:6px;}
 .topbar-search input{border:none;background:transparent;outline:none;font-size:13px;flex:1;color:var(--ink-900);font-family:inherit;}
 .topbar-search kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-400);}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
@@ -340,9 +457,6 @@ html,body,#root{height:100%;}
 .stat-value{font-family:var(--font-display);font-size:27px;font-weight:600;margin-top:12px;}
 .stat-label{font-size:12.5px;color:var(--ink-500);margin-top:2px;}
 .stat-delta{font-size:11.5px;font-weight:600;margin-top:8px;display:inline-flex;gap:4px;align-items:center;}
-/* Tokens dédiés : les couleurs de statut sont une famille construite
-   ensemble, une variation chiffrée garde son vert et son orange même si
-   la famille bouge. */
 .up{color:var(--positive);}
 .warn-delta{color:var(--caution);}
 
@@ -375,7 +489,117 @@ html,body,#root{height:100%;}
 .pill.neutral{background:var(--surface-alt);color:var(--ink-700);border-color:var(--border);}
 .tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 8px 3px 6px;border-radius:6px;background:var(--brass-100);color:var(--brass-700);}
 .tag svg{width:10px;height:10px;}
-.tag.plain{background:var(--surface-alt);color:var(--ink-700);border:1px solid var(--border);}
+/* .plain est l'ancien nom de la variante grise (antérieur aux couleurs de tag) ;
+   il est conservé parce que des écrans l'utilisent pour un libellé qui n'est PAS
+   un tag du catalogue — le groupe d'un membre, par exemple. */
+.tag.plain,
+.tag.tag-neutral{background:var(--surface-alt);color:var(--ink-700);border:1px solid var(--border);}
+/* Les couleurs de tag reprennent les paires de tokens des statuts : mêmes
+   contrastes déjà vérifiés (voir la note RGAA sur .pill.neutral), et un office
+   qui personnalise son thème voit ses tags suivre. */
+.tag.tag-info{background:var(--info-bg);color:var(--info);}
+.tag.tag-success{background:var(--success-bg);color:var(--success);}
+.tag.tag-warning{background:var(--warning-bg);color:var(--warning);}
+.tag.tag-critical{background:var(--critical-bg);color:var(--critical);}
+
+/* Croix de retrait dans une pastille éditable. Cible d'au moins 16px et non la
+   taille du glyphe : à 10px elle serait inatteignable à la souris comme au
+   doigt. */
+.tag-remove{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;margin:-2px -4px -2px 0;padding:0;
+  border:0;border-radius:4px;background:none;color:inherit;cursor:pointer;opacity:.65;
+}
+.tag-remove:hover{opacity:1;background:color-mix(in srgb,currentColor 16%,transparent);}
+.tag-remove svg{width:9px;height:9px;}
+
+/* Suite de pastilles (colonne « Tags » d'un tableau, en-tête d'un dossier). */
+.tag-list{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;}
+
+/* Bouton « + » du sélecteur : même gabarit qu'une pastille, en pointillé, pour
+   qu'il se lise comme un emplacement vide et non comme un tag de plus. */
+.tag-add{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;padding:0;
+  border:1px dashed var(--border);border-radius:6px;
+  background:none;color:var(--ink-500);cursor:pointer;
+}
+.tag-add:hover{border-color:var(--brass-700);color:var(--brass-700);background:var(--brass-100);}
+.tag-add svg{width:11px;height:11px;}
+
+/* ---- Menus de tags (filtre de liste et sélecteur d'élément) ----
+   Même panneau flottant que .navbar-menu ; il est déclaré à part parce qu'il
+   s'ancre à GAUCHE de son déclencheur (un bouton de barre de filtres, une
+   cellule de tableau) et non à droite comme les menus de la barre. */
+.tag-menu-root{position:relative;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;}
+/* Posé sur un sélecteur monté DANS une cellule de tableau : la colonne « Tags »
+   ne doit pas s'élargir sans fin sur un dossier qui en porte beaucoup — les
+   pastilles passent à la ligne plutôt que d'écraser les colonnes voisines. */
+.tag-picker{max-width:260px;}
+.tag-menu{
+  position:absolute;top:calc(100% + 6px);left:0;z-index:60;
+  min-width:230px;max-width:300px;padding:6px;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  box-shadow:0 18px 40px rgba(20,12,60,.18);
+}
+.tag-menu-search{width:100%;margin-bottom:6px;}
+.tag-menu-list{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px;}
+.tag-menu-item{
+  display:flex;align-items:center;gap:8px;width:100%;
+  padding:6px 8px;border:0;border-radius:8px;
+  background:none;color:var(--ink-800);font:inherit;font-size:12.4px;text-align:left;cursor:pointer;
+}
+.tag-menu-item:hover{background:var(--surface-alt);}
+.tag-menu-item.active{background:var(--brass-100);color:var(--brass-700);}
+.tag-menu-item:disabled{opacity:.55;cursor:progress;}
+.tag-menu-item input[type="checkbox"]{margin:0;flex:none;accent-color:var(--brass-700);}
+.tag-menu-item .icon{width:13px;height:13px;flex:none;}
+.tag-menu-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tag-menu-usage{flex:none;font-variant-numeric:tabular-nums;}
+/* Pastille de couleur : le nom seul ne dit pas de quel tag il s'agit quand deux
+   entrées se ressemblent, et la couleur est la seule chose qu'on retrouve
+   ensuite dans le tableau. */
+.tag-dot{width:9px;height:9px;flex:none;border-radius:3px;background:var(--brass-700);}
+.tag-dot.tag-neutral{background:var(--ink-400);}
+.tag-dot.tag-info{background:var(--info);}
+.tag-dot.tag-success{background:var(--success);}
+.tag-dot.tag-warning{background:var(--warning);}
+.tag-dot.tag-critical{background:var(--critical);}
+.tag-menu-empty{padding:8px;}
+.tag-menu-clear,
+.tag-menu-create{
+  display:flex;align-items:center;gap:6px;width:100%;margin-top:4px;
+  padding:6px 8px;border:0;border-top:1px solid var(--border);border-radius:0 0 8px 8px;
+  background:none;color:var(--ink-700);font:inherit;font-size:12px;text-align:left;cursor:pointer;
+}
+.tag-menu-create{color:var(--brass-700);font-weight:600;}
+.tag-menu-clear:hover,
+.tag-menu-create:hover{background:var(--surface-alt);}
+.tag-menu-clear .icon,
+.tag-menu-create .icon{width:12px;height:12px;flex:none;}
+.tag-menu-error{margin-top:6px;padding:6px 8px;border-radius:8px;background:var(--critical-bg);color:var(--critical);}
+/* Choix de couleur du tag à créer. Six pastilles et pas une liste déroulante :
+   la couleur SE VOIT, et un menu qui la nomme ferait choisir un mot plutôt
+   qu'une teinte. */
+.tag-menu-colors{display:flex;align-items:center;gap:4px;padding:8px 8px 4px;}
+.tag-color-choice{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;padding:0;
+  border:1px solid transparent;border-radius:7px;background:none;cursor:pointer;
+}
+.tag-color-choice:hover{background:var(--surface-alt);}
+.tag-color-choice.active{border-color:var(--brass-700);background:var(--brass-100);}
+.tag-color-choice .tag-dot{width:11px;height:11px;}
+/* Compteur de filtres actifs porté par le bouton lui-même : un filtre actif
+   qu'on ne voit pas menu fermé est la première cause de « la liste est vide,
+   c'est cassé ». */
+.tag-menu-count{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 4px;margin-left:2px;
+  border-radius:8px;background:var(--brass-700);color:var(--surface);
+  font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;
+}
+.btn.is-filtering{border-color:var(--brass-700);color:var(--brass-700);}
 
 /* avatars row */
 .avatar-stack{display:flex;}
@@ -551,6 +775,42 @@ select.control.control-sm{padding-right:26px;}
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
 .modal-body{padding:18px 20px;}
 .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--border);}
+/* palette de recherche (⌘K) — réutilise .overlay, mais ancrée en haut plutôt que
+   centrée : une liste qui grandit vers le bas ne doit pas faire remonter le champ
+   de saisie sous les yeux de l'utilisateur en train d'écrire. */
+.search-palette-overlay{align-items:flex-start;padding-top:12vh;}
+.search-palette{background:var(--surface);border-radius:var(--radius-lg);width:620px;max-width:92vw;box-shadow:var(--shadow-lg);overflow:hidden;}
+.search-palette-field{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--border);color:var(--ink-500);}
+.search-palette-field input{border:none;background:transparent;outline:none;font-size:14.5px;flex:1;color:var(--ink-900);font-family:inherit;}
+.search-palette-field kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--surface-alt);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-400);}
+.search-palette-results{max-height:min(52vh,420px);overflow-y:auto;padding:6px;}
+.search-palette-empty{padding:16px 12px;text-align:center;}
+/* flex obligatoire : svg.icon est en display:block, l'icône passerait sinon
+   au-dessus du libellé (même piège que le chevron du fil d'Ariane). */
+.search-hit{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:9px 11px;border:none;border-radius:8px;background:transparent;font-family:inherit;color:var(--ink-900);cursor:pointer;}
+.search-hit.is-active{background:var(--surface-alt);}
+.search-hit>svg.icon{flex:none;color:var(--brass-600);}
+.search-hit-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
+.search-hit-name{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* direction:rtl : sur un chemin trop long, c'est le DÉBUT qu'on tronque, la fin
+   (le dossier contenant) portant l'information utile pour se situer. */
+.search-hit-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;}
+.search-hit-kind{flex:none;}
+/* Pastille « simulé » : reprend le vocabulaire de .proto-pill (la mention
+   « Données partiellement simulées » de la topbar), en plus petit. Un résultat
+   inventé doit se distinguer d'un vrai AVANT le clic, pas après. */
+.search-hit-sim{
+  font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--brass-700);background:var(--brass-100);border:1px solid var(--brass-400);
+  border-radius:99px;padding:0 5px;margin-left:7px;vertical-align:1px;
+}
+/* Lettres trouvées. `background:transparent` explicite : <mark> arrive avec un
+   jaune de navigateur qui n'existe nulle part dans la palette notariale. La
+   couleur suffit à faire ressortir, sans découper le mot en morceaux. */
+.hl{background:transparent;color:var(--brass-700);font-weight:700;}
+.search-palette-foot{display:flex;gap:16px;padding:9px 16px;border-top:1px solid var(--border);background:var(--surface-alt);}
+.search-palette-foot kbd{font-family:var(--font-mono);font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:0 4px;margin-right:3px;color:var(--ink-400);}
+
 .tpl-option{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:9px;}
 .tpl-option:hover{border-color:var(--brass-400);background:var(--surface-alt);}
 .tpl-option .row-icon{background:var(--brass-100);color:var(--brass-700);}
@@ -729,11 +989,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:16px;border-radius:var(--radius-lg);
   background:var(--surface-alt);border:1px solid var(--border);
 }
-.save-flash{font-size:11px;color:var(--success);font-weight:600;opacity:0;transition:opacity .25s;display:inline-flex;align-items:center;gap:4px;}
+.save-flash{font-size:11px;color:var(--positive);font-weight:600;opacity:0;transition:opacity .25s;display:inline-flex;align-items:center;gap:4px;}
 .save-flash.show{opacity:1;}
 /* Pendant d'échec de .save-flash : l'enregistrement serveur a échoué, ce qui est
    affiché n'est pas ce qui est enregistré pour l'office. */
-.save-error{font-size:11px;color:var(--warning);font-weight:600;display:inline-flex;align-items:center;gap:4px;}
+.save-error{font-size:11px;color:var(--caution);font-weight:600;display:inline-flex;align-items:center;gap:4px;}
 
 /* ============ ESPACE NOTARIAL V1 — navigation à sous-menus et écrans iso ============
    Reconstruction de l'interface administrateur actuelle (admin.espacenotarial.com)
@@ -871,13 +1131,17 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 /* Le sélecteur d'office est dessiné pour le fond sombre du rail. Remonté dans
    la topbar (navigation horizontale), il doit prendre les couleurs de surface,
    sinon il y apparaît comme un bloc violet sans rapport avec ce qui l'entoure. */
+.topbar-right .tenant-picker{margin:0;}
 .topbar-right .tenant-switcher{
-  margin:0;padding:5px 9px;
+  padding:5px 9px;
   background:var(--surface-alt);border-color:var(--border);
 }
 .topbar-right .tenant-name{color:var(--ink-900);}
 .topbar-right .tenant-role{color:var(--ink-500);}
 .topbar-right .tenant-switcher .chev{color:var(--ink-400);}
+/* Ancré à droite : dans la topbar le sélecteur est en fin de ligne, un panneau
+   aligné à gauche déborderait de la fenêtre. */
+.topbar-right .tenant-menu{right:0;min-width:100%;}
 
 /* --- Mode réduit : icônes seules ------------------------------------------
    Le rail se réduit à une colonne de pastilles carrées ; chaque entrée révèle
@@ -905,7 +1169,12 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
   border:1px solid var(--shell-border);border-radius:var(--radius-md);
   background:var(--shell-bg-2);
 }
-[data-nav-size="rail"] .tenant-switcher{padding:9px 0;margin-left:8px;margin-right:8px;}
+[data-nav-size="rail"] .tenant-picker{margin-left:8px;margin-right:8px;}
+[data-nav-size="rail"] .tenant-switcher{padding:9px 0;}
+/* Le rail ne fait que ~54px : pas de tiroir possible — le panneau flotte (voir
+   plus haut), garde sa largeur propre et déborde vers la droite plutôt que de
+   se comprimer à l'illisible. */
+[data-nav-size="rail"] .tenant-menu{left:0;min-width:210px;}
 /* Chevron et intitulés de section n'ont plus de sens sans libellé : il n'y a
    plus rien à côté de quoi les afficher. Le sous-menu, lui, NE disparaît PAS —
    il devient un panneau volant, plus bas. */

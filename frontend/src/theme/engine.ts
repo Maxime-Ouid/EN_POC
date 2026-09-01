@@ -11,6 +11,7 @@
 
 import { composeColor, hexToRgb, parseColor } from './color';
 import {
+  APP_BG,
   LAYOUT_DEFAULTS,
   NAV_ACTIVE,
   NAV_DENSITY,
@@ -21,6 +22,7 @@ import {
   TYPOGRAPHY,
   type LayoutState,
   type NavActiveKey,
+  type AppBgKey,
   type NavDensityKey,
   type NavPlacement,
   type NavSizeKey,
@@ -34,6 +36,8 @@ export interface ThemeState {
   colors: Record<ThemeMode, Record<string, string>>;
   typography: TypographyKey;
   shape: ShapeKey;
+  /** Fond de l'espace connecté (voir APP_BG dans schema.ts). */
+  appBg: AppBgKey;
   /** Disposition et style de la navigation (voir LayoutState dans schema.ts). */
   layout: LayoutState;
 }
@@ -86,7 +90,13 @@ export function defaultThemeState(): ThemeState {
     colors.light[t.key] = t.light;
     colors.dark[t.key] = t.dark;
   }
-  return { colors, typography: 'classique', shape: 'equilibre', layout: { ...LAYOUT_DEFAULTS } };
+  return {
+    colors,
+    typography: 'classique',
+    shape: 'equilibre',
+    appBg: 'degrade',
+    layout: { ...LAYOUT_DEFAULTS },
+  };
 }
 
 export const THEME_DEFAULTS = defaultThemeState();
@@ -182,6 +192,9 @@ export function applyTheme(state: ThemeState): void {
   }
   tag.textContent = buildThemeCss(state);
   applyLayoutAttributes(state.layout);
+  // Le fond ne peut pas être une variable : il change la nature de
+  // l'image de fond (halos, filet, grain), pas seulement sa couleur.
+  document.documentElement.setAttribute('data-appbg', state.appBg);
 }
 
 /** Complète/valide un état venant du stockage ou de l'API — jamais confiance brute. */
@@ -205,6 +218,11 @@ export function normalizeThemeState(raw: unknown): ThemeState {
   }
   if (candidate.shape && candidate.shape in SHAPE) {
     state.shape = candidate.shape;
+  }
+  // Absent est le cas NORMAL pour tout thème enregistré avant l'ajout des
+  // fonds : il doit continuer à afficher le dégradé, pas un fond vide.
+  if (candidate.appBg && candidate.appBg in APP_BG) {
+    state.appBg = candidate.appBg;
   }
   state.layout = normalizeLayoutState(candidate.layout);
   return state;
