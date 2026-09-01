@@ -405,7 +405,7 @@ def datarooms_view(request):
     return Response([
         {"id": d.id, "name": d.name, "created_at": d.created_at}
         for d in datarooms
-        if _level_visible(request.user, d)
+        if _level_visible(request.user, office, d)
     ])
 
 def _dataroom_or_404(dataroom_id):
@@ -451,34 +451,55 @@ def _nearest_restriction(dataroom, folder=None, document=None):
         node = node.parent
     return AccessRestriction.objects.filter(dataroom=dataroom).first()
 
-def _user_can_access(user, dataroom, folder=None, document=None):
-    restriction = _nearest_restriction(dataroom, folder=folder, document=document)
-    return restriction is None or user.id in restriction.user_ids
+def _user_can_access(user, office, dataroom, folder=None, document=None):
+    """Accès direct à CE niveau précis (pas la visibilité de chemin, voir
+    _level_visible). Si une restriction existe quelque part sur la chaîne
+    (_nearest_restriction, inchangée), seule l'appartenance à `user_ids` compte —
+    le rôle n'entre pas en jeu, une restriction explicite prime toujours.
 
-def _subtree_has_accessible_content(user, dataroom, folder=None):
+    Si AUCUNE restriction n'existe sur toute la chaîne, le comportement dépend
+    désormais du rôle de `user` pour CET office précis (changement du 01/09/2026,
+    voir CLAUDE.md) : membre/admin/superadmin gardent l'accès ouvert par défaut
+    (comportement historique, inchangé) ; un client, lui, n'a PAS accès par défaut
+    — un client ne voit et n'accède qu'à ce qu'une restriction l'inclut
+    explicitement. Un utilisateur sans membership pour cet office (ne devrait pas
+    arriver : tous les appelants vérifient déjà l'appartenance en amont) est traité
+    comme un client, par défaut fermé plutôt qu'ouvert."""
+    restriction = _nearest_restriction(dataroom, folder=folder, document=document)
+    if restriction is not None:
+        return user.id in restriction.user_ids
+    membership = user.memberships.filter(office=office).first()
+    return membership is not None and membership.role != "client"
+
+def _subtree_has_accessible_content(user, office, dataroom, folder=None):
     """True si le sous-arbre ENFANT de `folder` (racine de la dataroom si None) —
     donc son contenu, pas `folder` lui-même — contient, à n'importe quelle
     profondeur, au moins un Document ou Folder directement accessible à `user`
-    (_user_can_access, héritage inchangé). Récursion explicite, séparée de
-    _nearest_restriction/_user_can_access pour ne jamais risquer de modifier leur
-    comportement déjà testé — sert uniquement à calculer une VISIBILITÉ DE CHEMIN
-    (voir _level_visible), jamais à muter une restriction. Pas de cache/
-    précalcul : recalculée à chaque requête, taille attendue d'une dataroom de POC."""
+    (_user_can_access, héritage et défaut par rôle inchangés ici). Récursion
+    explicite, séparée de _nearest_restriction/_user_can_access pour ne jamais
+    risquer de modifier leur comportement déjà testé — sert uniquement à calculer
+    une VISIBILITÉ DE CHEMIN (voir _level_visible), jamais à muter une
+    restriction. Pas de cache/précalcul : recalculée à chaque requête, taille
+    attendue d'une dataroom de POC."""
     for d in Document.objects.filter(dataroom=dataroom, folder=folder):
-        if _user_can_access(user, dataroom, folder=folder, document=d):
+        if _user_can_access(user, office, dataroom, folder=folder, document=d):
             return True
     for f in Folder.objects.filter(dataroom=dataroom, parent=folder):
-        if _level_visible(user, dataroom, folder=f):
+        if _level_visible(user, office, dataroom, folder=f):
             return True
     return False
 
-def _level_visible(user, dataroom, folder=None):
+def _level_visible(user, office, dataroom, folder=None):
     """Un Dataroom (folder=None) ou un Folder est visible si l'utilisateur y a un
-    accès direct (_user_can_access, héritage inchangé — restreint davantage un
-    contenu par ailleurs ouvert), OU si son sous-arbre contient à n'importe quelle
-    profondeur un élément directement accessible via une restriction plus précise
-    (visibilité de CHEMIN — permet de naviguer jusqu'à un document imbriqué même à
-    travers des niveaux par ailleurs fermés, y compris la dataroom elle-même).
+    accès direct (_user_can_access, héritage et défaut par rôle inchangés ici —
+    restreint davantage un contenu par ailleurs ouvert, ou fermé par défaut pour un
+    client), OU si son sous-arbre contient à n'importe quelle profondeur un élément
+    directement accessible via une restriction plus précise (visibilité de CHEMIN —
+    permet de naviguer jusqu'à un document imbriqué même à travers des niveaux par
+    ailleurs fermés, y compris la dataroom elle-même). Un client sans aucune
+    restriction explicite nulle part dans une dataroom ne voit donc plus rien de
+    cette dataroom (ni son nom ni son existence) — le défaut fermé de
+    _user_can_access se propage automatiquement ici, sans logique supplémentaire.
     Ne mute jamais aucune restriction (voir _subtree_has_accessible_content) :
     recalculée à chaque requête à partir des restrictions telles qu'explicitement
     configurées à chaque niveau — c'est pour ça que lister un niveau ne montre que
@@ -487,8 +508,8 @@ def _level_visible(user, dataroom, folder=None):
     (voir l'usage dans folders_view/documents_view/datarooms_view — uniquement les
     endpoints de LECTURE ; la création/l'upload restent gatés par _user_can_access
     seul, la visibilité de chemin n'étend jamais un droit d'écriture)."""
-    return _user_can_access(user, dataroom, folder=folder) or _subtree_has_accessible_content(
-        user, dataroom, folder=folder
+    return _user_can_access(user, office, dataroom, folder=folder) or _subtree_has_accessible_content(
+        user, office, dataroom, folder=folder
     )
 
 def _get_restriction_row(**target):
@@ -655,7 +676,7 @@ def documents_view(request, dataroom_id):
         # l'appelant ne peut pas voir — même 404 que "dossier introuvable" pour ne pas
         # confirmer l'existence d'un dossier restreint (même logique que le rang de
         # rôle sur office-users).
-        if not _user_can_access(request.user, dataroom, folder=folder):
+        if not _user_can_access(request.user, office, dataroom, folder=folder):
             return Response({"error": "dossier introuvable"}, status=404)
         document = Document.objects.create(dataroom=dataroom, folder=folder, name=upload.name, file=upload)
         return Response({"id": document.id, "name": document.name, "file": document.file.url}, status=201)
@@ -670,13 +691,13 @@ def documents_view(request, dataroom_id):
     # _level_visible (pas _user_can_access) : la lecture profite de la visibilité de
     # chemin, contrairement à l'upload ci-dessus qui reste gaté par l'accès direct
     # seul (voir _level_visible).
-    if not _level_visible(request.user, dataroom, folder=folder):
+    if not _level_visible(request.user, office, dataroom, folder=folder):
         return Response({"error": "dossier introuvable"}, status=404)
     documents = dataroom.documents.filter(folder=folder).order_by('-uploaded_at')
     return Response([
         {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at}
         for d in documents
-        if _user_can_access(request.user, dataroom, folder=folder, document=d)
+        if _user_can_access(request.user, office, dataroom, folder=folder, document=d)
     ])
 
 @api_view(['GET', 'POST'])
@@ -702,7 +723,7 @@ def folders_view(request, dataroom_id):
             return Response({"error": "dossier parent introuvable"}, status=400)
         # Contrôle d'accès : pas de création dans un niveau que l'appelant ne peut pas
         # voir — même raisonnement que documents_view (404, pas 403).
-        if not _user_can_access(request.user, dataroom, folder=parent):
+        if not _user_can_access(request.user, office, dataroom, folder=parent):
             return Response({"error": "dossier parent introuvable"}, status=404)
         folder = Folder.objects.create(dataroom=dataroom, parent=parent, name=name)
         return Response(
@@ -719,7 +740,7 @@ def folders_view(request, dataroom_id):
     # _level_visible (pas _user_can_access) : la lecture profite de la visibilité de
     # chemin, contrairement à la création ci-dessus qui reste gatée par l'accès
     # direct seul (voir _level_visible).
-    if not _level_visible(request.user, dataroom, folder=parent):
+    if not _level_visible(request.user, office, dataroom, folder=parent):
         return Response({"error": "dossier introuvable"}, status=404)
     folders = Folder.objects.filter(dataroom=dataroom, parent=parent).order_by('name')
     documents = dataroom.documents.filter(folder=parent).order_by('-uploaded_at')
@@ -730,12 +751,12 @@ def folders_view(request, dataroom_id):
             # _level_visible, pas _user_can_access : un sous-dossier qui ne mène nulle
             # part d'accessible reste masqué, mais un sous-dossier de transit vers un
             # élément accordé plus profond doit apparaître (visibilité de chemin).
-            if _level_visible(request.user, dataroom, folder=f)
+            if _level_visible(request.user, office, dataroom, folder=f)
         ],
         "documents": [
             {"id": d.id, "name": d.name, "file": d.file.url, "uploaded_at": d.uploaded_at}
             for d in documents
-            if _user_can_access(request.user, dataroom, folder=parent, document=d)
+            if _user_can_access(request.user, office, dataroom, folder=parent, document=d)
         ],
     })
 
@@ -769,7 +790,7 @@ def document_content_view(request, dataroom_id, document_id):
     # d'accès (voir _resolve_folder), on ne confirme pas l'existence d'une pièce que
     # l'utilisateur n'a pas le droit de voir.
     if document is None or not _user_can_access(
-        request.user, dataroom, folder=document.folder, document=document
+        request.user, office, dataroom, folder=document.folder, document=document
     ):
         return Response({"error": "document introuvable"}, status=404)
 

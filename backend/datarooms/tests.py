@@ -981,3 +981,144 @@ class PathVisibilityTests(unittest.TestCase):
         self.assertNotIn(self.dataroom.id, {d["id"] for d in res.json()})
         res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=host)
         self.assertEqual(res.status_code, 404)
+
+
+class RoleBasedDefaultAccessTests(unittest.TestCase):
+    """Teste le changement de comportement du 01/09/2026 (voir CLAUDE.md,
+    "État réel du code") : _user_can_access, quand AUCUNE restriction n'existe sur
+    toute la chaîne (le cas "accès ouvert à tout membre de l'office" jusqu'ici),
+    consulte désormais le rôle de l'appelant pour CET office précis — membre/admin/
+    superadmin gardent l'accès ouvert par défaut (inchangé), un client n'a PAS accès
+    par défaut. _nearest_restriction n'est pas touchée : dès qu'une restriction
+    existe quelque part sur la chaîne, seule l'appartenance à `user_ids` compte,
+    peu importe le rôle — ces tests-ci portent uniquement sur le cas "aucune
+    restriction nulle part".
+
+    Même patron que PathVisibilityTests ci-dessus (unittest.TestCase nu, tenant
+    sqlite dédié migré/nettoyé par test) et mêmes raisons documentées là-bas :
+    TestCase/TransactionTestCase ne supportent pas un alias enregistré
+    dynamiquement pour ce genre d'écriture réelle en base tenant.
+
+    Arborescence construite dans setUp, SANS AUCUNE restriction (le cas par défaut
+    à tester) :
+        D2
+        └── F1
+            └── doc_in_f1
+        └── doc_root (à la racine de D2, pas dans F1)
+    """
+
+    SUBDOMAIN = "roledefault"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Role Default Office")
+        self.addCleanup(self.office.delete)
+
+        self.client_user = User.objects.create_user(username="roledefault_client", password="pw123456")
+        self.addCleanup(self.client_user.delete)
+        OfficeMembership.objects.create(user=self.client_user, office=self.office, role="client")
+
+        self.membre_user = User.objects.create_user(username="roledefault_membre", password="pw123456")
+        self.addCleanup(self.membre_user.delete)
+        OfficeMembership.objects.create(user=self.membre_user, office=self.office, role="membre")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="D2")
+            self.f1 = Folder.objects.create(dataroom=self.dataroom, parent=None, name="F1")
+            self.doc_root = Document.objects.create(
+                dataroom=self.dataroom, folder=None, name="root.pdf", file="fake/root.pdf"
+            )
+            self.doc_in_f1 = Document.objects.create(
+                dataroom=self.dataroom, folder=self.f1, name="in_f1.pdf", file="fake/in_f1.pdf"
+            )
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def test_client_without_restriction_sees_nothing(self):
+        # Aucune restriction nulle part dans D2 — pour un client, le nouveau défaut
+        # est FERMÉ : ni la dataroom, ni F1, ni les documents ne doivent apparaître,
+        # à aucun niveau (visibilité ET accès direct).
+        self.client.force_login(self.client_user)
+        host = self._host()
+
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        self.assertNotIn(self.dataroom.id, {d["id"] for d in res.json()})
+
+        # _level_visible(dataroom) doit être False : 404, pas une liste vide — même
+        # logique de non-confirmation d'existence que le reste de l'API.
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 404)
+
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/documents/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 404)
+
+    def test_client_with_explicit_restriction_sees_that_level_and_path_to_it(self):
+        # Une restriction EXPLICITE nommant le client à un niveau précis doit lui
+        # donner accès à ce niveau, exactement comme n'importe quel autre rôle —
+        # _nearest_restriction n'est pas affectée par ce changement, seul le cas
+        # "aucune restriction" l'est.
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            AccessRestriction.objects.create(document=self.doc_in_f1, user_ids=[self.client_user.id])
+        finally:
+            reset_current_tenant(token)
+
+        self.client.force_login(self.client_user)
+        host = self._host()
+
+        # La dataroom redevient visible (visibilité de chemin, comme pour tout
+        # autre rôle) malgré l'absence d'accès direct au niveau racine.
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        self.assertIn(self.dataroom.id, {d["id"] for d in res.json()})
+
+        # À la racine : F1 apparaît (mène à l'accès accordé), doc_root N'apparaît
+        # PAS (pas de restriction l'incluant, et le défaut client est fermé).
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=host)
+        data = res.json()
+        self.assertEqual([f["id"] for f in data["folders"]], [self.f1.id])
+        self.assertEqual(data["documents"], [])
+
+        # Dans F1 : doc_in_f1 apparaît (accès direct via la restriction explicite).
+        res = self.client.get(
+            f"/api/datarooms/{self.dataroom.id}/folders/?parent={self.f1.id}", HTTP_HOST=host
+        )
+        data = res.json()
+        self.assertEqual([d["id"] for d in data["documents"]], [self.doc_in_f1.id])
+
+    def test_member_without_restriction_keeps_open_access(self):
+        # Régression de contrôle : le changement ne doit affecter QUE le rôle
+        # client — un membre (comme un admin/superadmin) garde l'accès ouvert par
+        # défaut quand aucune restriction n'existe nulle part, comportement
+        # historique inchangé.
+        self.client.force_login(self.membre_user)
+        host = self._host()
+
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        self.assertIn(self.dataroom.id, {d["id"] for d in res.json()})
+
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=host)
+        data = res.json()
+        self.assertEqual([f["id"] for f in data["folders"]], [self.f1.id])
+        self.assertEqual([d["id"] for d in data["documents"]], [self.doc_root.id])
+
+        res = self.client.get(
+            f"/api/datarooms/{self.dataroom.id}/folders/?parent={self.f1.id}", HTTP_HOST=host
+        )
+        data = res.json()
+        self.assertEqual([d["id"] for d in data["documents"]], [self.doc_in_f1.id])

@@ -237,7 +237,11 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   plus profond porte sa propre restriction — c'est la restriction la PLUS PROCHE qui
   s'applique (pas de fusion de plusieurs restrictions le long de la chaîne), voir
   `views._nearest_restriction`/`_user_can_access`. Absence de restriction sur toute la
-  chaîne = accès ouvert à tout membre de l'office (comportement par défaut, inchangé).
+  chaîne = accès ouvert par défaut, **mais depuis le 01/09/2026 uniquement pour les
+  rôles membre/admin/superadmin** — un `client` sans restriction explicite nulle
+  part n'a désormais accès à RIEN par défaut (voir entrée dédiée du 01/09/2026 dans
+  "État réel du code" pour le détail ; le comportement pour les autres rôles est
+  inchangé, et `_nearest_restriction` elle-même n'a pas bougé).
   Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
   `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
   « restreint à personne ».
@@ -997,6 +1001,56 @@ session si le code a bougé.
     30/08/2026 »).
   - Aucune régression détectée sur cette branche par rapport à ce que documentait
     ce fichier avant le 30/08/2026.
+- **✅ Fait le 01/09/2026 — défaut d'accès dépendant du rôle pour `_user_can_access`**
+  (`views.py`) : quand AUCUNE restriction n'existe sur toute la chaîne (le cas
+  "accès ouvert à tout membre de l'office" jusqu'ici), le résultat dépend
+  désormais du rôle de l'appelant **pour cet office précis** — membre/admin/
+  superadmin gardent l'accès ouvert par défaut (comportement historique,
+  inchangé) ; un `client` sans restriction explicite nulle part n'a plus accès à
+  rien par défaut, y compris la VISIBILITÉ (un client ne voit ni le nom ni
+  l'existence d'un dossier/document tant qu'aucune restriction ne l'y inclut
+  explicitement). `_nearest_restriction` n'a pas bougé : dès qu'une restriction
+  existe quelque part sur la chaîne, seule l'appartenance à `user_ids` compte,
+  peu importe le rôle — seul le cas "aucune restriction trouvée" change.
+  **Mécanisme** : `_user_can_access` gagne un paramètre `office` (elle ne
+  l'avait pas jusqu'ici, seul `dataroom` circulait) pour pouvoir résoudre
+  `user.memberships.filter(office=office).first()` et lire le rôle — un
+  utilisateur sans membership pour cet office (ne devrait jamais arriver, tous
+  les appelants vérifient déjà l'appartenance en amont) est traité par défaut
+  fermé, comme un client, plutôt qu'ouvert. `_subtree_has_accessible_content` et
+  `_level_visible` gagnent le même paramètre pour le faire descendre jusqu'à
+  `_user_can_access`, sans aucune autre modification de leur logique — les 8
+  points d'appel dans les vues (`datarooms_view`, `documents_view`,
+  `folders_view`, `document_content_view`) passent tous déjà `office` en
+  variable locale (`office = request.office`, résolu avant tout appel), donc
+  aucun changement de logique côté vues, seulement le paramètre supplémentaire.
+  **Propagation à la visibilité de chemin confirmée par les tests, pas
+  supposée** (demande explicite) : `_level_visible`/
+  `_subtree_has_accessible_content` s'appuyant déjà sur `_user_can_access`, le
+  nouveau défaut fermé pour un client s'y propage automatiquement — vérifié par
+  `test_client_without_restriction_sees_nothing` (aucune modification de ces
+  deux fonctions au-delà du paramètre `office` n'a été nécessaire).
+  **Tests** (`RoleBasedDefaultAccessTests`, `datarooms/tests.py`, même patron
+  `unittest.TestCase` nu + tenant sqlite dédié que `PathVisibilityTests`, voir
+  cette classe pour le détail des pièges déjà documentés) : un client sans
+  restriction ne voit rien — ni la dataroom dans la liste, ni `/folders/` ni
+  `/documents/` qui répondent `404` (pas une liste vide, même logique de
+  non-confirmation d'existence que le reste de l'API) ; un client avec une
+  restriction explicite l'incluant à un niveau précis (un document imbriqué)
+  voit ce niveau ET tout le chemin jusqu'à lui, exactement comme n'importe quel
+  autre rôle — la dataroom et le dossier intermédiaire redeviennent visibles par
+  visibilité de chemin, le reste du contenu à chaque niveau reste masqué ; un
+  membre sans restriction garde l'accès ouvert (régression de contrôle
+  explicitement demandée, pour confirmer que le changement ne s'applique QUE au
+  rôle client). Suite complète relancée : **67/67 tests verts** (64 existants +
+  3 nouveaux, aucune régression).
+  **⚠️ Incohérence introduite, pas corrigée par ce chantier** : le panneau
+  `organisms/AccessRestrictionModal.tsx` (frontend, ajouté le 30/08/2026 — voir
+  "État actuel du POC") affiche encore le texte « aucune case cochée = accès
+  OUVERT à toute l'étude » — vrai pour membre/admin/superadmin, plus vrai pour
+  un client depuis ce changement. Texte non corrigé ici (demande portait sur le
+  backend et les tests, pas sur l'UI) — à mettre à jour si ce chantier est
+  repris côté front.
 
 ## État actuel du POC
 
@@ -1060,12 +1114,13 @@ session si le code a bougé.
 - [x] Contrôle d'accès par utilisateur sur Dataroom/Folder/Document, avec héritage —
       **backend fait le 28/08/2026** : modèle `AccessRestriction` (base tenant,
       quatrième modèle métier après Dataroom/Folder/Document), accès ouvert par
-      défaut à tout l'office, restriction ponctuelle par admin/superadmin à un
-      niveau précis, héritée par le contenu imbriqué (la restriction la plus proche
-      dans la hiérarchie l'emporte, pas de fusion), visibilité de chemin
-      (`_subtree_has_accessible_content`/`_level_visible`) calculée à chaque requête,
-      lecture seulement (la création/l'upload restent gatés par l'accès direct
-      seul). **UI reconstruite le 30/08/2026** : modale
+      défaut à tout l'office (**nuancé le 01/09/2026 : fermé par défaut pour le
+      rôle `client`, voir "État réel du code"**), restriction ponctuelle par
+      admin/superadmin à un niveau précis, héritée par le contenu imbriqué (la
+      restriction la plus proche dans la hiérarchie l'emporte, pas de fusion),
+      visibilité de chemin (`_subtree_has_accessible_content`/`_level_visible`)
+      calculée à chaque requête, lecture seulement (la création/l'upload restent
+      gatés par l'accès direct seul). **UI reconstruite le 30/08/2026** : modale
       `organisms/AccessRestrictionModal.tsx`, ouverte depuis trois points de
       `DataroomDetailScreen` — bouton « Accès du dossier » (niveau dataroom),
       « Accès du sous-dossier » (dossier affiché), et une action cadenas sur chaque
