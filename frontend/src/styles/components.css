@@ -377,6 +377,17 @@ html,body,#root{height:100%;}
 .topbar-slot-start{align-self:stretch;flex:0 1 auto;overflow:hidden;}
 .topbar-slot-start .dash-tabs{flex-wrap:nowrap;}
 .topbar-slot-start .dash-tab{margin-right:10px;}
+/* Les onglets de Personnalisation (01/09/2026) : `.tabstrip` est dessiné pour
+   ouvrir une page — un filet bas sur toute sa largeur et 20px d'air sous lui.
+   Dans la barre, ce filet doublait la bordure de celle-ci et le retrait
+   décentrait les onglets ; seul le soulignement de l'onglet actif reste. Le
+   bandeau prend toute la hauteur de la barre pour que ce trait tombe sur son
+   bord bas, comme celui des onglets de l'accueil. */
+.topbar-slot-start>.tabstrip{
+  border-bottom:none;margin-bottom:0;flex-wrap:nowrap;align-self:stretch;align-items:stretch;
+}
+.topbar-slot-start>.tabstrip>.tab{margin-right:18px;white-space:nowrap;}
+.topbar-slot-start>.tabstrip>.tab:last-child{margin-right:0;}
 /* Le fil d'Ariane est le seul contenu du slot quand il y est : il prend la
    place disponible pour tronquer ses segments au plus tard (les libellés ont
    déjà `text-overflow:ellipsis`), au lieu d'être coupé net par l'`overflow` du

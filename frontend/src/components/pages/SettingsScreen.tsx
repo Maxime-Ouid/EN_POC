@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Screen } from '../atoms/Screen';
 import { SubscreenPanel } from '../atoms/SubscreenPanel';
 import { TabStrip } from '../molecules/TabStrip';
@@ -8,6 +9,7 @@ import { ModulesTab } from '../organisms/ModulesTab';
 import type { TabDef } from '../molecules/TabStrip';
 import type { IdentityTabProps } from '../organisms/IdentityTab';
 import type { ModulesTabProps } from '../organisms/ModulesTab';
+import { useTopbarSlots } from '../templates/topbarSlots';
 
 export type SettingsTabKey = 'sub3-identite' | 'sub3-apparence' | 'sub3-modules';
 
@@ -30,12 +32,26 @@ export interface SettingsScreenProps {
 // moteur de thème, qui s'applique à toute l'application, pas à cet écran.
 export function SettingsScreen({ identity, modules, defaultTab = 'sub3-identite' }: SettingsScreenProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(defaultTab);
+  const slots = useTopbarSlots();
+
+  /* La barre d'onglets remonte dans la topbar (01/09/2026), comme celle de
+     l'accueil : elle nomme la rubrique ouverte — c'est le repère qui a remplacé
+     le titre de page retiré le 28/08/2026 — et posée dans le contenu elle
+     glissait hors de vue au défilement des formulaires, longs sur cet écran. Le
+     début de barre est libre ici, et la page ouvre directement sur son panneau.
+
+     Portail plutôt que props : la topbar est montée par AppShell, très au-dessus
+     de cet écran, et l'onglet courant est un état qui n'appartient qu'à lui
+     (voir templates/topbarSlots.ts). */
+  const tabs = (
+    <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as SettingsTabKey)} />
+  );
 
   return (
     <Screen>
-      {/* Titre de page retiré le 28/08/2026 : le fil d'Ariane de la topbar
-          nomme l'écran. La barre d'onglets ouvre donc la page. */}
-      <TabStrip tabs={TABS} active={activeTab} onChange={k => setActiveTab(k as SettingsTabKey)} />
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : les
+          onglets restent alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? createPortal(tabs, slots.start) : tabs}
 
       <SubscreenPanel level={3} active={activeTab === 'sub3-identite'}>
         <IdentityTab {...identity} />

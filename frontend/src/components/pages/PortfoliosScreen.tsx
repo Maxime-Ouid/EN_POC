@@ -1,9 +1,11 @@
+import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Grid } from '../atoms/Grid';
 import { Pill } from '../atoms/Pill';
 import { AvatarStack } from '../molecules/AvatarStack';
 import { ButtonRow } from '../molecules/ButtonRow';
 import type { PillKind } from '../atoms/Pill';
+import { useTopbarSlots } from '../templates/topbarSlots';
 
 export interface Portfolio {
   id: string;
@@ -28,23 +30,44 @@ export interface PortfoliosScreenProps {
 
 // Écran "Portefeuilles" — index_16.html #screen-portfolios.
 export function PortfoliosScreen({ portfolios, onCreate, onFilter, onOpen }: PortfoliosScreenProps) {
+  const slots = useTopbarSlots();
+
+  /* Création et filtre remontent dans la topbar (01/09/2026), comme le décompte
+     et la création de la liste des dossiers : à eux deux ils tenaient une ligne
+     entière au-dessus de la grille, alors que le début de barre reste vide sur
+     cet écran. L'action primaire se lit donc au même endroit que sur les autres
+     écrans, et ne glisse plus hors de vue au défilement.
+
+     Portail plutôt que props : la topbar est montée par AppShell, très au-dessus
+     de cet écran, et `onCreate` / `onFilter` appartiennent à son appelant (voir
+     templates/topbarSlots.ts). */
+  const topbarCommands = (
+    <>
+      <Button variant="accent" size="sm" onClick={onCreate}>
+        <svg className="icon">
+          <use href="#i-plus" />
+        </svg>
+        Nouveau portefeuille
+      </Button>
+      <Button size="sm" onClick={onFilter}>
+        <svg className="icon">
+          <use href="#i-filter" />
+        </svg>
+        Filtrer
+      </Button>
+    </>
+  );
+
   return (
     <section className="screen is-active">
       {/* Titre retiré le 28/08/2026 — le fil d'Ariane dit « Portefeuilles ». */}
-      <ButtonRow style={{ marginBottom: 20 }}>
-        <Button variant="accent" onClick={onCreate}>
-          <svg className="icon">
-            <use href="#i-plus" />
-          </svg>
-          Nouveau portefeuille
-        </Button>
-        <Button onClick={onFilter}>
-          <svg className="icon">
-            <use href="#i-filter" />
-          </svg>
-          Filtrer
-        </Button>
-      </ButtonRow>
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : les
+          commandes restent alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? (
+        createPortal(topbarCommands, slots.start)
+      ) : (
+        <ButtonRow style={{ marginBottom: 20 }}>{topbarCommands}</ButtonRow>
+      )}
 
       <Grid columns={3}>
         {portfolios.map(p => (
