@@ -104,6 +104,10 @@ html,body,#root{height:100%;}
   position:fixed;
   top:0;left:0;
   z-index:99;
+  /* --nav-w change quand la personne replie le rail (theme/engine.ts). Une
+     custom property ne s'anime pas, mais la LARGEUR qui la consomme, si : la
+     colonne glisse au lieu de sauter de 236 à 62 px. */
+  transition:width .18s ease;
 }
 .brand{
   display:flex;align-items:center;gap:10px;padding:18px 16px 14px;
@@ -233,6 +237,9 @@ html,body,#root{height:100%;}
   flex:1;display:flex;flex-direction:column;min-width:0;
   background:none;
   padding-left:calc(var(--nav-w) + var(--nav-gutter));
+  /* Même durée et même courbe que .sidebar : le contenu et le rail bougent
+     ensemble, sinon on voit une bande vide se former puis se combler. */
+  transition:padding-left .18s ease, padding-right .18s ease;
 }
 /* Le dégradé de #app-main passe entièrement par --app-grad-base-from/to et
    --app-grad-1..4 (au lieu de couleurs codées en dur) depuis le 26/08/2026 :
@@ -1267,6 +1274,34 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
   [data-nav-size="rail"] .navbar-tab-label,
   [data-nav-size="rail"] .nav-item,
   [data-nav-size="rail"] .navbar-tab{transition:none;}
+}
+
+/* --- Repli du rail ---------------------------------------------------------
+   Le bouton bascule entre la taille choisie par l'office et « icônes seules ».
+   Il vit dans l'en-tête de la sidebar, à droite de la marque ; replié, il n'y a
+   plus de place à droite de rien — l'en-tête devient une colonne et le bouton
+   passe sous le logo, où il reste la seule sortie du mode réduit. */
+.nav-collapse{
+  margin-left:auto;flex:none;
+  width:26px;height:26px;
+  display:flex;align-items:center;justify-content:center;
+  border:1px solid transparent;border-radius:var(--radius-sm);
+  background:none;color:var(--nav-dim);
+}
+.nav-collapse:hover{background:var(--shell-bg-2);color:var(--shell-text);}
+/* Chevron vers la gauche quand la colonne est ouverte (« referme vers le
+   bord »), vers la droite quand elle est repliée (« rouvre vers le contenu »).
+   Le sens est déduit de aria-expanded, déjà porté par le bouton : pas de classe
+   d'état en double, qui pourrait un jour dire le contraire de l'attribut. */
+.nav-collapse .icon{width:14px;height:14px;transition:transform .18s ease;}
+.nav-collapse[aria-expanded="true"] .icon{transform:rotate(180deg);}
+[data-nav-size="rail"] .brand{flex-direction:column;gap:8px;}
+[data-nav-size="rail"] .nav-collapse{margin-left:0;}
+/* Le rail à droite se replie vers l'autre bord : les chevrons s'inversent. */
+[data-nav-placement="right"] .nav-collapse .icon{transform:rotate(180deg);}
+[data-nav-placement="right"] .nav-collapse[aria-expanded="true"] .icon{transform:none;}
+@media (prefers-reduced-motion:reduce){
+  .sidebar,.main,.nav-collapse .icon{transition:none;}
 }
 
 /* --- Sous-menus en mode « icônes seules » ---------------------------------

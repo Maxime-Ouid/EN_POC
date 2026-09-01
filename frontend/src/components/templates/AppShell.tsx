@@ -152,7 +152,7 @@ export function AppShell({
   // titre que les couleurs : elle vient du thème, pas des props. Le CSS pose
   // déjà les décalages via [data-nav-placement] ; ce qui suit ne décide que de
   // CE QU'ON MONTE — un rail ne devient pas une barre d'onglets par CSS.
-  const { state } = useTenantTheme();
+  const { state, navCollapsed, navCollapsible, toggleNavCollapsed } = useTenantTheme();
   const layout = state.layout;
   const horizontal = isHorizontalNav(layout.navPlacement);
   // `hideSectionLabels` reste un veto de l'écran (V1 n'a pas d'intitulés à
@@ -180,7 +180,18 @@ export function AppShell({
         />
       ) : (
         <Sidebar>
-          <SidebarBrand logoUrl={logoUrl} name="Espace Notarial" sub="Next" />
+          {/* Le repli est une préférence de la personne, gardée dans son
+              navigateur ; la taille de rail choisie dans Personnalisation reste
+              celle de l'office. `navCollapsible` retire le bouton quand il n'y
+              a rien à replier — voir theme/engine.ts. */}
+          <SidebarBrand
+            logoUrl={logoUrl}
+            name="Espace Notarial"
+            sub="Next"
+            collapsed={navCollapsed}
+            onToggleCollapse={navCollapsible ? toggleNavCollapsed : undefined}
+            navId="app-nav"
+          />
           <TenantSwitcher
             name={officeName}
             role={officeRole}
@@ -188,7 +199,7 @@ export function AppShell({
             currentSubdomain={officeSubdomain}
             onSelect={onSelectOffice}
           />
-          <Nav>
+          <Nav id="app-nav">
             {navSections.map(section => (
               <NavGroup key={section.label} label={showSectionLabels ? section.label : undefined}>
                 {section.items.map(item => {

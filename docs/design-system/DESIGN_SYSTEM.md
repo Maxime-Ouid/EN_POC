@@ -400,7 +400,13 @@ Centrée, `width:560px`, fond assombri `rgba(20,20,15,.42)`. Le `.tpl-option` (s
   <div class="sidebar-foot">…</div>
 </aside>
 ```
-`position:fixed`, largeur fixe 236px — le conteneur `.main` compense avec `padding-left:250px`. **Point d'attention en responsive** : ce couple fixed+padding n'a pas de repli mobile dans le prototype (pas de media query en dessous de 980px pour la sidebar) — à traiter si l'app doit être utilisable sur petit écran.
+`position:fixed`, largeur `--nav-w` — le conteneur `.main` compense avec `padding-left:calc(var(--nav-w) + var(--nav-gutter))`, la même variable des deux côtés.
+
+**Repli du rail** (01/09/2026). Un bouton dans l'en-tête (`.nav-collapse`) bascule la colonne en « icônes seules » : `--nav-w` passe à 62px, `.sidebar` et `.main` accompagnent le changement par une transition de 180 ms. Trois choses à savoir avant d'y toucher :
+
+- Le repli **ne modifie pas le thème de l'office**. La taille de rail choisie dans Personnalisation → Apparence reste ce qu'elle est ; le repli se superpose au moment d'écrire le CSS (`withCollapsedNav`, theme/engine.ts) et n'est jamais renvoyé au serveur. Il est gardé dans le navigateur de la personne (`ent-nav-collapsed`).
+- **Sous 1024px, le rail se replie de lui-même** — mais le bouton reste actif, et ce qui est fait là n'écrase pas la préférence du grand écran.
+- Le bouton **disparaît quand il n'y a rien à replier** : office déjà en « icônes seules », ou navigation en barre d'onglets (`isNavCollapsible`).
 
 ### 6.15 Écran de connexion — `.login-shell`
 
@@ -418,7 +424,7 @@ Points à corriger ou trancher avant d'aller plus loin, par ordre d'impact :
 2. ~~**Fonds « verre dépoli » codés en dur, indépendants du thème**~~ — **corrigé le 26/08/2026.** Au-delà de l'ombre, `.card`/`.stat-card` avaient un fond blanc à 50 % d'opacité et une bordure blanche fixes quel que soit le thème — quasi invisibles en dark mode. Des overrides dédiés (`rgba(23,19,48,.55)` / bordure `rgba(255,255,255,.08)`) ont été ajoutés ; la piste d'un token `--shadow-glass`/`--card-glass-bg` unique partagé avec `.topbar` reste à faire (les opacités clair diffèrent — 50 % pour les cartes, 85 % pour la topbar — donc une fusion naïve romprait l'un des deux looks).
 3. **Aucune échelle d'espacement tokenisée** (§4) — chaque padding/margin est une valeur ad hoc. Recommandation : introduire `--space-1` à `--space-8` sur une base de 4px (4/8/12/16/20/24/32/40) et migrer progressivement.
 4. **Petits écarts de rayon** (`9px`, `7px`, `4px` hors échelle `--radius-sm/md/lg`, §4).
-5. **Pas de repli mobile pour la sidebar fixe** (§6.14).
+5. ~~**Pas de repli mobile pour la sidebar fixe**~~ — **corrigé le 01/09/2026.** La sidebar se replie en rail d'icônes, à la demande ou d'elle-même sous 1024px (§6.14).
 6. **`.toggle` n'est pas un composant accessible** — pas de sémantique de case à cocher/interrupteur (§6.6).
 7. **Pas d'états `disabled`/`loading` sur les boutons et formulaires** — à définir avant intégration back-end réelle (le prototype est un aperçu statique, sans état de chargement).
 

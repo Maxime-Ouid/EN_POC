@@ -37,6 +37,18 @@ export interface TenantThemeContextValue {
    * montage, l'utilisateur est encore anonyme et l'API répond 403).
    */
   syncFromServer: () => Promise<void>;
+  /**
+   * Rail replié par la personne devant l'écran (icônes seules). Ce n'est PAS un
+   * réglage d'office : rien n'en part vers le serveur, et `state.layout.navSize`
+   * continue de porter le choix de l'office — voir engine.ts, `withCollapsedNav`.
+   */
+  navCollapsed: boolean;
+  /**
+   * Faux quand il n'y a rien à replier : office déjà en « icônes seules », ou
+   * navigation en barre d'onglets. Le bouton ne doit alors pas être affiché.
+   */
+  navCollapsible: boolean;
+  toggleNavCollapsed: () => void;
 }
 
 // Contexte isolé dans son propre fichier pour que ThemeProvider.tsx n'exporte
