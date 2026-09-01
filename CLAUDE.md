@@ -1044,13 +1044,14 @@ session si le code a bougé.
   explicitement demandée, pour confirmer que le changement ne s'applique QUE au
   rôle client). Suite complète relancée : **67/67 tests verts** (64 existants +
   3 nouveaux, aucune régression).
-  **⚠️ Incohérence introduite, pas corrigée par ce chantier** : le panneau
+  **✅ Incohérence corrigée le 01/09/2026** : le panneau
   `organisms/AccessRestrictionModal.tsx` (frontend, ajouté le 30/08/2026 — voir
-  "État actuel du POC") affiche encore le texte « aucune case cochée = accès
-  OUVERT à toute l'étude » — vrai pour membre/admin/superadmin, plus vrai pour
-  un client depuis ce changement. Texte non corrigé ici (demande portait sur le
-  backend et les tests, pas sur l'UI) — à mettre à jour si ce chantier est
-  repris côté front.
+  "État actuel du POC") affichait encore le texte « aucune case cochée = accès
+  OUVERT à toute l'étude », plus vrai pour un client depuis ce changement.
+  Corrigé : commentaire d'en-tête, pastille (« Ouvert (sauf clients) » plutôt
+  que « Ouvert à toute l'étude » quand aucune case n'est cochée) et texte
+  explicatif sous la pastille reformulés pour dire le nouveau défaut par rôle.
+  `check:ds`/`build`/`lint` relancés, tous clean.
 
 ## État actuel du POC
 

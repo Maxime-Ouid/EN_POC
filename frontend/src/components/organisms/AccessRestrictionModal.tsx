@@ -46,9 +46,12 @@ const INHERITANCE_NOTE: Record<AccessTargetKind, string> = {
  * Restriction d'accès d'un objet précis — GET/POST `.../access/`.
  *
  * Deux règles du backend que l'écran doit rendre lisibles plutôt que masquer :
- * l'accès est OUVERT à toute l'étude par défaut (aucune case cochée = aucune
- * restriction, pas « personne n'y a accès »), et la restriction la plus proche
- * dans l'arborescence l'emporte, sans fusion avec celles du dessus.
+ * l'accès par défaut (aucune case cochée = aucune restriction explicite) dépend
+ * du rôle depuis le 01/09/2026 — OUVERT à toute l'étude pour membre/admin/
+ * superadmin (comportement historique, inchangé), FERMÉ par défaut pour un
+ * client (voir CLAUDE.md, "État réel du code", et `views._user_can_access`) ;
+ * et la restriction la plus proche dans l'arborescence l'emporte, sans fusion
+ * avec celles du dessus.
  *
  * Composant pur : la liste des utilisateurs et l'état enregistré viennent des
  * props (useOfficeUsers / useAccessRestriction), branchés dans App.tsx.
@@ -91,14 +94,17 @@ export function AccessRestrictionModal({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Pill kind={restricted ? 'warning' : 'success'}>
-          {restricted ? `Restreint à ${selection.length} utilisateur(s)` : 'Ouvert à toute l’étude'}
+          {restricted ? `Restreint à ${selection.length} utilisateur(s)` : 'Ouvert (sauf clients)'}
         </Pill>
         <span className="tiny dim">{INHERITANCE_NOTE[kind]}</span>
       </div>
 
       <div className="tiny dim" style={{ marginTop: 10 }}>
-        Ne cocher personne lève la restriction : l'objet redevient visible par toute
-        l'étude. Cocher au moins un utilisateur la crée, et le contenu imbriqué en
+        Ne cocher personne lève la restriction : l'objet redevient visible par les
+        membres, administrateurs et superadmins de l'étude — mais reste FERMÉ par
+        défaut aux clients, qui n'y ont accès que si une case les concernant est
+        cochée ici (ou plus haut dans l'arborescence). Cocher au moins un
+        utilisateur crée une restriction explicite, et le contenu imbriqué en
         hérite tant qu'il ne porte pas la sienne.
       </div>
 
