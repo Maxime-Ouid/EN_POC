@@ -45,8 +45,8 @@ export function SidebarBrand({
       </div>
       {/* Le bouton reste dans l'en-tête une fois le rail replié : c'est le seul
           moyen de rouvrir la colonne, il ne peut pas disparaître avec les
-          libellés. Le CSS le recentre sous la marque — voir components.css,
-          « Repli du rail ». */}
+          libellés. Le CSS le garde sur la ligne de la marque et le sort dans la
+          gouttière, à droite du rail — voir components.css, « Repli du rail ». */}
       {onToggleCollapse && (
         <button
           type="button"

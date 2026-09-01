@@ -1306,9 +1306,11 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 
 /* --- Repli du rail ---------------------------------------------------------
    Le bouton bascule entre la taille choisie par l'office et « icônes seules ».
-   Il vit dans l'en-tête de la sidebar, à droite de la marque ; replié, il n'y a
-   plus de place à droite de rien — l'en-tête devient une colonne et le bouton
-   passe sous le logo, où il reste la seule sortie du mode réduit. */
+   Il vit dans l'en-tête de la sidebar, à droite de la marque, et RESTE sur cette
+   ligne une fois le rail replié : il sort simplement de la colonne pour se poser
+   dans la gouttière, à 8px du bord. Il a d'abord été placé sous le logo en mode
+   réduit — l'en-tête passait en colonne, ce qui décalait la marque vers le haut
+   et faisait sauter tout l'en-tête au moment du repli. */
 .nav-collapse{
   margin-left:auto;flex:none;
   width:26px;height:26px;
@@ -1323,9 +1325,28 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
    d'état en double, qui pourrait un jour dire le contraire de l'attribut. */
 .nav-collapse .icon{width:14px;height:14px;transition:transform .18s ease;}
 .nav-collapse[aria-expanded="true"] .icon{transform:rotate(180deg);}
-[data-nav-size="rail"] .brand{flex-direction:column;gap:8px;}
-[data-nav-size="rail"] .nav-collapse{margin-left:0;}
-/* Le rail à droite se replie vers l'autre bord : les chevrons s'inversent. */
+/* Replié, il n'y a plus 26px à donner à droite du logo dans 62px de rail : le
+   bouton passe en absolu et sort du côté du contenu. Il tient dans la gouttière
+   sans rien recouvrir — var(--nav-gutter) + les 30px de retrait de la topbar
+   font 44px de libre, le bouton en occupe 26 à partir du 8e. `top` le cale sur
+   le centre du logo en mode rail (16px de retrait + 38/2 - 26/2), à 1px près le
+   même centre qu'en mode déployé : le bouton glisse, il ne monte pas.
+   L'ancrage est .sidebar (position:fixed), donc la largeur qui anime le rail
+   emmène le bouton avec elle. */
+[data-nav-size="rail"] .nav-collapse{
+  position:absolute;top:22px;left:calc(100% + 8px);
+  margin-left:0;
+  /* Hors du rail, le bouton n'a plus le fond foncé de la sidebar derrière lui :
+     il lui faut sa propre surface pour rester lisible sur le dégradé de l'app. */
+  background:var(--surface);border-color:var(--border);color:var(--ink-700);
+  box-shadow:var(--shadow-sm);
+}
+[data-nav-size="rail"] .nav-collapse:hover{background:var(--surface-alt);color:var(--ink-900);}
+/* Le rail à droite se replie vers l'autre bord : le bouton sort à gauche, et les
+   chevrons s'inversent. */
+[data-nav-placement="right"][data-nav-size="rail"] .nav-collapse{
+  left:auto;right:calc(100% + 8px);
+}
 [data-nav-placement="right"] .nav-collapse .icon{transform:rotate(180deg);}
 [data-nav-placement="right"] .nav-collapse[aria-expanded="true"] .icon{transform:none;}
 @media (prefers-reduced-motion:reduce){
