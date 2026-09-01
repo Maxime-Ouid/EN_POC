@@ -368,11 +368,28 @@ html,body,#root{height:100%;}
    écrans qui n'y projettent rien — c'est-à-dire presque tous. */
 .topbar-slot{display:flex;align-items:center;gap:8px;min-width:0;}
 .topbar-slot:empty{display:none;}
-/* Les onglets d'écrans portent leur soulignement actif : ils doivent occuper
-   toute la hauteur de la barre pour que le trait tombe au bon endroit. */
+/* Deux occupants selon l'écran : les onglets de l'accueil, et le fil d'Ariane
+   du dossier (01/09/2026). Les onglets portent leur soulignement actif : ils
+   doivent occuper toute la hauteur de la barre pour que le trait tombe au bon
+   endroit — d'où `align-self:stretch`, le contenu restant centré par
+   `align-items` du conteneur. `overflow:hidden` + `flex:0 1 auto` : le début de
+   barre se resserre avant la recherche plutôt que de la pousser dehors. */
 .topbar-slot-start{align-self:stretch;flex:0 1 auto;overflow:hidden;}
 .topbar-slot-start .dash-tabs{flex-wrap:nowrap;}
 .topbar-slot-start .dash-tab{margin-right:10px;}
+/* Le fil d'Ariane est le seul contenu du slot quand il y est : il prend la
+   place disponible pour tronquer ses segments au plus tard (les libellés ont
+   déjà `text-overflow:ellipsis`), au lieu d'être coupé net par l'`overflow` du
+   conteneur. */
+.topbar-slot-start>.breadcrumb{flex:0 1 auto;min-width:0;}
+/* Le décompte de la liste des dossiers (01/09/2026) : l'`.eyebrow` porte un
+   retrait bas fait pour surmonter un titre, qui le décentrait d'autant dans une
+   barre alignée au centre. Il ne se tronque pas non plus — « 5 DOSSIERS » est
+   le repère d'écran, coupé il ne dit plus rien. */
+.topbar-slot-start>.eyebrow{margin-bottom:0;white-space:nowrap;flex:none;}
+/* Le bouton de création suit le décompte : un peu d'air entre le repère et
+   l'action, et jamais de compression du libellé. */
+.topbar-slot-start>.eyebrow+.btn{margin-left:4px;flex:none;}
 /* La barre a déjà 12px entre ses éléments de droite ; les boutons de l'écran
    se serrent un peu plus entre eux pour rester lus comme un groupe. */
 .topbar-slot-end{gap:6px;}
@@ -391,7 +408,18 @@ html,body,#root{height:100%;}
 }
 .proto-pill svg{width:11px;height:11px;}
 
-.content{flex:1;overflow-y:auto;padding:26px 30px 60px;}
+/* La gouttière de défilement est prise SUR le retrait de droite, jamais en plus :
+   sans cela le bord droit des cartes tombait --sbw plus à gauche que celui de la
+   topbar, qui vit hors du conteneur défilant et ignore donc la barre (décalage
+   corrigé le 01/09/2026). Le calcul : la topbar se centre dans .main, les cartes
+   dans la boîte de contenu de .content — soit .main moins la gouttière et les
+   deux retraits. Les deux centres coïncident exactement quand le retrait de
+   droite vaut 30px - var(--sbw) : au-dessus de 1560px de contenu, où les deux
+   plafonnent à 1500px, comme en dessous, où les cartes suivent la largeur.
+   `scrollbar-gutter:stable` rend la gouttière permanente : sans elle, un écran
+   trop court pour défiler la verrait disparaître et le calage repartirait de
+   --sbw dans l'autre sens. */
+.content{flex:1;overflow-y:auto;scrollbar-gutter:stable;padding:26px calc(30px - var(--sbw)) 60px 30px;}
 .content-inner{max-width:1500px;margin:0 auto;}
 .screen{display:none;}
 .screen.is-active{display:block;}

@@ -88,6 +88,11 @@
      dans Personnalisation → Apparence, sans entrée supplémentaire à éditer.
      La variante "on-shell" sert aux zones posées sur le fond foncé de la
      sidebar, où un pouce sombre serait invisible. */
+  /* Largeur de la gouttière de défilement, égale au ::-webkit-scrollbar{width}
+     de components.css. Elle sert au calage horizontal des cartes sur la topbar :
+     sans valeur nommée, la correction ressemblerait à un nombre magique. Firefox
+     (scrollbar-width:thin) réserve ~11px et non 10 — un pixel d'écart, invisible. */
+  --sbw:10px;
   --scrollbar-thumb:color-mix(in srgb, var(--ink-400) 38%, transparent);
   --scrollbar-thumb-hover:color-mix(in srgb, var(--ink-400) 68%, transparent);
   --scrollbar-thumb-on-shell:color-mix(in srgb, var(--shell-text) 26%, transparent);

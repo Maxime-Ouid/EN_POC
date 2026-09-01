@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Pill } from '../atoms/Pill';
 import { RowMenu } from '../atoms/RowMenu';
@@ -16,6 +17,7 @@ import { DocumentSlideover } from '../organisms/DocumentSlideover';
 import { Explorer } from '../organisms/Explorer';
 import { QACard } from '../organisms/QACard';
 import { TagPicker } from '../organisms/TagPicker';
+import { useTopbarSlots } from '../templates/topbarSlots';
 import type { PillKind } from '../atoms/Pill';
 import type { TabDef } from '../molecules/TabStrip';
 import type { DocumentActivityEntry, DocumentCustomField } from '../organisms/DocumentSlideover';
@@ -163,6 +165,7 @@ export function DataroomDetailScreen({
   onDocumentTagsChange,
   onCreateTag,
 }: DataroomDetailScreenProps) {
+  const slots = useTopbarSlots();
   const [activeTab, setActiveTab] = useState('sub-docs');
   const firstFolderId = tree[0]?.children?.[0]?.id ?? tree[0]?.id;
   const [activeFolderId, setActiveFolderId] = useState<string | undefined>(focusFolderId ?? firstFolderId);
@@ -221,18 +224,29 @@ export function DataroomDetailScreen({
     [folderDocs, docTagFilter],
   );
 
+  /* Le repère d'écran remonte dans la topbar (01/09/2026) : c'est le seul
+     endroit qui dit où l'on se trouve depuis le retrait des titres de page, et
+     le laisser dans le contenu le faisait glisser hors de vue au défilement.
+     Le début de barre est libre sur cet écran — seul l'accueil y projette ses
+     onglets. */
+  const crumb = (
+    <Breadcrumb
+      items={[
+        { label: 'Dossiers', onClick: onBackToList },
+        ...(portfolioName ? [{ label: portfolioName }] : []),
+      ]}
+      current={dataroomName}
+    />
+  );
+
   return (
     <section className="screen is-active">
-      <Breadcrumb
-        items={[
-          { label: 'Dossiers', onClick: onBackToList },
-          ...(portfolioName ? [{ label: portfolioName }] : []),
-        ]}
-        current={dataroomName}
-      />
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : le fil
+          reste alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? createPortal(crumb, slots.start) : crumb}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        {/* Le nom du dossier est déjà le dernier segment du fil d'Ariane
-            juste au-dessus : le titre le répétait mot pour mot. */}
+        {/* Le nom du dossier est déjà le dernier segment du fil d'Ariane, en
+            topbar depuis le 01/09/2026 : le titre le répétait mot pour mot. */}
         <div>
           <ButtonRow>
             <TagPicker

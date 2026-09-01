@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Pill } from '../atoms/Pill';
 import { RowMenu } from '../atoms/RowMenu';
@@ -10,6 +11,7 @@ import { TableCard } from '../organisms/TableCard';
 import { TagPicker } from '../organisms/TagPicker';
 import type { PillKind } from '../atoms/Pill';
 import type { TagColor } from '../atoms/Tag';
+import { useTopbarSlots } from '../templates/topbarSlots';
 import type { TagRef } from '../organisms/TagPicker';
 
 export interface DataroomRow {
@@ -67,21 +69,41 @@ export function DataroomsListScreen({
   onRowTagsChange,
   onCreateTag,
 }: DataroomsListScreenProps) {
+  const slots = useTopbarSlots();
+
+  /* Décompte et création remontent dans la topbar, au début de barre
+     (01/09/2026) : ils tenaient à eux deux une ligne entière au-dessus de la
+     liste, alors que la barre garde sa gauche vide sur cet écran. Le décompte
+     nomme l'écran — c'est le repère qui remplace le titre retiré le 28/08/2026 —
+     et l'action primaire se lit juste après lui, au même endroit que sur les
+     autres écrans, plutôt qu'à l'opposé de la ligne.
+
+     Portail plutôt que props : la topbar est montée par AppShell, très au-dessus
+     de cet écran, et `onCreate` appartient à l'appelant de l'écran (voir
+     templates/topbarSlots.ts). */
+  const topbarCommands = (
+    <>
+      <div className="eyebrow">{totalCount} dossiers</div>
+      <Button variant="accent" size="sm" onClick={onCreate}>
+        <svg className="icon">
+          <use href="#i-plus" />
+        </svg>
+        Nouveau dossier
+      </Button>
+    </>
+  );
+
   return (
     <section className="screen is-active">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        {/* Le titre est parti avec les autres le 28/08/2026 (fil d'Ariane) ; le
-            décompte, lui, est une donnée et reste. */}
-        <div className="eyebrow">{totalCount} dossiers</div>
-        <Button variant="accent" onClick={onCreate}>
-          <svg className="icon">
-            <use href="#i-plus" />
-          </svg>
-          Nouveau dossier
-        </Button>
-      </div>
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : les
+          commandes restent alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? (
+        createPortal(topbarCommands, slots.start)
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{topbarCommands}</div>
+      )}
 
-      <ButtonRow style={{ margin: '18px 0' }}>
+      <ButtonRow style={{ margin: '0 0 18px' }}>
         <TopbarSearch
           placeholder="Rechercher…"
           onChange={onSearch}
