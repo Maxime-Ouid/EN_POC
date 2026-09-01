@@ -58,6 +58,32 @@ class OfficeMembership(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="memberships")
     office = models.ForeignKey(Office, on_delete=models.CASCADE, related_name="memberships")
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="membre")
+    dashboard = models.JSONField(null=True, blank=True)
+    # Disposition personnalisée de l'écran d'accueil pour CE membre dans CET office.
+    # Forme attendue — une liste d'ONGLETS, chacun étant un écran complet :
+    #   {"template": "notaire",
+    #    "pages": [{"id": "notaire-1", "name": "Vue d'ensemble",
+    #               "widgets": [{"id": "dossiers-actifs", "x": 0, "y": 0, "w": 3, "h": 2}, ...]}]}
+    #
+    # Les dispositions écrites avant les onglets ont la forme {"template", "widgets"}
+    # et sont converties en un onglet unique à l'écriture suivante — voir
+    # validators.clean_dashboard_payload. Rien à migrer : la lecture les tolère.
+    #
+    # Porté par le membership plutôt que par un modèle dédié parce que la clé
+    # métier est exactement (user, office) — celle que `unique_together` garantit
+    # déjà. Un DashboardLayout séparé aurait dupliqué cette contrainte et exigé
+    # d'être ajouté à SHARED_MODELS du routeur ; ici il n'y a rien à router de
+    # plus, le membership est déjà un modèle partagé (base "default").
+    #
+    # Le catalogue des widgets et celui des templates vivent côté front
+    # (frontend/src/dashboard/registry.tsx et templates.ts), exactement comme le
+    # schéma de tokens pour Office.theme : ajouter un widget ne doit imposer ni
+    # migration ni déploiement backend. Le serveur stocke et BORNE la forme
+    # (validators.clean_dashboard_payload), le front ignore à la lecture les
+    # widgets qu'il ne connaît plus.
+    #
+    # null = ce membre n'a jamais rien réorganisé — l'API répond 204 et le front
+    # applique le template déduit du rôle.
 
     class Meta:
         unique_together = ("user", "office")
@@ -81,6 +107,41 @@ class HyperadminAccess(models.Model):
     def __str__(self):
         return f"Hyperadmin: {self.user}"
 
+class Tag(models.Model):
+    """Cinquième modèle métier tenant (fait le 01/09/2026) — même patron que
+    Dataroom/Folder/Document/AccessRestriction : vit dans la base de l'office, absent de
+    SHARED_MODELS par conception (voir tenancy/router.py). C'est donc le CATALOGUE DE
+    TAGS DE L'OFFICE : deux offices peuvent avoir un tag « Vente » sans aucun rapport
+    l'un avec l'autre, et `slug` n'a besoin d'être unique que dans la base tenant — pas
+    de colonne `office_id` à porter, l'isolation est physique.
+
+    `slug` est dérivé du nom à la création et sert de clé de déduplication : re-créer
+    « Vente » alors que « vente » existe déjà renvoie le tag existant plutôt qu'un
+    doublon (voir views._get_or_create_tag) — c'est ce qui rend la création à la volée
+    depuis un dossier sûre sans imposer un catalogue verrouillé.
+
+    `color` est une CLÉ SÉMANTIQUE (« brass », « info », « success »…), pas un
+    hexadécimal : la couleur réellement affichée est celle du thème de l'office, résolue
+    côté front via les tokens CSS (voir frontend/src/components/atoms/Tag.tsx). Un office
+    qui personnalise sa palette voit ses tags suivre, ce qu'un `#7c3aed` figé en base
+    empêcherait. L'ensemble fermé des clés vit dans validators.TAG_COLORS.
+
+    Les M2M vers Dataroom et Document sont déclarés côté Dataroom/Document (pas ici) et
+    leurs tables pivot implicites sont, comme leurs deux extrémités, des tables tenant —
+    rien à ajouter à SHARED_MODELS, contrairement à office_enabled_modules qui relie deux
+    modèles partagés.
+    """
+    name = models.CharField(max_length=60)
+    slug = models.SlugField(max_length=80, unique=True)
+    color = models.CharField(max_length=20, default="brass")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
 class Dataroom(models.Model):
     """Modèle métier tenant : vit dans la base de l'office (tenant_<subdomain>), pas
     dans la base default. Volontairement pas de ForeignKey vers Office — l'office est
@@ -91,6 +152,7 @@ class Dataroom(models.Model):
     """
     name = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
+    tags = models.ManyToManyField(Tag, blank=True, related_name="datarooms")
 
     def __str__(self):
         return self.name
@@ -121,6 +183,7 @@ class Document(models.Model):
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to=tenant_document_path)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    tags = models.ManyToManyField(Tag, blank=True, related_name="documents")
 
     def __str__(self):
         return self.name

@@ -4,11 +4,28 @@ export interface SidebarBrandProps {
   logoUrl?: string;
   name: string;
   sub: string;
+  /** Rail replié : pilote le sens du chevron et l'intitulé du bouton. */
+  collapsed?: boolean;
+  /**
+   * Absent = pas de bouton. C'est le cas quand il n'y a rien à replier : office
+   * déjà en « icônes seules », ou navigation en barre d'onglets.
+   */
+  onToggleCollapse?: () => void;
+  /** Identifiant de la zone de navigation, pour `aria-controls`. */
+  navId?: string;
 }
 
 // En-tête de la sidebar (logo + nom d'office/produit). Sans logo d'office
 // fourni, on affiche la marque Notantis — c'est le défaut de la marque grise.
-export function SidebarBrand({ logoUrl = notantisLogo, name, sub }: SidebarBrandProps) {
+export function SidebarBrand({
+  logoUrl = notantisLogo,
+  name,
+  sub,
+  collapsed,
+  onToggleCollapse,
+  navId,
+}: SidebarBrandProps) {
+  const toggleLabel = collapsed ? 'Déployer la navigation' : 'Réduire la navigation';
   return (
     <div className="brand">
       <div className="mark">
@@ -26,6 +43,25 @@ export function SidebarBrand({ logoUrl = notantisLogo, name, sub }: SidebarBrand
         <div className="brand-name">{name}</div>
         <div className="brand-sub">{sub}</div>
       </div>
+      {/* Le bouton reste dans l'en-tête une fois le rail replié : c'est le seul
+          moyen de rouvrir la colonne, il ne peut pas disparaître avec les
+          libellés. Le CSS le garde sur la ligne de la marque et le sort dans la
+          gouttière, à droite du rail — voir components.css, « Repli du rail ». */}
+      {onToggleCollapse && (
+        <button
+          type="button"
+          className="nav-collapse"
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+          aria-controls={navId}
+          aria-label={toggleLabel}
+          title={toggleLabel}
+        >
+          <svg className="icon" aria-hidden="true">
+            <use href="#i-chevr" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

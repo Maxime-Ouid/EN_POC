@@ -84,8 +84,10 @@ Endpoints consommés (`backend/datarooms/urls.py`) :
 
 - `POST /api/login/`, `GET /api/whoami/`, `GET /api/my-offices/`
 - `GET /api/tenant-config/` — nom de l'office, logo, modules activés
-- `GET|POST /api/datarooms/`
+- `GET|POST /api/datarooms/` — accepte `?tags=1,2` (filtre en OU) et renvoie les tags de chaque dossier
 - `GET|POST /api/datarooms/<id>/documents/`
+- `GET|POST /api/tags/`, `PATCH|DELETE /api/tags/<id>/` — catalogue de tags de l'office
+- `PUT /api/datarooms/<id>/tags/`, `PUT /api/datarooms/<id>/documents/<id>/tags/`
 - `POST /api/sso/issue/` — bascule d'office
 
 Non modélisé côté serveur, donc servi depuis `src/data/demo.tsx` : portefeuilles,

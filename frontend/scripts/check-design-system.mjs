@@ -169,7 +169,11 @@ function checkComponentClasses(file, lines) {
   lines.forEach((text, i) => {
     for (const [cls, component] of Object.entries(COMPONENT_CLASSES)) {
       if (COMPONENT_FILES[cls]?.includes(basename)) continue;
-      const inClassName = new RegExp(`className=(?:"|'|\`)[^"'\`]*\\b${cls}\\b`);
+      // `(?![\\w-])` et pas un simple `\\b` : `.tag-menu` ou `.btn-row` ne sont PAS
+      // des recopies de `.tag`/`.btn`, ce sont des classes distinctes qui
+      // commencent par le même mot. Un `\\b` s'arrête au tiret et les signalait
+      // toutes — un bruit qui pousse à ajouter des exemptions plutôt qu'à lire.
+      const inClassName = new RegExp(`className=(?:"|'|\`)[^"'\`]*\\b${cls}(?![\\w-])`);
       if (inClassName.test(text)) {
         report(
           file,

@@ -11,6 +11,7 @@
 
 import { composeColor, hexToRgb, parseColor } from './color';
 import {
+  APP_BG,
   LAYOUT_DEFAULTS,
   NAV_ACTIVE,
   NAV_DENSITY,
@@ -21,6 +22,7 @@ import {
   TYPOGRAPHY,
   type LayoutState,
   type NavActiveKey,
+  type AppBgKey,
   type NavDensityKey,
   type NavPlacement,
   type NavSizeKey,
@@ -34,6 +36,8 @@ export interface ThemeState {
   colors: Record<ThemeMode, Record<string, string>>;
   typography: TypographyKey;
   shape: ShapeKey;
+  /** Fond de l'espace connecté (voir APP_BG dans schema.ts). */
+  appBg: AppBgKey;
   /** Disposition et style de la navigation (voir LayoutState dans schema.ts). */
   layout: LayoutState;
 }
@@ -86,7 +90,13 @@ export function defaultThemeState(): ThemeState {
     colors.light[t.key] = t.light;
     colors.dark[t.key] = t.dark;
   }
-  return { colors, typography: 'classique', shape: 'equilibre', layout: { ...LAYOUT_DEFAULTS } };
+  return {
+    colors,
+    typography: 'classique',
+    shape: 'equilibre',
+    appBg: 'degrade',
+    layout: { ...LAYOUT_DEFAULTS },
+  };
 }
 
 export const THEME_DEFAULTS = defaultThemeState();
@@ -182,6 +192,9 @@ export function applyTheme(state: ThemeState): void {
   }
   tag.textContent = buildThemeCss(state);
   applyLayoutAttributes(state.layout);
+  // Le fond ne peut pas être une variable : il change la nature de
+  // l'image de fond (halos, filet, grain), pas seulement sa couleur.
+  document.documentElement.setAttribute('data-appbg', state.appBg);
 }
 
 /** Complète/valide un état venant du stockage ou de l'API — jamais confiance brute. */
@@ -205,6 +218,11 @@ export function normalizeThemeState(raw: unknown): ThemeState {
   }
   if (candidate.shape && candidate.shape in SHAPE) {
     state.shape = candidate.shape;
+  }
+  // Absent est le cas NORMAL pour tout thème enregistré avant l'ajout des
+  // fonds : il doit continuer à afficher le dégradé, pas un fond vide.
+  if (candidate.appBg && candidate.appBg in APP_BG) {
+    state.appBg = candidate.appBg;
   }
   state.layout = normalizeLayoutState(candidate.layout);
   return state;
@@ -290,6 +308,69 @@ export function withLayout(state: ThemeState, patch: Partial<LayoutState>): Them
   return { ...state, layout: { ...state.layout, ...patch } };
 }
 
+/* ---------------------------------------------------------------------------
+   Repli du rail par l'utilisateur.
+
+   À ne pas confondre avec le réglage « Taille » de Personnalisation →
+   Apparence : celui-là est une décision de l'OFFICE, enregistrée pour tout le
+   monde ; le repli est une décision de la PERSONNE devant l'écran, gardée dans
+   son navigateur et jamais renvoyée au serveur. C'est pourquoi il ne touche pas
+   à `state.layout` : il se superpose au moment d'écrire le CSS
+   (`withCollapsedNav`), et l'écran Apparence continue d'afficher le choix de
+   l'office, pas l'état du repli.
+
+   La clé de stockage n'est PAS préfixée par l'office (contrairement au thème) :
+   « je préfère travailler avec le rail replié » est une habitude de la
+   personne, pas un réglage à réapprendre à chaque office visité.
+   --------------------------------------------------------------------------- */
+
+/** En dessous de cette largeur, le rail se replie de lui-même au chargement. */
+export const NAV_NARROW_QUERY = '(max-width: 1024px)';
+const NAV_COLLAPSE_KEY = 'ent-nav-collapsed';
+
+export function isNarrowViewport(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia(NAV_NARROW_QUERY).matches;
+}
+
+/** Préférence de repli de CE navigateur. Rail déployé tant que rien n'est écrit. */
+export function loadNavCollapsePreference(): boolean {
+  try {
+    return localStorage.getItem(NAV_COLLAPSE_KEY) === '1';
+  } catch {
+    /* stockage indisponible (navigation privée, quota) */
+    return false;
+  }
+}
+
+export function persistNavCollapsePreference(collapsed: boolean): void {
+  try {
+    localStorage.setItem(NAV_COLLAPSE_KEY, collapsed ? '1' : '0');
+  } catch {
+    /* stockage indisponible : le repli reste valable pour la session en cours */
+  }
+}
+
+/**
+ * Applique le repli PAR-DESSUS la taille choisie par l'office, sans l'écraser :
+ * l'état rendu passe en « icônes seules », l'état enregistré ne bouge pas.
+ *
+ * Deux cas où il n'y a rien à replier, et où l'état revient tel quel :
+ * l'office affiche déjà les icônes seules, ou sa navigation est une barre
+ * d'onglets en haut/en bas — il n'y a alors aucune colonne à rétracter.
+ */
+export function withCollapsedNav(state: ThemeState, collapsed: boolean): ThemeState {
+  if (!collapsed) return state;
+  if (state.layout.navSize === 'rail') return state;
+  if (NAV_PLACEMENT[state.layout.navPlacement]?.horizontal) return state;
+  return withLayout(state, { navSize: 'rail' });
+}
+
+/** Vrai quand il y a bien un rail à replier — pilote l'affichage du bouton. */
+export function isNavCollapsible(layout: LayoutState): boolean {
+  return layout.navSize !== 'rail' && !NAV_PLACEMENT[layout.navPlacement]?.horizontal;
+}
+
 /**
  * À appeler avant le premier rendu React (main.tsx) pour éviter un flash des
  * couleurs Notantis par défaut quand un thème personnalisé est enregistré —
@@ -297,6 +378,10 @@ export function withLayout(state: ThemeState, patch: Partial<LayoutState>): Them
  */
 export function applyThemeEarly(): ThemeState {
   const state = loadThemeState();
-  applyTheme(state);
+  // Le repli est posé dès maintenant, pour la même raison que les couleurs :
+  // sans lui le rail s'afficherait large puis se rétracterait sous les yeux.
+  // La valeur renvoyée reste celle de l'OFFICE — le repli est recalculé par
+  // useNavCollapse au montage, il n'a rien à faire dans l'état du thème.
+  applyTheme(withCollapsedNav(state, isNarrowViewport() || loadNavCollapsePreference()));
   return state;
 }

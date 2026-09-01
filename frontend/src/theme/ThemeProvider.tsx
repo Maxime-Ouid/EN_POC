@@ -9,14 +9,17 @@ import {
   applyTheme,
   clearPersistedThemeState,
   defaultThemeState,
+  isNavCollapsible,
   loadThemeState,
   persistThemeState,
+  withCollapsedNav,
   withColor,
   withLayout,
   type ThemeState,
   type ThemeTransport,
 } from './engine';
-import type { LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
+import { useNavCollapse } from './useNavCollapse';
+import type { AppBgKey, LayoutState, ShapeKey, ThemeMode, TypographyKey } from './schema';
 import { TenantThemeContext, type TenantThemeContextValue } from './context';
 
 const SAVE_FLASH_MS = 1600;
@@ -60,11 +63,24 @@ export function ThemeProvider({
   const [justSaved, setJustSaved] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Une seule source de vérité pour le CSS : l'état. Tout changement d'état
-  // réécrit le <style>, y compris pendant un glissement de curseur de couleur.
+  /* Le repli du rail vit ICI et pas dans l'écran qui porte le bouton, parce
+     qu'il change la largeur de la navigation : cette largeur est une variable
+     CSS (--nav-w) écrite par `applyTheme`, et deux endroits qui écriraient
+     tour à tour le même attribut `data-nav-size` finiraient par se contredire.
+     Une seule main sur le DOM, donc — celle du fournisseur de thème. */
+  const {
+    collapsed: navCollapsed,
+    toggle: toggleNavCollapsed,
+    expand: expandNav,
+  } = useNavCollapse();
+
+  // Une seule source de vérité pour le CSS : l'état, plus le repli par-dessus.
+  // Tout changement réécrit le <style>, y compris pendant un glissement de
+  // curseur de couleur. Ce que `save` enregistre reste `state` : le repli n'est
+  // jamais renvoyé au serveur ni écrit dans le thème de l'office.
   useEffect(() => {
-    applyTheme(state);
-  }, [state]);
+    applyTheme(withCollapsedNav(state, navCollapsed));
+  }, [state, navCollapsed]);
 
   useEffect(() => {
     return () => {
@@ -140,10 +156,10 @@ export function ThemeProvider({
     [save],
   );
 
-  const setLayout = useCallback(
-    (patch: Partial<LayoutState>) => {
+  const setAppBg = useCallback(
+    (key: AppBgKey) => {
       setState(prev => {
-        const next = withLayout(prev, patch);
+        const next = { ...prev, appBg: key };
         save(next);
         return next;
       });
@@ -151,7 +167,23 @@ export function ThemeProvider({
     [save],
   );
 
+  const setLayout = useCallback(
+    (patch: Partial<LayoutState>) => {
+      // Toucher à la forme du rail depuis Personnalisation, c'est parler du
+      // rail : on le déplie, sinon le réglage resterait sans effet visible et
+      // passerait pour cassé.
+      if (patch.navSize !== undefined || patch.navPlacement !== undefined) expandNav();
+      setState(prev => {
+        const next = withLayout(prev, patch);
+        save(next);
+        return next;
+      });
+    },
+    [save, expandNav],
+  );
+
   const reset = useCallback(() => {
+    expandNav();
     if (persist) clearPersistedThemeState();
     const defaults = defaultThemeState();
     setState(defaults);
@@ -163,7 +195,7 @@ export function ThemeProvider({
     transport.save(defaults).catch((err: unknown) => {
       setSaveError(err instanceof Error ? err.message : 'Enregistrement impossible');
     });
-  }, [persist, transport, flashSaved]);
+  }, [persist, transport, flashSaved, expandNav]);
 
   /**
    * Le serveur fait foi. Un échec (403 avant connexion, backend injoignable)
@@ -197,11 +229,15 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setAppBg,
       setLayout,
       reset,
       justSaved,
       saveError,
       syncFromServer,
+      navCollapsed,
+      navCollapsible: isNavCollapsible(state.layout),
+      toggleNavCollapsed,
     }),
     [
       state,
@@ -211,11 +247,14 @@ export function ThemeProvider({
       commit,
       setTypography,
       setShape,
+      setAppBg,
       setLayout,
       reset,
       justSaved,
       saveError,
       syncFromServer,
+      navCollapsed,
+      toggleNavCollapsed,
     ],
   );
 

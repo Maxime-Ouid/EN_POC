@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Pill } from '../atoms/Pill';
 import { RowMenu } from '../atoms/RowMenu';
@@ -11,13 +12,18 @@ import { Dropzone } from '../molecules/Dropzone';
 import { MetaBanner } from '../molecules/MetaBanner';
 import { RowName } from '../molecules/RowName';
 import { TabStrip } from '../molecules/TabStrip';
+import { TagFilter } from '../molecules/TagFilter';
 import { DocumentSlideover } from '../organisms/DocumentSlideover';
 import { Explorer } from '../organisms/Explorer';
 import { QACard } from '../organisms/QACard';
+import { TagPicker } from '../organisms/TagPicker';
+import { useTopbarSlots } from '../templates/topbarSlots';
 import type { PillKind } from '../atoms/Pill';
 import type { TabDef } from '../molecules/TabStrip';
 import type { DocumentActivityEntry, DocumentCustomField } from '../organisms/DocumentSlideover';
 import type { TreeNodeData } from '../organisms/Explorer';
+import type { TagColor } from '../atoms/Tag';
+import type { TagRef } from '../organisms/TagPicker';
 
 export interface DataroomDocument {
   id: string;
@@ -28,6 +34,8 @@ export interface DataroomDocument {
   size: string;
   /** Pièce annoncée mais pas encore déposée : ligne grisée, non ouvrable. */
   muted?: boolean;
+  /** Tags posés sur la pièce — même catalogue d'office que les dossiers. */
+  tags?: TagRef[];
   /** Métadonnées libres de l'office, affichées dans le volet latéral. */
   customFields?: DocumentCustomField[];
   /** Dernières actions sur la pièce (consultations, dépôts). */
@@ -64,7 +72,7 @@ export interface HistoryRow {
 export interface DataroomDetailScreenProps {
   portfolioName?: string;
   dataroomName: string;
-  tags: Array<{ label: string; plain?: boolean }>;
+  tags: TagRef[];
   status: { kind: PillKind; label: string };
   meta: Array<{ label: string; value: React.ReactNode }>;
   tree: TreeNodeData[];
@@ -100,6 +108,30 @@ export interface DataroomDetailScreenProps {
    * seulement quelle pièce est ouverte.
    */
   renderDocumentPreview?: (doc: DataroomDocument) => React.ReactNode;
+  /**
+   * Dossier à ouvrir d'emblée, quand l'écran est atteint depuis un résultat de
+   * recherche plutôt que depuis la liste. Sert de CIBLE, pas de valeur
+   * contrôlée : une fois le dossier ouvert, l'utilisateur reste libre d'en
+   * sélectionner un autre sans que la prop le ramène en arrière.
+   *
+   * Chaque demande doit porter une valeur distincte, d'où le compteur qui
+   * l'accompagne : rechercher deux fois de suite la même pièce doit rouvrir
+   * son dossier, alors qu'un `focusFolderId` inchangé ne déclencherait rien.
+   */
+  focusFolderId?: string;
+  focusNonce?: number;
+  /**
+   * Catalogue de tags de l'office. Absent = les tags affichés (dossier et
+   * pièces) restent en lecture seule — ce qui garde valides les aperçus du kit
+   * d'interface, qui n'ont pas d'office derrière eux.
+   */
+  tagCatalog?: TagRef[];
+  /** Pose la sélection COMPLÈTE de tags sur le dossier lui-même. */
+  onTagsChange?: (tagIds: number[]) => void | Promise<void>;
+  /** Idem pour une pièce. */
+  onDocumentTagsChange?: (documentId: string, tagIds: number[]) => void | Promise<void>;
+  /** Création à la volée, partagée par les deux sélecteurs. */
+  onCreateTag?: (name: string, color: TagColor) => Promise<TagRef>;
 }
 
 // Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents /
@@ -126,11 +158,34 @@ export function DataroomDetailScreen({
   onReply,
   onDownloadDocument,
   renderDocumentPreview,
+  focusFolderId,
+  focusNonce,
+  tagCatalog = [],
+  onTagsChange,
+  onDocumentTagsChange,
+  onCreateTag,
 }: DataroomDetailScreenProps) {
+  const slots = useTopbarSlots();
   const [activeTab, setActiveTab] = useState('sub-docs');
   const firstFolderId = tree[0]?.children?.[0]?.id ?? tree[0]?.id;
-  const [activeFolderId, setActiveFolderId] = useState<string | undefined>(firstFolderId);
+  const [activeFolderId, setActiveFolderId] = useState<string | undefined>(focusFolderId ?? firstFolderId);
   const [openDoc, setOpenDoc] = useState<DataroomDocument | null>(null);
+  // Filtre par tag DANS le dossier ouvert. Il vit ici et pas dans l'appelant
+  // parce qu'il ne survit pas au changement de rubrique : filtrer « Signé »
+  // puis passer à un autre sous-dossier ne doit pas y masquer silencieusement
+  // des pièces.
+  const [docTagFilter, setDocTagFilter] = useState<number[]>([]);
+
+  // Une NOUVELLE demande de ciblage (nonce différent) ouvre le dossier visé et
+  // referme le volet resté ouvert sur une pièce d'un autre dossier. Dépendance
+  // volontairement limitée au nonce : réagir aussi à `focusFolderId` ferait
+  // resauter la sélection au moindre re-rendu portant la même cible.
+  useEffect(() => {
+    if (focusNonce === undefined) return;
+    setActiveFolderId(focusFolderId);
+    setOpenDoc(null);
+    // oxlint-disable-next-line exhaustive-deps
+  }, [focusNonce]);
 
   // Le volet document se ferme dès qu'on change de rubrique ou d'onglet — sans
   // quoi il resterait ouvert sur une pièce qui n'est plus dans la vue (le
@@ -138,6 +193,7 @@ export function DataroomDetailScreen({
   function selectFolder(id: string) {
     setActiveFolderId(id);
     setOpenDoc(null);
+    setDocTagFilter([]);
   }
 
   function selectTab(key: string) {
@@ -153,27 +209,54 @@ export function DataroomDetailScreen({
   ];
 
   const activeFolderLabel = findLabel(tree, activeFolderId) ?? '—';
-  const activeDocs = (activeFolderId && documentsByFolder[activeFolderId]) || [];
+  const folderDocs = useMemo(
+    () => (activeFolderId && documentsByFolder[activeFolderId]) || [],
+    [activeFolderId, documentsByFolder],
+  );
+  // Filtrage en OU, côté client : l'arborescence entière est déjà chargée (voir
+  // useDataroomTree), un aller-retour serveur par case cochée n'apporterait
+  // rien qu'un délai.
+  const activeDocs = useMemo(
+    () =>
+      docTagFilter.length === 0
+        ? folderDocs
+        : folderDocs.filter(doc => doc.tags?.some(t => docTagFilter.includes(t.id))),
+    [folderDocs, docTagFilter],
+  );
+
+  /* Le repère d'écran remonte dans la topbar (01/09/2026) : c'est le seul
+     endroit qui dit où l'on se trouve depuis le retrait des titres de page, et
+     le laisser dans le contenu le faisait glisser hors de vue au défilement.
+     Le début de barre est libre sur cet écran — seul l'accueil y projette ses
+     onglets. */
+  const crumb = (
+    <Breadcrumb
+      items={[
+        { label: 'Dossiers', onClick: onBackToList },
+        ...(portfolioName ? [{ label: portfolioName }] : []),
+      ]}
+      current={dataroomName}
+    />
+  );
 
   return (
     <section className="screen is-active">
-      <Breadcrumb
-        items={[
-          { label: 'Dossiers', onClick: onBackToList },
-          ...(portfolioName ? [{ label: portfolioName }] : []),
-        ]}
-        current={dataroomName}
-      />
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : le fil
+          reste alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? createPortal(crumb, slots.start) : crumb}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        {/* Le nom du dossier est déjà le dernier segment du fil d'Ariane
-            juste au-dessus : le titre le répétait mot pour mot. */}
+        {/* Le nom du dossier est déjà le dernier segment du fil d'Ariane, en
+            topbar depuis le 01/09/2026 : le titre le répétait mot pour mot. */}
         <div>
           <ButtonRow>
-            {tags.map((t, i) => (
-              <Tag key={i} icon={t.plain ? undefined : 'tag'} plain={t.plain}>
-                {t.label}
-              </Tag>
-            ))}
+            <TagPicker
+              value={tags}
+              catalog={tagCatalog}
+              readOnly={!onTagsChange}
+              emptyLabel="Aucun tag"
+              onChange={tagIds => onTagsChange?.(tagIds)}
+              onCreate={onCreateTag}
+            />
             <Pill kind={status.kind}>{status.label}</Pill>
           </ButtonRow>
         </div>
@@ -220,6 +303,14 @@ export function DataroomDetailScreen({
             title={activeFolderLabel}
             actions={
               <>
+                {tagCatalog.length > 0 && (
+                  <TagFilter
+                    options={tagCatalog}
+                    selected={docTagFilter}
+                    onChange={setDocTagFilter}
+                    label="Tags"
+                  />
+                )}
                 <Button size="sm" onClick={() => onCreateFolder?.(activeFolderId)}>
                   <svg className="icon">
                     <use href="#i-up" />
@@ -258,6 +349,7 @@ export function DataroomDetailScreen({
                   <tr>
                     <th>Nom</th>
                     <th>Statut</th>
+                    <th>Tags</th>
                     <th>Ajouté par</th>
                     <th>Date</th>
                     <th>Taille</th>
@@ -281,6 +373,20 @@ export function DataroomDetailScreen({
                       </RowName>
                       <td>
                         <Pill kind={doc.status.kind}>{doc.status.label}</Pill>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        {/* stopPropagation sur la cellule entière : la ligne
+                            ouvre le volet document, et taguer une pièce ne doit
+                            pas l'ouvrir au passage. Une pièce annoncée mais non
+                            déposée (`muted`) n'est pas taguable — il n'y a
+                            encore rien à classer. */}
+                        <TagPicker
+                          value={doc.tags ?? []}
+                          catalog={tagCatalog}
+                          readOnly={!onDocumentTagsChange || doc.muted}
+                          onChange={tagIds => onDocumentTagsChange?.(doc.id, tagIds)}
+                          onCreate={onCreateTag}
+                        />
                       </td>
                       <td className={doc.muted ? 'dim' : undefined}>{doc.addedBy}</td>
                       <td className="dim">{doc.date}</td>
@@ -317,6 +423,13 @@ export function DataroomDetailScreen({
                       )}
                     </tr>
                   ))}
+                  {activeDocs.length === 0 && docTagFilter.length > 0 && (
+                    <tr>
+                      <td colSpan={7} className="dim tiny" style={{ textAlign: 'center', padding: 18 }}>
+                        Aucune pièce de ce dossier ne porte les tags sélectionnés.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -417,6 +530,7 @@ export function DataroomDetailScreen({
                 addedBy: openDoc.addedBy,
                 date: openDoc.date,
                 size: openDoc.size,
+                tags: openDoc.tags,
                 customFields: openDoc.customFields,
                 activity: openDoc.activity,
               }

@@ -3,7 +3,7 @@ import {
   AvatarStack, Breadcrumb, Button, ButtonRow, Card, DocPanel, Dropzone,
   FeedItem, Field, FieldRow, Icon, MetaBanner, ModuleRow, Nav, NavGroup, NavItem,
   Pill, PresetCard, PresetRow, RowName, Select, ShapeSwatch,
-  SidebarBrand, SidebarFoot, StatCard, TabStrip, TemplateOption, TenantSwitcher,
+  SidebarBrand, SidebarFoot, StatCard, TabStrip, TagFilter, TemplateOption, TenantSwitcher,
   TextInput, TokenItem, TopbarSearch, TypographySample, BarTrack,
 } from '../components';
 import { TOKEN_SCHEMA } from '../theme/schema';
@@ -15,6 +15,30 @@ import { Specimen } from './Specimen';
 
 function Row({ children }: { children: React.ReactNode }) {
   return <div className="uikit-row">{children}</div>;
+}
+
+/** Catalogue de tags partagé par les spécimens de TagFilter et TagPicker — la
+    même poignée d'entrées que dans les captures d'écran de l'office de démo. */
+const DEMO_TAG_CATALOG = [
+  { id: 1, name: 'Vente', color: 'brass' as const },
+  { id: 2, name: 'Prioritaire', color: 'critical' as const },
+  { id: 3, name: 'APUI', color: 'info' as const },
+  { id: 4, name: 'Copropriété', color: 'neutral' as const },
+  { id: 5, name: 'Signé', color: 'success' as const },
+];
+
+/** Le filtre ne garde aucune sélection en propre : elle est portée par l'écran. */
+function TagFilterDemo() {
+  const [selected, setSelected] = useState<number[]>([1]);
+  return (
+    <Row>
+      <TagFilter
+        options={DEMO_TAG_CATALOG.map((t, i) => ({ ...t, usage: 12 - i * 2 }))}
+        selected={selected}
+        onChange={setSelected}
+      />
+    </Row>
+  );
 }
 
 function ShellBox({ children, width = 236 }: { children: React.ReactNode; width?: number }) {
@@ -180,6 +204,13 @@ export function MoleculeSpecimens() {
       <Specimen name="TabStrip" variants={[{ label: 'Onglets, dont un avec compteur', node: <TabStripDemo /> }]} />
 
       <Specimen
+        name="TagFilter"
+        variants={[
+          { label: 'Multi-sélection en OU — le décompte reste visible menu fermé', node: <TagFilterDemo /> },
+        ]}
+      />
+
+      <Specimen
         name="MetaBanner"
         variants={[{ label: 'Métadonnées d\'un dossier', node: (
           <MetaBanner items={[
@@ -279,9 +310,26 @@ export function MoleculeSpecimens() {
 
       <Specimen
         name="TenantSwitcher"
-        variants={[{ label: 'Sélecteur d\'office', node: (
-          <ShellBox><TenantSwitcher name="Briand & Hamon" role="Notaires associés" onClick={() => {}} /></ShellBox>
-        )}]}
+        variants={[
+          { label: 'Un seul office — étiquette, rien à choisir', node: (
+            <ShellBox><TenantSwitcher name="Briand & Hamon" role="Notaires associés" /></ShellBox>
+          )},
+          { label: 'Plusieurs offices — liste déroulante', node: (
+            <ShellBox>
+              <TenantSwitcher
+                name="Briand & Hamon"
+                role="Notaires associés"
+                currentSubdomain="briand"
+                offices={[
+                  { subdomain: 'briand', name: 'Briand & Hamon', role: 'Notaires associés' },
+                  { subdomain: 'martin', name: 'Office B — Étude Martin', role: 'superadmin' },
+                  { subdomain: 'lemoine', name: 'Étude Lemoine', role: 'Collaborateur' },
+                ]}
+                onSelect={() => {}}
+              />
+            </ShellBox>
+          )},
+        ]}
       />
 
       <Specimen

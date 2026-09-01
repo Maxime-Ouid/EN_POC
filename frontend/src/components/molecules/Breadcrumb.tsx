@@ -5,8 +5,9 @@ export interface BreadcrumbProps {
   current: string;
 }
 
-/* Fil d'Ariane — utilisé à la fois dans la topbar (office › rubrique › écran) et
-   en tête d'écran détail dataroom (dossiers › portefeuille › dossier).
+/* Fil d'Ariane — vit dans le début de topbar (voir templates/topbarSlots.ts) :
+   l'écran détail dossier l'y projette (dossiers › portefeuille › dossier), et
+   retombe en tête de contenu hors AppShell (UiKit, démos).
 
    Depuis le retrait des titres de page (28/08/2026), c'est le SEUL endroit qui
    dit où l'on se trouve : il porte donc la rubrique parente en plus de l'écran.

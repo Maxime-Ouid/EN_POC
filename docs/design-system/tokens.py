@@ -79,7 +79,7 @@ LIGHT: Dict[str, str] = {
     "card-border": "rgba(255,255,255,0.65)",
     "card-glass-bg": "rgb(255 255 255 / 85%)",
     "card-glass-border": "rgba(255,255,255,.7)",
-    "app-orb": "radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), rgba(255,255,255,.04))",
+    "app-pattern": "rgba(107,63,212,.10)",
     "nav-dim": "#2f206f",
     "nav-label-c": "#372979",
     "brand-strong": "#2a1c66",
@@ -145,7 +145,7 @@ DARK_OVERRIDES: Dict[str, str] = {
     "card-border": "rgba(255,255,255,.08)",
     "card-glass-bg": "rgba(28,23,64,.75)",
     "card-glass-border": "rgba(255,255,255,.12)",
-    "app-orb": "radial-gradient(circle at 30% 30%, rgba(255,255,255,.22), rgba(255,255,255,.02))",
+    "app-pattern": "rgba(185,156,247,.10)",
     "nav-dim": "#a89ed4",
     "nav-label-c": "#a89ed4",
     "brand-strong": "#ffffff",
@@ -257,8 +257,8 @@ TOKEN_SCHEMA = [
     {"key": "border", "group": "surfaces", "label": "Bordure standard", "type": "hex", "light": "#e5e2f0", "dark": "#332a5e"},
     {"key": "border-soft", "group": "surfaces", "label": "Séparateur discret", "type": "hex", "light": "#eeecf7", "dark": "#2a2350"},
 
-    {"key": "app-grad-base-from", "group": "appbg", "label": "Dégradé — départ", "type": "hex", "light": "#f2eeff", "dark": "#100d1f"},
-    {"key": "app-grad-base-to", "group": "appbg", "label": "Dégradé — arrivée", "type": "hex", "light": "#ecf1ff", "dark": "#1c1740"},
+    {"key": "app-grad-base-from", "group": "appbg", "label": "Base — départ", "type": "hex", "light": "#f2eeff", "dark": "#100d1f"},
+    {"key": "app-grad-base-to", "group": "appbg", "label": "Base — arrivée", "type": "hex", "light": "#ecf1ff", "dark": "#1c1740"},
     {"key": "app-grad-1", "group": "appbg", "label": "Halo haut-gauche", "type": "rgba", "light": "#ede4ff", "dark": "rgba(150,104,244,.16)"},
     {"key": "app-grad-2", "group": "appbg", "label": "Halo haut-droite", "type": "rgba", "light": "#b8cdff", "dark": "rgba(91,123,251,.14)"},
     {"key": "app-grad-3", "group": "appbg", "label": "Halo bas-droite", "type": "rgba", "light": "rgba(166,140,255,.369)", "dark": "rgba(150,104,244,.10)"},
@@ -322,7 +322,7 @@ TOKEN_SCHEMA = [
 
 GROUPS = [
     {"id": "surfaces", "label": "Fonds & surfaces"},
-    {"id": "appbg", "label": "Dégradé de fond (tableau de bord)"},
+    {"id": "appbg", "label": "Fond de l'application"},
     {"id": "cards", "label": "Cartes (effet verre)"},
     {"id": "text", "label": "Texte"},
     {"id": "brand", "label": "Marque & accent"},
@@ -343,6 +343,19 @@ SHAPE_PRESETS = {
     "arrondi":   {"label": "Arrondi",   "sm": "8px", "md": "14px", "lg": "22px"},
 }
 
+# Fonds de l'espace connecté. Contrairement aux typographies et aux formes, un
+# fond ne sort PAS en variables CSS : il est choisi par l'attribut data-appbg sur
+# <html> et la règle correspondante vit dans components.css. Cette table est ici
+# pour que le serveur sache valider la valeur reçue et connaisse, pour chaque
+# fond, les tokens qu'il consomme réellement.
+APP_BG_PRESETS = {
+    "degrade":     {"label": "Dégradé",     "uses": ["app-grad-base-from", "app-grad-base-to", "app-grad-1", "app-grad-2", "app-grad-3", "app-grad-4"]},
+    "uni":         {"label": "Uni",         "uses": ["app-grad-base-from"]},
+    "quadrillage": {"label": "Quadrillage", "uses": ["app-grad-base-from", "app-pattern"]},
+    "halo":        {"label": "Halo",        "uses": ["app-grad-base-from", "app-grad-base-to", "app-grad-2"]},
+    "grain":       {"label": "Grain",       "uses": ["app-grad-base-from", "app-pattern"]},
+}
+
 _TOKENS_BY_KEY = {t["key"]: t for t in TOKEN_SCHEMA}
 
 
@@ -359,6 +372,7 @@ class TenantTheme:
     colors: dict = field(default_factory=default_colors)
     typography: str = "classique"
     shape: str = "equilibre"
+    app_bg: str = "degrade"
 
 
 def default_state() -> TenantTheme:
@@ -372,7 +386,7 @@ def normalize_state(overrides: "TenantTheme | dict | None") -> TenantTheme:
     if overrides is None:
         return state
     if isinstance(overrides, TenantTheme):
-        overrides = {"colors": overrides.colors, "typography": overrides.typography, "shape": overrides.shape}
+        overrides = {"colors": overrides.colors, "typography": overrides.typography, "shape": overrides.shape, "appBg": overrides.app_bg}
     colors_in = overrides.get("colors") or {}
     for mode in ("light", "dark"):
         for key, val in (colors_in.get(mode) or {}).items():
@@ -382,6 +396,10 @@ def normalize_state(overrides: "TenantTheme | dict | None") -> TenantTheme:
         state.typography = overrides["typography"]
     if overrides.get("shape") in SHAPE_PRESETS:
         state.shape = overrides["shape"]
+    # Absent est le cas NORMAL pour tout thème enregistré avant l'arrivée des
+    # fonds : il doit rester sur le dégradé, pas tomber sur un fond vide.
+    if overrides.get("appBg") in APP_BG_PRESETS:
+        state.app_bg = overrides["appBg"]
     return state
 
 

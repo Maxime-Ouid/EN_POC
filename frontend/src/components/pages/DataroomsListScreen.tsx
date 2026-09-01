@@ -1,13 +1,18 @@
+import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Pill } from '../atoms/Pill';
 import { RowMenu } from '../atoms/RowMenu';
-import { Tag } from '../atoms/Tag';
 import { AvatarStack } from '../molecules/AvatarStack';
 import { ButtonRow } from '../molecules/ButtonRow';
 import { RowName } from '../molecules/RowName';
+import { TagFilter } from '../molecules/TagFilter';
 import { TopbarSearch } from '../molecules/TopbarSearch';
 import { TableCard } from '../organisms/TableCard';
+import { TagPicker } from '../organisms/TagPicker';
 import type { PillKind } from '../atoms/Pill';
+import type { TagColor } from '../atoms/Tag';
+import { useTopbarSlots } from '../templates/topbarSlots';
+import type { TagRef } from '../organisms/TagPicker';
 
 export interface DataroomRow {
   id: string;
@@ -17,7 +22,7 @@ export interface DataroomRow {
   muted?: boolean;
   name: string;
   portfolio?: string;
-  tags: Array<{ label: string; plain?: boolean }>;
+  tags: TagRef[];
   members: Array<{ label: string; gray?: boolean }>;
   storage: string;
   activity: string;
@@ -31,6 +36,23 @@ export interface DataroomsListScreenProps {
   onCreate: () => void;
   onSearch?: (value: string) => void;
   displayRange: string; // ex. "1–6 sur 245 dossiers"
+  /**
+   * Catalogue de tags de l'office — alimente à la fois le menu de filtre et,
+   * ligne par ligne, le sélecteur de la colonne « Tags ». Absent = l'écran se
+   * comporte comme avant l'arrivée des tags (colonne en lecture seule, bouton
+   * de filtre inerte), ce qui garde les aperçus du kit d'interface valides.
+   */
+  tagCatalog?: TagRef[];
+  /** Ids cochés dans le menu de filtre — sémantique OU (au moins un). */
+  selectedTagIds?: number[];
+  onTagFilterChange?: (tagIds: number[]) => void;
+  /**
+   * Pose la sélection COMPLÈTE de tags sur un dossier. Absent = la colonne
+   * « Tags » reste en lecture seule.
+   */
+  onRowTagsChange?: (dataroomId: string, tagIds: number[]) => void | Promise<void>;
+  /** Création à la volée depuis la colonne « Tags ». Absent = catalogue figé. */
+  onCreateTag?: (name: string, color: TagColor) => Promise<TagRef>;
 }
 
 // Écran "Dossiers" (liste) — index_16.html #screen-datarooms.
@@ -41,22 +63,47 @@ export function DataroomsListScreen({
   onCreate,
   onSearch,
   displayRange,
+  tagCatalog = [],
+  selectedTagIds = [],
+  onTagFilterChange,
+  onRowTagsChange,
+  onCreateTag,
 }: DataroomsListScreenProps) {
+  const slots = useTopbarSlots();
+
+  /* Décompte et création remontent dans la topbar, au début de barre
+     (01/09/2026) : ils tenaient à eux deux une ligne entière au-dessus de la
+     liste, alors que la barre garde sa gauche vide sur cet écran. Le décompte
+     nomme l'écran — c'est le repère qui remplace le titre retiré le 28/08/2026 —
+     et l'action primaire se lit juste après lui, au même endroit que sur les
+     autres écrans, plutôt qu'à l'opposé de la ligne.
+
+     Portail plutôt que props : la topbar est montée par AppShell, très au-dessus
+     de cet écran, et `onCreate` appartient à l'appelant de l'écran (voir
+     templates/topbarSlots.ts). */
+  const topbarCommands = (
+    <>
+      <div className="eyebrow">{totalCount} dossiers</div>
+      <Button variant="accent" size="sm" onClick={onCreate}>
+        <svg className="icon">
+          <use href="#i-plus" />
+        </svg>
+        Nouveau dossier
+      </Button>
+    </>
+  );
+
   return (
     <section className="screen is-active">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        {/* Le titre est parti avec les autres le 28/08/2026 (fil d'Ariane) ; le
-            décompte, lui, est une donnée et reste. */}
-        <div className="eyebrow">{totalCount} dossiers</div>
-        <Button variant="accent" onClick={onCreate}>
-          <svg className="icon">
-            <use href="#i-plus" />
-          </svg>
-          Nouveau dossier
-        </Button>
-      </div>
+      {/* Hors AppShell (UiKit, démos isolées) le conteneur vaut `null` : les
+          commandes restent alors en tête d'écran plutôt que de disparaître. */}
+      {slots.start ? (
+        createPortal(topbarCommands, slots.start)
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{topbarCommands}</div>
+      )}
 
-      <ButtonRow style={{ margin: '18px 0' }}>
+      <ButtonRow style={{ margin: '0 0 18px' }}>
         <TopbarSearch
           placeholder="Rechercher…"
           onChange={onSearch}
@@ -69,12 +116,11 @@ export function DataroomsListScreen({
           Portefeuille
         </Button>
         <Button size="sm">Statut</Button>
-        <Button size="sm">
-          <svg className="icon">
-            <use href="#i-tag" />
-          </svg>
-          Tags
-        </Button>
+        <TagFilter
+          options={tagCatalog}
+          selected={selectedTagIds}
+          onChange={next => onTagFilterChange?.(next)}
+        />
         <div style={{ marginLeft: 'auto' }} className="dim tiny">
           Tri par activité récente
         </div>
@@ -88,13 +134,17 @@ export function DataroomsListScreen({
             </RowName>
             <td className="dim">{row.portfolio ?? '—'}</td>
             <td>
-              {row.tags.length
-                ? row.tags.map((t, i) => (
-                    <Tag key={i} icon={t.plain ? undefined : 'tag'} plain={t.plain}>
-                      {t.label}
-                    </Tag>
-                  ))
-                : '—'}
+              {/* Le sélecteur est monté même sur une ligne sans tag : c'est le
+                  bouton « + » qui rend le tagging découvrable, et une colonne
+                  qui n'affiche « — » qu'en lecture ne dit jamais qu'on peut y
+                  poser quelque chose. */}
+              <TagPicker
+                value={row.tags}
+                catalog={tagCatalog}
+                readOnly={!onRowTagsChange}
+                onChange={tagIds => onRowTagsChange?.(row.id, tagIds)}
+                onCreate={onCreateTag}
+              />
             </td>
             <td>{row.members.length ? <AvatarStack avatars={row.members} /> : <span className="dim">—</span>}</td>
             <td className="mono">{row.storage}</td>

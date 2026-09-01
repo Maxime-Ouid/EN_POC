@@ -3,7 +3,6 @@ import {
   AppShell,
   LoginScreen,
   MfaScreen,
-  HomeScreen,
   PortfoliosScreen,
   DataroomsListScreen,
   type DataroomRow,
@@ -25,14 +24,18 @@ import {
   Card,
   type TreeNodeData,
 } from './components';
+import { DashboardScreen } from './dashboard';
 import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
+import { useTags } from './hooks/useTags';
 import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRestrictions';
 import { useOfficeUsers } from './hooks/useOfficeUsers';
 import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
-import { api, type DocumentSummary } from './api/endpoints';
+import { api, type DocumentSummary, type TagColor, type TagSummary } from './api/endpoints';
+import { matchesWordStart } from './search/match';
+import type { LocalEntry } from './search/localEntries';
 import {
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
@@ -153,7 +156,20 @@ function toDataroomDocument(doc: DocumentSummary, username: string): DataroomDoc
     // Le backend ne renvoie pas encore la taille du fichier (Document n'expose
     // que name/file/uploaded_at) — pas de valeur inventée.
     size: '—',
+    tags: doc.tags,
   };
+}
+
+/** « 1 dossier » / « 3 dossiers » — le pluriel s'accorde sur le nombre affiché,
+    pas sur un autre. */
+function plural(count: number, word: string) {
+  return `${count} ${word}${count > 1 ? 's' : ''}`;
+}
+
+/** Réduit un tag de l'API à ce dont le design system a besoin — il ne connaît
+    ni `slug` ni `usage`. */
+function toTagRef(tag: TagSummary) {
+  return { id: tag.id, name: tag.name, color: tag.color };
 }
 
 /** Mappe l'arbre de dossiers (id numériques, forme API) vers TreeNodeData (id string, forme Explorer). */
@@ -224,8 +240,23 @@ export default function App() {
   const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
+      liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
+  const [dataroomFilter, setDataroomFilter] = useState('');
+  /** Tags cochés dans le menu de filtre de la liste Dossiers. Contrairement à la
+      recherche par nom, ce filtre part au SERVEUR (`?tags=`) : le décompte
+      affiché sous le tableau doit rester celui de l'office, pas celui de la
+      page déjà chargée. */
+  const [dataroomTagFilter, setDataroomTagFilter] = useState<number[]>([]);
+  /** Dossier à ouvrir dans l'écran détail après un résultat de recherche, et
+      compteur qui rend chaque demande distincte — voir DataroomDetailScreen. */
+  const [focusFolder, setFocusFolder] = useState<{ id: string | undefined; nonce: number } | null>(null);
 
-  const datarooms = useDatarooms(authenticated);
+  const datarooms = useDatarooms(authenticated, dataroomTagFilter);
+  // Le catalogue de tags est chargé dès la connexion : il alimente à la fois le
+  // menu de filtre de la liste et les sélecteurs posés sur chaque dossier ou
+  // pièce, et le charger par écran donnerait un menu vide au premier affichage.
+  const tags = useTags(authenticated);
   const dataroomTree = useDataroomTree(screen === 'dataroom' ? openDataroomId : null);
   const openModule = useModule(moduleSlug);
 
@@ -302,18 +333,149 @@ export default function App() {
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
-  const dataroomRows: DataroomRow[] = datarooms.items.map(d => ({
+  /**
+   * Ce que la palette ⌘K trouve en plus des résultats du serveur.
+   *
+   * Construit ici et pas dans AppShell parce que chaque entrée porte SON action
+   * d'ouverture, et que naviguer est le métier de ce composant — la palette ne
+   * fait que présenter et déclencher.
+   *
+   * `simulated: true` sur tout ce qui vient de data/demo.tsx : ces lignes
+   * n'existent en base nulle part. Les taire aurait été plus simple, mais une
+   * recherche qui renvoie de l'inventé sans le dire est un piège — c'est le
+   * même avertissement que la pastille « Données partiellement simulées » de la
+   * topbar, appliqué résultat par résultat.
+   *
+   * Q&R, membres et historique vivent dans les ONGLETS d'un dossier, sans être
+   * rattachés à un dossier réel : leur entrée ouvre donc la liste des dossiers,
+   * faute de destination honnête. C'est la limite connue de ce lot.
+   */
+  const searchLocalEntries = useMemo<LocalEntry[]>(() => {
+    const entries: LocalEntry[] = [];
+
+    // Écrans et modules : lus dans navSections plutôt que réécrits, pour que la
+    // palette ne puisse pas proposer un écran que le menu n'a pas (un module
+    // désactivé côté serveur disparaît des deux d'un coup).
+    for (const section of navSections) {
+      for (const item of section.items) {
+        const slug = moduleSlugOf(item.key);
+        entries.push({
+          key: `nav-${item.key}`,
+          icon: `i-${item.icon}`,
+          name: item.label,
+          path: slug ? `Modules / ${item.label}` : `${section.label} / ${item.label}`,
+          kindLabel: slug ? 'Module' : 'Écran',
+          open: () => navigate(item.key),
+        });
+      }
+    }
+
+    const demo = (
+      key: string,
+      icon: string,
+      name: string,
+      path: string,
+      kindLabel: string,
+      open: () => void,
+    ): LocalEntry => ({ key, icon, name, path, kindLabel, simulated: true, open });
+
+    for (const p of PORTFOLIOS) {
+      entries.push(demo(`pf-${p.id}`, 'i-layers', p.name, `Portefeuilles / ${p.name}`,
+        'Portefeuille', () => navigate('portfolios')));
+    }
+    for (const c of CLIENT_USAGE) {
+      entries.push(demo(`cu-${c.id}`, 'i-building', c.name,
+        `Statistiques & facturation / ${c.name}`, 'Client', () => navigate('stats')));
+    }
+    for (const i of INVOICES) {
+      entries.push(demo(`inv-${i.id}`, 'i-file', i.period,
+        `Statistiques & facturation / ${i.period}`, 'Facture', () => navigate('stats')));
+    }
+    for (const u of CONNECTED_USERS) {
+      entries.push(demo(`cx-${u.id}`, 'i-users', u.name,
+        `Statistiques & facturation / ${u.name}`, 'Connecté', () => navigate('stats')));
+    }
+    for (const t of DATAROOM_TEMPLATES) {
+      entries.push(demo(`tpl-${t.id}`, 'i-seal', t.name, `Modèles / ${t.name}`,
+        'Modèle', () => setModalOpen(true)));
+    }
+    for (const q of QA_ENTRIES) {
+      entries.push(demo(`qa-${q.id}`, 'i-msg', q.object, `Questions / Réponses`,
+        'Q&R', () => navigate('datarooms')));
+    }
+    for (const m of MEMBERS) {
+      entries.push(demo(`mb-${m.id}`, 'i-users', m.name, `Membres d’un dossier / ${m.group}`,
+        'Membre', () => navigate('datarooms')));
+    }
+    for (const h of HISTORY) {
+      entries.push(demo(`hi-${h.id}`, 'i-clock', h.target, `Historique / ${h.timestamp}`,
+        'Historique', () => navigate('datarooms')));
+    }
+
+    return entries;
+    // `navigate` est stable (déclarée dans le corps du composant, sans état
+    // capturé qui changerait son comportement) ; la lister forcerait un recalcul
+    // à chaque rendu sans rien apporter.
+    // oxlint-disable-next-line exhaustive-deps
+  }, [navSections]);
+
+  // Filtrage local de la liste Dossiers — même sémantique que la recherche
+  // globale : correspondance en DÉBUT DE MOT, pas sous-chaîne quelconque (voir
+  // _name_starts_with côté Django). Sans cet accord, un même mot tapé dans la
+  // barre de la liste et dans la palette ⌘K donnerait deux réponses différentes.
+  const visibleDatarooms = useMemo(
+    () =>
+      datarooms.items.filter(
+        // Les TAGS du dossier sont cherchés au même titre que son nom : taper
+        // « vente » dans la barre doit ramener les dossiers tagués Vente, pas
+        // seulement ceux qui portent le mot dans leur intitulé. Le menu de
+        // filtre reste le chemin exact ; la barre, elle, est le chemin rapide.
+        d =>
+          matchesWordStart(d.name, dataroomFilter) ||
+          d.tags.some(tag => matchesWordStart(tag.name, dataroomFilter)),
+      ),
+    [datarooms.items, dataroomFilter],
+  );
+
+  const dataroomRows: DataroomRow[] = visibleDatarooms.map(d => ({
     id: String(d.id),
     icon: 'folder',
     iconBg: 'var(--info-bg)',
     iconColor: 'var(--info)',
     name: d.name,
-    tags: [],
+    tags: d.tags,
     members: [],
     storage: '—',
     activity: formatDate(d.created_at),
     status: { kind: 'success', label: 'Actif' },
   }));
+
+  /**
+   * Création de tag partagée par tous les sélecteurs de l'application. Rend le
+   * tag (existant ou nouveau — le serveur déduplique sur le nom replié) pour
+   * que l'appelant puisse l'ajouter immédiatement à sa sélection.
+   */
+  const createTag = async (name: string, color: TagColor) => toTagRef(await tags.create(name, color));
+
+  /**
+   * Ligne de décompte sous le tableau des dossiers.
+   *
+   * Trois cas distincts, et pas un seul « x sur y » : sous filtre par tag, la
+   * liste reçue du serveur est DÉJÀ réduite — le total de l'office n'est plus
+   * connu du client, et l'annoncer quand même serait inventer un chiffre. On
+   * dit alors ce qu'on sait : combien de dossiers portent ces tags.
+   */
+  const dataroomRange = datarooms.loading
+    ? 'Chargement…'
+    : datarooms.error
+      ? datarooms.error
+      : dataroomTagFilter.length
+        ? `${plural(visibleDatarooms.length, 'dossier')} pour ${plural(dataroomTagFilter.length, 'tag')} sélectionné${dataroomTagFilter.length > 1 ? 's' : ''}`
+        : // Sous recherche, dire « x sur y » : un décompte nu laisserait croire
+          // que l'office ne contient que les lignes affichées.
+          dataroomFilter.trim()
+          ? `${visibleDatarooms.length} sur ${plural(datarooms.items.length, 'dossier')}`
+          : plural(datarooms.items.length, 'dossier');
 
   // La racine (documents sans dossier) est un nœud synthétique — ROOT_NODE_ID —
   // dont les enfants sont les vrais dossiers de premier niveau ; voir
@@ -351,6 +513,7 @@ export default function App() {
     // de ce qui s'affiche (voir le rendu plus bas).
     if (!slug) setScreen(key as ScreenKey);
     setOpenDataroomId(null);
+    setFocusFolder(null);
   }
 
   if (session.status === 'loading') {
@@ -407,14 +570,9 @@ export default function App() {
       navSections={navSections}
       activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
       onNavigate={navigate}
-      onSwitchOffice={
-        session.offices.length > 1
-          ? () => {
-              const next = session.offices.find(o => o.subdomain !== currentOffice?.subdomain);
-              if (next) void switchOffice(next.subdomain);
-            }
-          : undefined
-      }
+      offices={session.offices}
+      officeSubdomain={currentOffice?.subdomain}
+      onSelectOffice={subdomain => void switchOffice(subdomain)}
       onLogout={() => setLogoutConfirm(true)}
       userInitials={initialsOf(username)}
       userName={username}
@@ -424,6 +582,35 @@ export default function App() {
         openModuleEntry?.name ?? (openDataroom ? openDataroom.name : CRUMB_LABELS[screen])
       }
       noticeLabel="Données partiellement simulées"
+      searchLocalEntries={searchLocalEntries}
+      onSearchSelect={hit => {
+        setModuleSlug(null);
+
+        // Une personne n'est pas dans un dossier : elle vit dans l'annuaire.
+        if (hit.kind === 'person' || hit.dataroom_id == null) {
+          setFocusFolder(null);
+          setOpenDataroomId(null);
+          setScreen('users');
+          return;
+        }
+
+        // Les trois autres types mènent au même écran — le détail du dossier —
+        // et ne diffèrent que par le niveau à y ouvrir. Pour une pièce, c'est
+        // son dossier CONTENANT (`folder_id`), pas la pièce : l'explorateur
+        // sélectionne des dossiers, et `folder_id` vaut null quand elle est à la
+        // racine, d'où le nœud synthétique ROOT_NODE_ID.
+        setOpenDataroomId(hit.dataroom_id);
+        setScreen('dataroom');
+        if (hit.kind === 'dataroom') {
+          setFocusFolder(null);
+        } else {
+          const folderId = hit.kind === 'folder' ? String(hit.id) : hit.folder_id;
+          setFocusFolder(prev => ({
+            id: folderId != null ? String(folderId) : ROOT_NODE_ID,
+            nonce: (prev?.nonce ?? 0) + 1,
+          }));
+        }
+      }}
     >
       {/* Monté en dehors des écrans : la déconnexion se déclenche depuis la
           sidebar et la topbar, présentes quel que soit l'écran affiché. */}
@@ -463,11 +650,16 @@ export default function App() {
       )}
 
       {!openModuleEntry && screen === 'dashboard' && (
-        <HomeScreen
-          // Seul le nombre de dossiers est réel ; les autres compteurs n'ont pas
-          // encore de source côté backend.
+        <DashboardScreen
+          role={currentOffice?.role}
+          ready={authenticated}
+          // Seul le nombre de dossiers et la liste des dossiers sont réels ; les
+          // autres compteurs n'ont pas encore de source côté backend. Chaque
+          // widget reçoit ses données ici plutôt que d'aller les chercher :
+          // quinze widgets à l'écran feraient sinon quinze chargements au
+          // montage de l'accueil (voir src/dashboard/types.ts).
           stats={{ ...DEMO_HOME_STATS, activeDatarooms: datarooms.items.length }}
-          recentPortfolios={PORTFOLIOS.map(p => ({
+          portfolios={PORTFOLIOS.map(p => ({
             id: p.id,
             icon: p.icon,
             iconBg: p.iconBg,
@@ -476,10 +668,50 @@ export default function App() {
             desc: p.desc,
             status: p.status,
           }))}
-          recentActivity={RECENT_ACTIVITY}
-          onOpenPortfolio={() => setScreen('datarooms')}
-          onSeeAllPortfolios={() => setScreen('portfolios')}
-          onSeeFullHistory={() => setScreen('stats')}
+          activity={RECENT_ACTIVITY}
+          questions={QA_ENTRIES.map(q => ({
+            id: q.id,
+            status: q.status,
+            object: q.object,
+            meta: q.meta,
+          }))}
+          members={MEMBERS.map(m => ({
+            id: m.id,
+            initials: m.initials,
+            name: m.name,
+            detail: `${m.group} · ${m.lastLogin}`,
+            status: m.access,
+          }))}
+          connected={CONNECTED_USERS.map(c => ({
+            id: c.id,
+            initials: c.initials,
+            name: c.name,
+            detail: `${c.role} · connecté depuis ${c.connectedFor}`,
+          }))}
+          datarooms={datarooms.items.map(d => ({
+            id: String(d.id),
+            name: d.name,
+            meta: `Créé le ${new Date(d.created_at).toLocaleDateString('fr-FR')}`,
+          }))}
+          usage={CLIENT_USAGE.map(u => ({
+            id: u.id,
+            name: u.name,
+            detail: `${u.dataroomCount} dossiers · ${u.storage}`,
+            percent: u.sharePercent,
+            warning: u.shareWarning,
+          }))}
+          invoices={INVOICES.map(i => ({
+            id: i.id,
+            period: i.period,
+            detail: `Stockage moyen ${i.averageStorage}`,
+            amount: i.amountExclTax,
+          }))}
+          modules={modulesWithServerState.map(m => ({
+            slug: m.slug,
+            name: m.name,
+            enabled: !!m.enabled,
+          }))}
+          navigate={navigate}
         />
       )}
 
@@ -498,17 +730,27 @@ export default function App() {
             totalCount={datarooms.items.length}
             rows={dataroomRows}
             onOpen={id => {
+              // Ouverture « normale » : on efface une éventuelle cible laissée
+              // par une recherche précédente, sinon l'explorateur s'ouvrirait
+              // sur un dossier d'une AUTRE dataroom.
+              setFocusFolder(null);
               setOpenDataroomId(Number(id));
               setScreen('dataroom');
             }}
             onCreate={() => setModalOpen(true)}
-            displayRange={
-              datarooms.loading
-                ? 'Chargement…'
-                : datarooms.error
-                  ? datarooms.error
-                  : `${datarooms.items.length} dossier${datarooms.items.length > 1 ? 's' : ''}`
+            onSearch={setDataroomFilter}
+            tagCatalog={tags.items}
+            selectedTagIds={dataroomTagFilter}
+            onTagFilterChange={setDataroomTagFilter}
+            onRowTagsChange={(dataroomId, tagIds) =>
+              // `setTags` recharge la liste : le catalogue, lui, ne bouge pas —
+              // seuls ses compteurs d'usage vieillissent, et ils se rafraîchiront
+              // à la prochaine création. Un rechargement du catalogue à chaque
+              // case cochée coûterait un aller-retour pour un chiffre.
+              datarooms.setTags(Number(dataroomId), tagIds)
             }
+            onCreateTag={createTag}
+            displayRange={dataroomRange}
           />
           <NewDataroomModal
             open={modalOpen}
@@ -526,8 +768,24 @@ export default function App() {
       {!openModuleEntry && screen === 'dataroom' && openDataroom && (
         <>
           <DataroomDetailScreen
+            // La clé remonte l'identité de la dataroom : l'écran garde en état
+            // interne le dossier sélectionné, qui n'a aucun sens d'une dataroom
+            // à l'autre — sans remontage, passer de l'une à l'autre laissait
+            // l'explorateur pointer un dossier inexistant ici.
+            key={openDataroom.id}
             dataroomName={openDataroom.name}
-            tags={[]}
+            tags={openDataroom.tags}
+            tagCatalog={tags.items}
+            onTagsChange={tagIds => datarooms.setTags(openDataroom.id, tagIds)}
+            onDocumentTagsChange={async (documentId, tagIds) => {
+              await api.setDocumentTags(openDataroom.id, Number(documentId), tagIds);
+              // L'arborescence porte les tags de chaque pièce : sans ce
+              // rechargement, la pastille posée disparaîtrait au prochain
+              // changement de rubrique (l'état d'origine étant celui du dernier
+              // parcours de l'arbre, pas celui de l'écran).
+              await dataroomTree.refresh();
+            }}
+            onCreateTag={createTag}
             status={{ kind: 'success', label: 'Actif' }}
             meta={[
               { label: 'Créé le', value: formatDate(openDataroom.created_at) },
@@ -535,6 +793,8 @@ export default function App() {
             ]}
             tree={tree}
             documentsByFolder={documentsByFolder}
+            focusFolderId={focusFolder?.id}
+            focusNonce={focusFolder?.nonce}
             // Non modélisés côté backend — jeux de démonstration assumés.
             qaEntries={QA_ENTRIES}
             members={MEMBERS}

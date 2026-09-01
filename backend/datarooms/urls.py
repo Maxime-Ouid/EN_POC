@@ -1,11 +1,13 @@
 from django.urls import path
 from .views import (
     ping, login_view, logout_view, mfa_setup, mfa_verify, whoami, my_offices, tenant_config, tenant_theme,
-    coffre_fort_view, issue_sso_ticket, consume_sso_ticket, datarooms_view, documents_view,
+    dashboard_view, coffre_fort_view, issue_sso_ticket, consume_sso_ticket, datarooms_view,
+    documents_view,
     folders_view, office_users_view, office_user_detail_view, attach_office_user_view,
     dataroom_access_view, folder_access_view, document_access_view, access_restrictions_view,
     document_content_view, templates_view, template_detail_view, template_folders_view,
     template_folder_detail_view, hyperadmin_offices_view, hyperadmin_office_detail_view,
+    search_view, tags_view, tag_detail_view, dataroom_tags_view, document_tags_view,
 )
 
 urlpatterns = [
@@ -18,13 +20,19 @@ urlpatterns = [
     path('my-offices/', my_offices),
     path('tenant-config/', tenant_config),
     path('tenant-theme/', tenant_theme),
+    path('dashboard/', dashboard_view),
     path('modules/coffre-fort/', coffre_fort_view),
     path('sso/issue/', issue_sso_ticket),
     path('sso/consume/', consume_sso_ticket),
+    path('search/', search_view),
+    path('tags/', tags_view),
+    path('tags/<int:tag_id>/', tag_detail_view),
     path('datarooms/', datarooms_view),
+    path('datarooms/<int:dataroom_id>/tags/', dataroom_tags_view),
     path('datarooms/<int:dataroom_id>/documents/', documents_view),
     path('datarooms/<int:dataroom_id>/documents/<int:document_id>/access/', document_access_view),
     path('datarooms/<int:dataroom_id>/documents/<int:document_id>/content/', document_content_view),
+    path('datarooms/<int:dataroom_id>/documents/<int:document_id>/tags/', document_tags_view),
     path('datarooms/<int:dataroom_id>/folders/', folders_view),
     path('datarooms/<int:dataroom_id>/folders/<int:folder_id>/access/', folder_access_view),
     path('datarooms/<int:dataroom_id>/access/', dataroom_access_view),

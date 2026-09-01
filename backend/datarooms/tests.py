@@ -12,14 +12,19 @@ from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from .models import (
-    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership,
+    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership, Tag,
 )
 from .tenancy.context import get_current_tenant, reset_current_tenant, set_current_tenant, TenantContext
 from .tenancy.middleware import TenantResolutionMiddleware
 from .tenancy.registry import ensure_tenant_registered, tenant_alias, tenant_db_path
 from .tenancy.router import TenantRouter
 from .tenancy.sso import consume_ticket, issue_ticket
-from .validators import ThemeValidationError, clean_theme_payload, is_accepted_extension
+from .validators import (
+    DASHBOARD_MAX_PAGES, DASHBOARD_MAX_PAGE_NAME, DASHBOARD_MAX_WIDGETS,
+    DashboardValidationError, TagValidationError, ThemeValidationError,
+    clean_dashboard_payload, clean_tag_payload, clean_theme_payload,
+    is_accepted_extension, tag_slug,
+)
 
 User = get_user_model()
 TEST_TOTP_KEY = "3a" * 20  # 40 caractères hex (20 octets) — clé de test arbitraire mais valide
@@ -313,6 +318,238 @@ class TenantThemeApiTests(TestCase):
         self.assertEqual(res.status_code, 400)
         self.office.refresh_from_db()
         self.assertIsNone(self.office.theme)
+
+
+class DashboardValidatorTests(TestCase):
+    """clean_dashboard_payload — ce que le serveur accepte de stocker.
+
+    Le validateur ne connaît PAS le catalogue des widgets (il vit côté front) :
+    ces tests vérifient donc uniquement qu'aucune charge utile déformée ne
+    franchit la porte, pas qu'un identifiant existe.
+    """
+
+    def _widget(self, **overrides):
+        widget = {"id": "dossiers-actifs", "x": 0, "y": 0, "w": 3, "h": 2}
+        widget.update(overrides)
+        return widget
+
+    def _page(self, **overrides):
+        page = {"id": "ecran-1", "name": "Accueil", "widgets": [self._widget()]}
+        page.update(overrides)
+        return page
+
+    def test_a_minimal_payload_is_normalised(self):
+        cleaned = clean_dashboard_payload({"pages": [self._page()]})
+        self.assertEqual(cleaned["template"], None)
+        self.assertEqual(cleaned["pages"][0]["widgets"][0]["id"], "dossiers-actifs")
+
+    def test_extra_keys_are_dropped(self):
+        # Rien d'autre que la forme attendue ne doit atterrir en base : un client
+        # bricolé ne doit pas pouvoir faire grossir le JSON à sa guise.
+        cleaned = clean_dashboard_payload({
+            "pages": [self._page(widgets=[self._widget(couleur="rouge")], surprise=1)],
+            "note": "x" * 5000,
+        })
+        self.assertEqual(set(cleaned), {"template", "pages"})
+        self.assertEqual(set(cleaned["pages"][0]), {"id", "name", "widgets"})
+        self.assertEqual(set(cleaned["pages"][0]["widgets"][0]), {"id", "x", "y", "w", "h"})
+
+    def test_legacy_flat_payload_becomes_one_page(self):
+        # Compatibilité : les dispositions d'avant les onglets ne doivent PAS
+        # être refusées, sinon tout le monde perd son rangement au déploiement.
+        cleaned = clean_dashboard_payload({"template": "membre", "widgets": [self._widget()]})
+        self.assertEqual(len(cleaned["pages"]), 1)
+        self.assertEqual(cleaned["pages"][0]["widgets"][0]["id"], "dossiers-actifs")
+
+    def test_unknown_widget_id_is_accepted(self):
+        # Volontaire : le catalogue vit côté front, le serveur ne l'arbitre pas.
+        cleaned = clean_dashboard_payload(
+            {"pages": [self._page(widgets=[self._widget(id="widget-de-2027")])]}
+        )
+        self.assertEqual(cleaned["pages"][0]["widgets"][0]["id"], "widget-de-2027")
+
+    def test_duplicate_widget_in_one_page_is_refused(self):
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(widgets=[self._widget(), self._widget()])]})
+
+    def test_same_widget_on_two_pages_is_allowed(self):
+        # Le même widget sur deux onglets est un usage normal : ses dossiers
+        # récents peuvent servir sur plusieurs écrans.
+        cleaned = clean_dashboard_payload({"pages": [self._page(), self._page(id="ecran-2")]})
+        self.assertEqual(len(cleaned["pages"]), 2)
+
+    def test_duplicate_page_id_is_refused(self):
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(), self._page()]})
+
+    def test_empty_page_name_is_refused(self):
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(name="   ")]})
+
+    def test_control_characters_are_stripped_from_page_name(self):
+        cleaned = clean_dashboard_payload({"pages": [self._page(name="Pilo\u0000tage")]})
+        self.assertEqual(cleaned["pages"][0]["name"], "Pilotage")
+
+    def test_page_name_is_truncated(self):
+        cleaned = clean_dashboard_payload({"pages": [self._page(name="N" * 500)]})
+        self.assertEqual(len(cleaned["pages"][0]["name"]), DASHBOARD_MAX_PAGE_NAME)
+
+    def test_boolean_coordinates_are_refused(self):
+        # `isinstance(True, int)` vaut True en Python : sans garde-fou explicite,
+        # un booléen passerait pour une coordonnée et vaudrait 0 ou 1 en silence.
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(widgets=[self._widget(x=True)])]})
+
+    def test_out_of_range_coordinates_are_refused(self):
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(widgets=[self._widget(w=999)])]})
+
+    def test_too_many_widgets_are_refused(self):
+        widgets = [self._widget(id=f"widget-{i}") for i in range(DASHBOARD_MAX_WIDGETS + 1)]
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": [self._page(widgets=widgets)]})
+
+    def test_too_many_pages_are_refused(self):
+        pages = [self._page(id=f"ecran-{i}") for i in range(DASHBOARD_MAX_PAGES + 1)]
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": pages})
+
+    def test_at_least_one_page_is_required(self):
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"pages": []})
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload({"template": "notaire"})
+
+    def test_options_survive_but_stay_flat(self):
+        cleaned = clean_dashboard_payload(
+            {"pages": [self._page(widgets=[self._widget(options={"lignes": 5})])]}
+        )
+        self.assertEqual(cleaned["pages"][0]["widgets"][0]["options"], {"lignes": 5})
+        with self.assertRaises(DashboardValidationError):
+            clean_dashboard_payload(
+                {"pages": [self._page(widgets=[self._widget(options={"a": {"b": 1}})])]}
+            )
+
+
+class DashboardApiTests(TestCase):
+    """GET/PUT/DELETE /api/dashboard/ — disposition d'accueil PAR MEMBRE."""
+
+    HOST = "officea.localhost"
+
+    def setUp(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("officea"), None)
+        self.addCleanup(connections.databases.pop, tenant_alias("officeb"), None)
+        self.office = Office.objects.create(subdomain="officea", name="Office A")
+        self.other_office = Office.objects.create(subdomain="officeb", name="Office B")
+
+        self.membre = User.objects.create_user(username="membre-a", password="motdepasse")
+        self.membership = OfficeMembership.objects.create(
+            user=self.membre, office=self.office, role="membre"
+        )
+        self.collegue = User.objects.create_user(username="collegue-a", password="motdepasse")
+        self.membership_collegue = OfficeMembership.objects.create(
+            user=self.collegue, office=self.office, role="membre"
+        )
+        self.etranger = User.objects.create_user(username="etranger", password="motdepasse")
+        OfficeMembership.objects.create(user=self.etranger, office=self.other_office, role="admin")
+
+    def _put(self, payload):
+        return self.client.put(
+            "/api/dashboard/",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_HOST=self.HOST,
+        )
+
+    def _layout(self, widget_id="dossiers-actifs"):
+        return {
+            "template": "membre",
+            "pages": [{
+                "id": "ecran-1",
+                "name": "Mon travail",
+                "widgets": [{"id": widget_id, "x": 0, "y": 0, "w": 3, "h": 2}],
+            }],
+        }
+
+    def test_get_returns_204_when_never_customised(self):
+        # 204 et pas une liste vide : le front doit distinguer « jamais rangé »
+        # (→ template du rôle) de « rangé, et vidé de tous ses widgets ».
+        self.client.force_login(self.membre)
+        res = self.client.get("/api/dashboard/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 204)
+
+    def test_save_then_read_back(self):
+        self.client.force_login(self.membre)
+        self.assertEqual(self._put(self._layout()).status_code, 200)
+
+        res = self.client.get("/api/dashboard/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["template"], "membre")
+        self.assertEqual(res.json()["pages"][0]["name"], "Mon travail")
+        self.assertEqual(res.json()["pages"][0]["widgets"][0]["id"], "dossiers-actifs")
+
+    def test_a_layout_stored_before_tabs_is_read_as_one_page(self):
+        # Régression : une ligne écrite avant les onglets doit rester lisible.
+        # Sans conversion à la lecture, le front n'y trouve pas de `pages`,
+        # retombe sur le template, et le rangement de l'utilisateur disparaît.
+        self.membership.dashboard = {
+            "template": "membre",
+            "widgets": [{"id": "dossiers-actifs", "x": 0, "y": 0, "w": 3, "h": 2}],
+        }
+        self.membership.save(update_fields=["dashboard"])
+        self.client.force_login(self.membre)
+
+        res = self.client.get("/api/dashboard/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()["pages"]), 1)
+        self.assertEqual(res.json()["pages"][0]["widgets"][0]["id"], "dossiers-actifs")
+
+    def test_a_membre_may_write_his_own_dashboard(self):
+        # Contrairement au thème d'office, l'écriture n'est PAS réservée aux
+        # administrateurs : ce que chacun range chez lui ne regarde que lui.
+        self.client.force_login(self.membre)
+        self.assertEqual(self._put(self._layout()).status_code, 200)
+
+    def test_dashboard_is_scoped_to_the_member(self):
+        # Le point de toute l'opération : deux membres du MÊME office ne
+        # partagent pas leur accueil.
+        self.client.force_login(self.membre)
+        self._put(self._layout())
+        self.membership_collegue.refresh_from_db()
+        self.assertIsNone(self.membership_collegue.dashboard)
+
+    def test_delete_clears_the_customisation(self):
+        self.client.force_login(self.membre)
+        self._put(self._layout())
+        self.assertEqual(self.client.delete("/api/dashboard/", HTTP_HOST=self.HOST).status_code, 204)
+        self.assertEqual(self.client.get("/api/dashboard/", HTTP_HOST=self.HOST).status_code, 204)
+
+    def test_saving_does_not_touch_the_role(self):
+        # `save(update_fields=['dashboard'])` : ranger son accueil ne doit pas
+        # réécrire un rôle modifié entre-temps par un administrateur.
+        self.client.force_login(self.membre)
+        self._put(self._layout())
+        self.membership.refresh_from_db()
+        self.assertEqual(self.membership.role, "membre")
+
+    def test_invalid_payload_is_refused_and_nothing_is_stored(self):
+        self.client.force_login(self.membre)
+        self.assertEqual(self._put({"pages": "beaucoup"}).status_code, 400)
+        self.membership.refresh_from_db()
+        self.assertIsNone(self.membership.dashboard)
+
+    def test_non_member_is_refused(self):
+        self.client.force_login(self.etranger)
+        self.assertEqual(self.client.get("/api/dashboard/", HTTP_HOST=self.HOST).status_code, 403)
+
+    def test_anonymous_is_refused(self):
+        self.assertIn(self.client.get("/api/dashboard/", HTTP_HOST=self.HOST).status_code, (401, 403))
+
+    def test_unknown_subdomain_returns_404(self):
+        self.client.force_login(self.membre)
+        self.assertEqual(
+            self.client.get("/api/dashboard/", HTTP_HOST="inconnu.localhost").status_code, 404
+        )
 
 
 class TenantResolutionMiddlewareTests(TestCase):
@@ -1615,3 +1852,576 @@ class HyperadminTests(unittest.TestCase):
         # "coffre-fort" (créé par seed_demo, réutilisé ici) appliqué, le slug
         # inconnu silencieusement ignoré — pas d'erreur bloquante.
         self.assertEqual(res.json()["enabled_modules"], ["coffre-fort"])
+
+
+class SearchApiTests(unittest.TestCase):
+    """Teste GET /api/search/ — et surtout le point qui compte : une recherche ne
+    doit JAMAIS servir de contournement aux AccessRestriction. Trouver le nom d'une
+    pièce qu'on n'a pas le droit d'ouvrir est déjà une fuite, même sans son contenu.
+
+    Même harnais que PathVisibilityTests (tenant sqlite dédié, `unittest.TestCase`,
+    nettoyage manuel) — voir la longue note de cette classe pour la raison détaillée
+    du choix de `unittest.TestCase` plutôt que `django.test.TestCase`.
+
+    Arborescence construite dans setUp — tout contient « martin », pour que ce soit
+    bien le contrôle d'accès et non le filtre par nom qui trie les résultats. Les tags
+    posés (colonne de droite) servent la recherche par tag : « Vente » est porté par un
+    dossier dont le NOM ne contient pas « vente » (c'est là tout l'intérêt) et par une
+    pièce dont le nom le contient (pour vérifier qu'elle ne remonte pas deux fois) ;
+    « Confidentiel » n'est porté que par des éléments restreints, pour vérifier qu'un
+    tag n'ouvre aucun contournement :
+        Succession Martin (pas de restriction)                    [Vente]
+        ├── Actes Martin (pas de restriction)
+        │    ├── acte-vente-martin.pdf   (pas de restriction)     [Vente]
+        │    └── secret-martin.pdf       (restreint à {alice})    [Confidentiel]
+        └── Prive Martin (restreint à {alice})
+             └── note-martin.pdf         (pas de restriction propre → hérite) [Confidentiel]
+    """
+
+    SUBDOMAIN = "searchq"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Search Office")
+        self.addCleanup(self.office.delete)
+
+        self.alice = User.objects.create_user(username="searchq_alice", password="pw123456")
+        self.addCleanup(self.alice.delete)
+        OfficeMembership.objects.create(user=self.alice, office=self.office, role="membre")
+        self.bob = User.objects.create_user(username="searchq_bob", password="pw123456")
+        self.addCleanup(self.bob.delete)
+        OfficeMembership.objects.create(user=self.bob, office=self.office, role="membre")
+        # Volontairement SANS OfficeMembership : sert à vérifier le 403.
+        self.etranger = User.objects.create_user(username="searchq_etranger", password="pw123456")
+        self.addCleanup(self.etranger.delete)
+        # Deux gestionnaires, pour la recherche de personnes : seul un gestionnaire en
+        # obtient, et un admin ne doit pas voir les superadmins (même règle que
+        # /api/office-users/, volontairement pas une seconde règle en parallèle).
+        self.patronne = User.objects.create_user(username="searchq_patronne", password="pw123456")
+        self.addCleanup(self.patronne.delete)
+        OfficeMembership.objects.create(user=self.patronne, office=self.office, role="superadmin")
+        self.gestionnaire = User.objects.create_user(username="searchq_gestion", password="pw123456")
+        self.addCleanup(self.gestionnaire.delete)
+        OfficeMembership.objects.create(user=self.gestionnaire, office=self.office, role="admin")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="Succession Martin")
+            self.actes = Folder.objects.create(dataroom=self.dataroom, parent=None, name="Actes Martin")
+            self.acte_doc = Document.objects.create(
+                dataroom=self.dataroom, folder=self.actes,
+                name="acte-vente-martin.pdf", file="fake/acte.pdf",
+            )
+            self.secret_doc = Document.objects.create(
+                dataroom=self.dataroom, folder=self.actes,
+                name="secret-martin.pdf", file="fake/secret.pdf",
+            )
+            AccessRestriction.objects.create(document=self.secret_doc, user_ids=[self.alice.id])
+
+            self.prive = Folder.objects.create(dataroom=self.dataroom, parent=None, name="Prive Martin")
+            AccessRestriction.objects.create(folder=self.prive, user_ids=[self.alice.id])
+            self.note_doc = Document.objects.create(
+                dataroom=self.dataroom, folder=self.prive,
+                name="note-martin.pdf", file="fake/note.pdf",
+            )
+
+            self.tag_vente = Tag.objects.create(name="Vente", slug="vente", color="brass")
+            self.tag_confidentiel = Tag.objects.create(
+                name="Confidentiel", slug="confidentiel", color="critical"
+            )
+            self.dataroom.tags.set([self.tag_vente])
+            self.acte_doc.tags.set([self.tag_vente])
+            self.secret_doc.tags.set([self.tag_confidentiel])
+            self.note_doc.tags.set([self.tag_confidentiel])
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def _search(self, query):
+        res = self.client.get("/api/search/", {"q": query}, HTTP_HOST=self._host())
+        self.assertEqual(res.status_code, 200)
+        return res.json()
+
+    def _names(self, payload, kind=None):
+        return {h["name"] for h in payload["results"] if kind is None or h["kind"] == kind}
+
+    def test_member_without_restriction_finds_all_three_kinds(self):
+        self.client.force_login(self.alice)
+        payload = self._search("martin")
+        self.assertEqual(self._names(payload, "dataroom"), {"Succession Martin"})
+        self.assertEqual(self._names(payload, "folder"), {"Actes Martin", "Prive Martin"})
+        self.assertEqual(
+            self._names(payload, "document"),
+            {"acte-vente-martin.pdf", "secret-martin.pdf", "note-martin.pdf"},
+        )
+        self.assertFalse(payload["truncated"])
+
+    def test_search_never_reveals_a_restricted_document(self):
+        # Le point central : bob cherche un terme qui matche TOUT, et ne doit
+        # récupérer que ce qu'il pourrait déjà atteindre en cliquant.
+        self.client.force_login(self.bob)
+        payload = self._search("martin")
+        self.assertEqual(self._names(payload, "document"), {"acte-vente-martin.pdf"})
+        self.assertNotIn("secret-martin.pdf", self._names(payload))
+        # Le dossier restreint et son contenu hérité disparaissent aussi.
+        self.assertEqual(self._names(payload, "folder"), {"Actes Martin"})
+        self.assertNotIn("note-martin.pdf", self._names(payload))
+
+    def test_restricted_document_is_unreachable_even_by_its_exact_name(self):
+        # Chercher le nom exact ne doit pas mieux marcher qu'un terme large : sans
+        # ce test, une implémentation qui filtrerait "au mieux" passerait le test
+        # précédent tout en confirmant l'existence de la pièce sur requête ciblée.
+        self.client.force_login(self.bob)
+        self.assertEqual(self._search("secret-martin.pdf")["results"], [])
+        self.assertEqual(self._search("secret")["results"], [])
+
+    def test_path_is_the_full_readable_chain(self):
+        self.client.force_login(self.alice)
+        payload = self._search("acte-vente")
+        hit = next(h for h in payload["results"] if h["kind"] == "document")
+        self.assertEqual(hit["path"], "Succession Martin / Actes Martin / acte-vente-martin.pdf")
+        # `folder_id` désigne le dossier CONTENANT — c'est le niveau que l'interface
+        # ouvre pour montrer la pièce, pas la pièce elle-même.
+        self.assertEqual(hit["folder_id"], self.actes.id)
+        self.assertEqual(hit["dataroom_id"], self.dataroom.id)
+
+    def test_empty_query_returns_nothing(self):
+        # Seul le vide (ou les espaces seuls) ne cherche rien : ouvrir la palette ne
+        # doit pas lister tout l'office. Le seuil est à 1 depuis le 31/08/2026.
+        self.client.force_login(self.alice)
+        for query in ("", " ", "   "):
+            payload = self._search(query)
+            self.assertEqual(payload["results"], [], f"requête {query!r}")
+            self.assertFalse(payload["truncated"])
+
+    def test_single_character_query_already_searches(self):
+        # Régression du comportement demandé : une seule lettre doit chercher.
+        self.client.force_login(self.alice)
+        payload = self._search("m")
+        self.assertIn("Succession Martin", self._names(payload, "dataroom"))
+
+    def test_match_is_on_word_start_not_anywhere_inside(self):
+        # Régression du 31/08/2026 : « e » ramenait « Succession Martin » (le « e »
+        # de Succession) — la palette devenait inutilisable dès la première lettre.
+        self.client.force_login(self.alice)
+        self.assertNotIn("Succession Martin", self._names(self._search("e")))
+        # Mais le début d'un mot INTERNE doit continuer à marcher, sinon il faudrait
+        # connaître le premier mot du nom pour retrouver quoi que ce soit.
+        self.assertIn("Succession Martin", self._names(self._search("mar")))
+        self.assertIn("Actes Martin", self._names(self._search("mar"), "folder"))
+
+    def test_word_start_also_applies_after_a_dash_or_a_dot(self):
+        # Les noms de pièces séparent leurs mots autrement que par des espaces : la
+        # classe de séparateurs est définie en négatif justement pour ça.
+        self.client.force_login(self.alice)
+        self.assertIn("acte-vente-martin.pdf", self._names(self._search("vente")))
+        self.assertIn("acte-vente-martin.pdf", self._names(self._search("pdf")))
+
+    def test_manager_finds_the_people_of_the_office(self):
+        self.client.force_login(self.patronne)
+        # « alice » trouve « searchq_alice » : l'underscore est un séparateur comme un
+        # autre, donc « alice » y est bien un début de mot.
+        self.assertIn("searchq_alice", self._names(self._search("alice"), "person"))
+
+    def test_ordinary_member_gets_no_person_but_keeps_searching_content(self):
+        # Un membre sans rôle de gestion ne doit voir personne — sans que ça lui coupe
+        # la recherche de ses propres dossiers (d'où un filtrage et non un 403 global).
+        self.client.force_login(self.bob)
+        self.assertEqual(self._names(self._search("alice"), "person"), set())
+        self.assertIn(
+            "acte-vente-martin.pdf", self._names(self._search("acte-vente"), "document")
+        )
+
+    def test_admin_does_not_find_superadmin_people(self):
+        # Même visibilité hiérarchique que /api/office-users/ : un admin (rang 2) ne
+        # voit pas les superadmins (rang 3). La recherche ne doit pas être la porte
+        # dérobée qui confirme leur existence.
+        self.client.force_login(self.gestionnaire)
+        names = self._names(self._search("searchq"), "person")
+        self.assertIn("searchq_alice", names)
+        self.assertNotIn("searchq_patronne", names)
+
+    def test_a_tag_finds_what_carries_it_even_when_the_name_says_nothing(self):
+        # Le cœur de la fonctionnalité : « Succession Martin » ne contient pas
+        # « vente », c'est son TAG qui correspond. Sans ce passage, le dossier serait
+        # introuvable autrement qu'en sachant déjà comment il s'appelle.
+        self.client.force_login(self.alice)
+        hits = [h for h in self._search("vente")["results"] if h["kind"] == "dataroom"]
+        self.assertEqual([h["name"] for h in hits], ["Succession Martin"])
+        self.assertEqual(hits[0]["matched_tag"]["name"], "Vente")
+
+    def test_a_result_found_by_its_name_carries_no_tag_justification(self):
+        # `matched_tag` répond à « pourquoi cet élément remonte-t-il ? ». Sur une
+        # correspondance par nom la question ne se pose pas, et une pastille de tag
+        # affichée là ferait croire à une correspondance qui n'a pas eu lieu.
+        self.client.force_login(self.alice)
+        hits = [
+            h for h in self._search("martin")["results"]
+            if h["kind"] == "dataroom" and h["name"] == "Succession Martin"
+        ]
+        self.assertEqual(len(hits), 1)
+        self.assertIsNone(hits[0]["matched_tag"])
+
+    def test_an_element_matching_by_both_name_and_tag_appears_once(self):
+        # « acte-vente-martin.pdf » porte le tag « Vente » ET « vente » dans son nom.
+        # Le nom l'emporte : un seul résultat, sans justification par tag.
+        self.client.force_login(self.alice)
+        hits = [
+            h for h in self._search("vente")["results"]
+            if h["kind"] == "document" and h["name"] == "acte-vente-martin.pdf"
+        ]
+        self.assertEqual(len(hits), 1)
+        self.assertIsNone(hits[0]["matched_tag"])
+
+    def test_a_tag_is_never_a_way_around_a_restriction(self):
+        # Le point qui compte, transposé aux tags : « Confidentiel » n'est porté que
+        # par une pièce restreinte à alice et par une pièce d'un dossier restreint à
+        # alice. Bob ne doit rien en apprendre — ni le nom, ni l'existence.
+        self.client.force_login(self.bob)
+        self.assertEqual(self._search("confidentiel")["results"], [])
+        # Et le tag ne rend pas trouvable non plus la pièce dont l'accès est hérité.
+        self.assertEqual(self._names(self._search("confidentiel")), set())
+
+        # Contre-épreuve : alice, elle, les trouve bien par ce tag — sinon le test
+        # ci-dessus passerait aussi avec une recherche par tag cassée.
+        self.client.force_login(self.alice)
+        self.assertEqual(
+            self._names(self._search("confidentiel"), "document"),
+            {"secret-martin.pdf", "note-martin.pdf"},
+        )
+
+    def test_tag_match_is_word_start_like_names(self):
+        # Même règle que pour les noms (voir _name_starts_with), pas une seconde
+        # sémantique à retenir : « vent » trouve « Vente », « ente » ne trouve rien.
+        self.client.force_login(self.alice)
+        self.assertIn("Succession Martin", self._names(self._search("vent"), "dataroom"))
+        self.assertEqual(self._names(self._search("ente"), "dataroom"), set())
+
+    def test_a_tag_on_the_dataroom_does_not_pull_up_its_content(self):
+        # « Vente » est posé sur le dossier, pas sur « Prive Martin » ni sur
+        # « note-martin.pdf ». Remonter tout le contenu d'un dossier étiqueté noierait
+        # la palette et répondrait à une question de navigation, pas de recherche.
+        self.client.force_login(self.alice)
+        names = self._names(self._search("vente"))
+        self.assertNotIn("Prive Martin", names)
+        self.assertNotIn("note-martin.pdf", names)
+
+    def test_regex_metacharacters_in_the_query_are_escaped(self):
+        # Une frappe passe par des motifs incomplets (« ( », « [ ») : le serveur doit
+        # les traiter comme du texte et répondre vide, pas planter en 500.
+        self.client.force_login(self.alice)
+        for query in ("(", "[", ".*", "\\"):
+            res = self.client.get("/api/search/", {"q": query}, HTTP_HOST=self._host())
+            self.assertEqual(res.status_code, 200, f"requête {query!r}")
+            self.assertEqual(res.json()["results"], [], f"requête {query!r}")
+
+    def test_non_member_of_the_office_is_forbidden(self):
+        self.client.force_login(self.etranger)
+        res = self.client.get("/api/search/", {"q": "martin"}, HTTP_HOST=self._host())
+        self.assertEqual(res.status_code, 403)
+
+    def test_anonymous_is_rejected(self):
+        res = self.client.get("/api/search/", {"q": "martin"}, HTTP_HOST=self._host())
+        self.assertIn(res.status_code, (401, 403))
+
+
+class TagValidatorTests(TestCase):
+    """Repliage du nom et bornes du payload — la partie de la logique des tags qui
+    ne demande ni base tenant ni requête HTTP."""
+
+    def test_slug_folds_case_and_accents(self):
+        # C'est ce repliage qui empêche « Copropriété », « copropriete » et
+        # « COPROPRIETE » de devenir trois entrées du catalogue.
+        self.assertEqual(tag_slug("Copropriété"), tag_slug("copropriete"))
+        self.assertEqual(tag_slug("COPROPRIETE"), tag_slug("Copropriété"))
+        self.assertEqual(tag_slug("Vente  immobilière"), "vente-immobiliere")
+
+    def test_slug_of_a_non_latin_name_is_not_empty(self):
+        # Sans le repli final, un nom entièrement non-latin donnerait une chaîne
+        # vide — et TOUS ces tags seraient alors le même (slug unique en base).
+        self.assertNotEqual(tag_slug("契約"), "")
+        self.assertNotEqual(tag_slug("契約"), tag_slug("譲渡"))
+
+    def test_name_is_collapsed_and_required(self):
+        self.assertEqual(clean_tag_payload({"name": "  Vente   ferme "})["name"], "Vente ferme")
+        with self.assertRaises(TagValidationError):
+            clean_tag_payload({"name": "   "})
+        with self.assertRaises(TagValidationError):
+            clean_tag_payload({"name": "x" * 61})
+
+    def test_color_defaults_and_is_bounded(self):
+        self.assertEqual(clean_tag_payload({"name": "Vente"})["color"], "brass")
+        with self.assertRaises(TagValidationError):
+            clean_tag_payload({"name": "Vente", "color": "#7c3aed"})
+
+    def test_partial_payload_returns_only_what_was_sent(self):
+        self.assertEqual(clean_tag_payload({"color": "info"}, partial=True), {"color": "info"})
+
+
+class TagRouterTests(TestCase):
+    """Tag et ses deux tables pivot doivent rester des modèles TENANT.
+
+    Contre-exemple à garder en tête : `office_enabled_modules` est, lui, partagé —
+    parce qu'il relie deux modèles partagés. Ici les deux extrémités sont tenant, donc
+    la table pivot l'est aussi, et rien ne doit apparaître dans SHARED_MODELS.
+    """
+
+    def setUp(self):
+        self.router = TenantRouter()
+
+    def test_tag_is_a_tenant_model_not_shared(self):
+        self.assertFalse(self.router.allow_migrate("default", "datarooms", "tag"))
+        self.assertTrue(self.router.allow_migrate("tenant_officea", "datarooms", "tag"))
+
+    def test_tag_pivot_tables_are_tenant_tables(self):
+        for table in ("dataroom_tags", "document_tags"):
+            with self.subTest(table=table):
+                self.assertFalse(self.router.allow_migrate("default", "datarooms", table))
+                self.assertTrue(self.router.allow_migrate("tenant_officea", "datarooms", table))
+
+
+class TagApiTests(unittest.TestCase):
+    """Catalogue de tags et affectation — /api/tags/, /api/datarooms/<id>/tags/,
+    /api/datarooms/<id>/documents/<id>/tags/.
+
+    Même montage que PathVisibilityApiTests (voir sa docstring pour le pourquoi de
+    `unittest.TestCase` plutôt que `django.test.TestCase`) : tenant sqlite dédié,
+    migré explicitement, supprimé à chaque test.
+    """
+
+    SUBDOMAIN = "tagtest"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Tag Office")
+        self.addCleanup(self.office.delete)
+
+        self.admin = User.objects.create_user(username="tag_admin", password="pw123456")
+        self.addCleanup(self.admin.delete)
+        OfficeMembership.objects.create(user=self.admin, office=self.office, role="admin")
+
+        self.membre = User.objects.create_user(username="tag_membre", password="pw123456")
+        self.addCleanup(self.membre.delete)
+        OfficeMembership.objects.create(user=self.membre, office=self.office, role="membre")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.vente = Dataroom.objects.create(name="Vente Caudan")
+            self.succession = Dataroom.objects.create(name="Succession Hamon")
+            self.doc = Document.objects.create(
+                dataroom=self.vente, folder=None, name="acte.pdf", file="fake/acte.pdf"
+            )
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def _post(self, path, payload):
+        return self.client.post(
+            path, data=json.dumps(payload), content_type="application/json", HTTP_HOST=self._host()
+        )
+
+    def _put(self, path, payload):
+        return self.client.put(
+            path, data=json.dumps(payload), content_type="application/json", HTTP_HOST=self._host()
+        )
+
+    def _create_tag(self, name, color="brass"):
+        res = self._post("/api/tags/", {"name": name, "color": color})
+        self.assertIn(res.status_code, (200, 201), res.content)
+        return res.json()
+
+    # --- catalogue -------------------------------------------------------
+
+    def test_a_membre_can_create_a_tag_on_the_fly(self):
+        # Le droit de création est volontairement large : sans lui, le tagging
+        # meurt d'attendre un admin.
+        self.client.force_login(self.membre)
+        res = self._post("/api/tags/", {"name": "Prioritaire", "color": "critical"})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()["name"], "Prioritaire")
+        self.assertEqual(res.json()["color"], "critical")
+
+    def test_creating_an_existing_name_returns_the_existing_tag(self):
+        self.client.force_login(self.membre)
+        first = self._create_tag("Vente", color="brass")
+        res = self._post("/api/tags/", {"name": "VENTE", "color": "info"})
+        # 200 et pas 201 : le front distingue « ajouté au catalogue » de
+        # « existait déjà » sans second appel.
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["id"], first["id"])
+        # La couleur de l'existant n'est pas écrasée : deux membres qui tapent le
+        # même mot ne doivent pas se voler la couleur à tour de rôle.
+        self.assertEqual(res.json()["color"], "brass")
+
+    def test_catalog_reports_usage_across_datarooms_and_documents(self):
+        self.client.force_login(self.membre)
+        tag = self._create_tag("Vente")
+        self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [tag["id"]]})
+        self._put(
+            f"/api/datarooms/{self.vente.id}/documents/{self.doc.id}/tags/", {"tags": [tag["id"]]}
+        )
+        listing = self.client.get("/api/tags/", HTTP_HOST=self._host()).json()
+        self.assertEqual([t["usage"] for t in listing if t["id"] == tag["id"]], [2])
+
+    def test_only_an_admin_can_rename_or_delete(self):
+        self.client.force_login(self.membre)
+        tag = self._create_tag("Vente")
+        patch = self.client.patch(
+            f"/api/tags/{tag['id']}/",
+            data=json.dumps({"name": "Cession"}),
+            content_type="application/json",
+            HTTP_HOST=self._host(),
+        )
+        self.assertEqual(patch.status_code, 403, patch.content)
+        self.assertEqual(
+            self.client.delete(f"/api/tags/{tag['id']}/", HTTP_HOST=self._host()).status_code, 403
+        )
+
+        self.client.force_login(self.admin)
+        patch = self.client.patch(
+            f"/api/tags/{tag['id']}/",
+            data=json.dumps({"name": "Cession"}),
+            content_type="application/json",
+            HTTP_HOST=self._host(),
+        )
+        self.assertEqual(patch.status_code, 200, patch.content)
+        self.assertEqual(patch.json()["name"], "Cession")
+
+    def test_renaming_onto_an_existing_name_is_refused(self):
+        # Accepter fusionnerait deux entrées du catalogue sans le dire.
+        self.client.force_login(self.admin)
+        self._create_tag("Vente")
+        other = self._create_tag("Succession")
+        res = self.client.patch(
+            f"/api/tags/{other['id']}/",
+            data=json.dumps({"name": "vente"}),
+            content_type="application/json",
+            HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 409, res.content)
+
+    def test_deleting_a_tag_removes_it_from_the_datarooms_that_carried_it(self):
+        self.client.force_login(self.admin)
+        tag = self._create_tag("Vente")
+        self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [tag["id"]]})
+        self.assertEqual(
+            self.client.delete(f"/api/tags/{tag['id']}/", HTTP_HOST=self._host()).status_code, 204
+        )
+        rows = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        self.assertEqual([r["tags"] for r in rows if r["id"] == self.vente.id], [[]])
+
+    # --- affectation et filtre -------------------------------------------
+
+    def test_tags_survive_the_round_trip_on_a_dataroom(self):
+        self.client.force_login(self.membre)
+        vente = self._create_tag("Vente", color="brass")
+        urgent = self._create_tag("Urgent", color="critical")
+        res = self._put(
+            f"/api/datarooms/{self.vente.id}/tags/", {"tags": [vente["id"], urgent["id"]]}
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        rows = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        names = [t["name"] for r in rows if r["id"] == self.vente.id for t in r["tags"]]
+        # Ordre alphabétique (Tag.Meta.ordering) : la colonne « Tags » ne doit pas
+        # changer d'ordre d'un rafraîchissement à l'autre.
+        self.assertEqual(names, ["Urgent", "Vente"])
+
+    def test_put_replaces_the_whole_selection(self):
+        self.client.force_login(self.membre)
+        vente = self._create_tag("Vente")
+        urgent = self._create_tag("Urgent")
+        self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [vente["id"], urgent["id"]]})
+        self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [urgent["id"]]})
+        rows = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        names = [t["name"] for r in rows if r["id"] == self.vente.id for t in r["tags"]]
+        self.assertEqual(names, ["Urgent"])
+
+    def test_filter_is_an_or_across_the_selected_tags(self):
+        self.client.force_login(self.membre)
+        vente = self._create_tag("Vente")
+        succession = self._create_tag("Succession")
+        self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [vente["id"]]})
+        self._put(f"/api/datarooms/{self.succession.id}/tags/", {"tags": [succession["id"]]})
+
+        one = self.client.get(f"/api/datarooms/?tags={vente['id']}", HTTP_HOST=self._host()).json()
+        self.assertEqual([r["id"] for r in one], [self.vente.id])
+
+        both = self.client.get(
+            f"/api/datarooms/?tags={vente['id']},{succession['id']}", HTTP_HOST=self._host()
+        ).json()
+        # Cocher un deuxième tag ÉLARGIT la vue (OU) — un ET la viderait ici.
+        self.assertEqual(sorted(r["id"] for r in both), sorted([self.vente.id, self.succession.id]))
+
+    def test_an_unreadable_filter_returns_nothing_rather_than_everything(self):
+        # « ?tags=abc » ne doit pas se comporter comme « pas de filtre » : une liste
+        # vide dit que le filtre a joué, une liste complète ferait croire à une panne.
+        self.client.force_login(self.membre)
+        res = self.client.get("/api/datarooms/?tags=abc", HTTP_HOST=self._host()).json()
+        self.assertEqual(res, [])
+
+    def test_an_unknown_tag_id_is_refused(self):
+        # Un id valide dans l'office voisin ne doit pas passer en silence — même
+        # règle que _resolve_folder pour un dossier d'une autre dataroom.
+        self.client.force_login(self.membre)
+        res = self._put(f"/api/datarooms/{self.vente.id}/tags/", {"tags": [999999]})
+        self.assertEqual(res.status_code, 400, res.content)
+
+    def test_document_tags_survive_the_round_trip(self):
+        self.client.force_login(self.membre)
+        signe = self._create_tag("Signé", color="success")
+        res = self._put(
+            f"/api/datarooms/{self.vente.id}/documents/{self.doc.id}/tags/", {"tags": [signe["id"]]}
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        level = self.client.get(
+            f"/api/datarooms/{self.vente.id}/folders/", HTTP_HOST=self._host()
+        ).json()
+        self.assertEqual(
+            [t["name"] for d in level["documents"] if d["id"] == self.doc.id for t in d["tags"]],
+            ["Signé"],
+        )
+
+    def test_a_dataroom_can_be_created_with_tags(self):
+        # self.admin, pas self.membre : POST /api/datarooms/ est réservé
+        # admin/superadmin depuis la fusion du 01/09/2026 (chantier Templates,
+        # voir CLAUDE.md) — sans rapport avec les tags, seul le rôle de
+        # l'appelant change ici par rapport à la version d'origine du test.
+        self.client.force_login(self.admin)
+        tag = self._create_tag("Vente")
+        res = self._post("/api/datarooms/", {"name": "Nouveau dossier", "tags": [tag["id"]]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual([t["name"] for t in res.json()["tags"]], ["Vente"])
+
+    def test_a_non_member_gets_nothing(self):
+        etranger = User.objects.create_user(username="tag_etranger", password="pw123456")
+        self.addCleanup(etranger.delete)
+        self.client.force_login(etranger)
+        self.assertEqual(self.client.get("/api/tags/", HTTP_HOST=self._host()).status_code, 403)

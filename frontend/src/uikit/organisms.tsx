@@ -3,7 +3,7 @@ import {
   AppearanceTab, Avatar, Breadcrumb, Button, DocPanel, DocumentSlideover, Explorer,
   Icon, IconButton, IdentityTab, Modal, ModulesTab, Nav, NavGroup, NavItem,
   NewDataroomModal, Pill, ProtoPill, QACard, RowName, Sidebar, SidebarBrand,
-  SidebarFoot, Slideover, SoField, TableCard, TenantSwitcher, TokenEditor, Topbar,
+  SidebarFoot, Slideover, SoField, TableCard, TagPicker, TenantSwitcher, TokenEditor, Topbar,
   TopbarRight, TopbarSearch,
 } from '../components';
 import {
@@ -11,10 +11,39 @@ import {
   NEW_DATAROOM_TEMPLATES, PORTFOLIO_OPTIONS, TREE,
 } from '../data/demo';
 import { Specimen, Stage } from './Specimen';
+import type { TagRef } from '../components';
 
 // Spécimens des organismes : blocs autonomes, souvent porteurs de leur propre
 // état. Ceux qui se positionnent en `fixed` (modale, volets) sont enfermés dans
 // un <Stage> — sinon ils s'échapperaient de leur fiche pour couvrir la page.
+
+const DEMO_TAG_CATALOG: TagRef[] = [
+  { id: 1, name: 'Vente', color: 'brass' },
+  { id: 2, name: 'Prioritaire', color: 'critical' },
+  { id: 3, name: 'APUI', color: 'info' },
+  { id: 4, name: 'Copropriété', color: 'neutral' },
+  { id: 5, name: 'Signé', color: 'success' },
+];
+
+/** Le sélecteur ne garde pas la sélection : elle appartient à l'élément tagué.
+    `onCreate` simule ici la création à la volée servie par le serveur. */
+function TagPickerDemo({ editable = true }: { editable?: boolean }) {
+  const [catalog, setCatalog] = useState(DEMO_TAG_CATALOG);
+  const [selected, setSelected] = useState<number[]>([1]);
+  return (
+    <TagPicker
+      value={catalog.filter(t => selected.includes(t.id))}
+      catalog={catalog}
+      readOnly={!editable}
+      onChange={setSelected}
+      onCreate={async (name, color) => {
+        const tag = { id: Math.max(...catalog.map(t => t.id)) + 1, name, color };
+        setCatalog(prev => [...prev, tag]);
+        return tag;
+      }}
+    />
+  );
+}
 
 function ExplorerDemo() {
   const [folder, setFolder] = useState('2.1');
@@ -128,6 +157,14 @@ export function OrganismSpecimens() {
   return (
     <>
       <Specimen
+        name="TagPicker"
+        variants={[
+          { label: 'Éditable — croix pour retirer, « + » pour ouvrir le catalogue', node: <TagPickerDemo /> },
+          { label: 'Lecture seule — mêmes pastilles, sans prise', node: <TagPickerDemo editable={false} /> },
+        ]}
+      />
+
+      <Specimen
         name="TableCard"
         variants={[{ label: 'Tableau dans une carte', node: (
           <TableCard headers={['Membre', 'Groupe', 'Droits', 'Dernière connexion']}>
@@ -175,7 +212,7 @@ export function OrganismSpecimens() {
             <div style={{ height: '100%', display: 'flex', background: 'var(--shell-bg)' }}>
               <Sidebar>
                 <SidebarBrand name="Espace Notarial" sub="Next" />
-                <TenantSwitcher name="Briand & Hamon" role="Notaires associés" onClick={() => {}} />
+                <TenantSwitcher name="Briand & Hamon" role="Notaires associés" />
                 <Nav>
                   <NavGroup label="Général">
                     <NavItem icon="home" active>Accueil</NavItem>

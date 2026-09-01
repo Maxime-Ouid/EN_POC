@@ -1,24 +1,25 @@
-import { Decor } from '../atoms/Decor';
 import { IconButton } from '../atoms/IconButton';
 import { Nav } from '../atoms/Nav';
-import { ProtoPill } from '../atoms/ProtoPill';
 import { TopbarRight } from '../atoms/TopbarRight';
-import { Breadcrumb } from '../molecules/Breadcrumb';
 import { NavGroup } from '../molecules/NavGroup';
 import { NavItem } from '../molecules/NavItem';
 import { NavSubItem } from '../molecules/NavSubItem';
 import { SidebarBrand } from '../molecules/SidebarBrand';
 import { SidebarFoot } from '../molecules/SidebarFoot';
-import { TenantSwitcher } from '../molecules/TenantSwitcher';
+import { TenantSwitcher, type TenantOption } from '../molecules/TenantSwitcher';
 import { TopbarSearch } from '../molecules/TopbarSearch';
 import { NavBar } from '../organisms/NavBar';
+import { SearchPalette } from '../organisms/SearchPalette';
 import { Sidebar } from '../organisms/Sidebar';
 import { Topbar } from '../organisms/Topbar';
 import { positionNavTooltip } from '../atoms/navTooltip';
+import { TopbarSlotsContext } from './topbarSlots';
 import { isHorizontalNav } from '../../theme/schema';
 import { useTenantTheme } from '../../theme/useTenantTheme';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { SearchHit } from '../../api/endpoints';
+import type { LocalEntry } from '../../search/localEntries';
 
 export type { NavEntry, NavSection, NavSubEntry } from '../organisms/navModel';
 import type { NavSection } from '../organisms/navModel';
@@ -29,20 +30,35 @@ export interface AppShellProps {
   navSections: NavSection[];
   activeScreen: string;
   onNavigate: (screenKey: string) => void;
-  onSwitchOffice?: () => void;
+  /**
+   * Offices auxquels l'utilisateur appartient : le sélecteur les liste tous.
+   * En dessous de deux, il n'y a rien à choisir et il redevient une étiquette.
+   */
+  offices?: TenantOption[];
+  /** Sous-domaine de l'office courant — celui coché dans la liste. */
+  officeSubdomain?: string;
+  /** Reçoit le sous-domaine choisi dans la liste. */
+  onSelectOffice?: (subdomain: string) => void;
   userInitials: string;
   userName: string;
   userRole: string;
   onLogout?: () => void;
+  /**
+   * PLUS AFFICHÉS depuis la refonte de la topbar (01/09/2026) : la barre porte
+   * la recherche, la cloche et les commandes de l'écran courant — le fil
+   * d'Ariane a cédé sa place aux onglets de l'accueil. Les props restent
+   * acceptées pour ne pas casser les six appelants, et parce que le fil est une
+   * décision d'affichage, pas une information à jeter du modèle.
+   */
   breadcrumbCurrent: string;
   breadcrumbRoot?: string;
   hasUnreadNotifications?: boolean;
   children?: ReactNode;
   logoUrl?: string;
   /**
-   * Texte de la pastille d'avertissement de la topbar. `null` la retire.
-   * Sert à distinguer la maquette pure des écrans partiellement branchés sur
-   * le backend — le lecteur doit toujours savoir ce qui est réel.
+   * Texte de la pastille d'avertissement de la topbar. PLUS AFFICHÉ depuis la
+   * refonte du 01/09/2026 — la place revient aux commandes de l'écran. Prop
+   * conservée pour les appelants (V1Preview, V1AppView, App).
    */
   noticeLabel?: string | null;
   /**
@@ -52,6 +68,20 @@ export interface AppShellProps {
    * Laissé à `undefined`, c'est la personnalisation de l'office qui décide.
    */
   hideSectionLabels?: boolean;
+  /**
+   * Ouvre un résultat de la recherche globale. C'est cette prop qui ACTIVE la
+   * barre de recherche de la topbar et le raccourci ⌘K : sans elle, le champ
+   * reste décoratif — la palette interroge `/api/search/`, qui exige une
+   * session ouverte sur un office, ce dont la démonstration du design system
+   * ne dispose pas.
+   */
+  onSearchSelect?: (hit: SearchHit) => void;
+  /**
+   * Ce que la palette doit trouver en plus des résultats du serveur : écrans de
+   * l'application, modules activés, données de démonstration. Construit par
+   * l'appelant, qui est le seul à savoir naviguer — voir search/localEntries.ts.
+   */
+  searchLocalEntries?: LocalEntry[];
 }
 
 // Assemble la coquille de l'app (sidebar + topbar + zone de contenu) — §6.14 +
@@ -64,19 +94,48 @@ export function AppShell({
   navSections,
   activeScreen,
   onNavigate,
-  onSwitchOffice,
+  offices,
+  officeSubdomain,
+  onSelectOffice,
   userInitials,
   userName,
   userRole,
   onLogout,
-  breadcrumbCurrent,
-  breadcrumbRoot,
   hasUnreadNotifications,
   children,
   logoUrl,
-  noticeLabel = 'Aperçu — maquette visuelle',
   hideSectionLabels,
+  onSearchSelect,
+  searchLocalEntries,
 }: AppShellProps) {
+  const searchEnabled = onSearchSelect != null;
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  /* Les deux conteneurs que les écrans peuvent remplir par portail (voir
+     topbarSlots.ts). En état plutôt qu'en `ref` : c'est leur apparition qui
+     doit déclencher le rendu des écrans, sinon ceux-ci projetteraient dans le
+     vide au premier passage. */
+  const [slotStart, setSlotStart] = useState<HTMLDivElement | null>(null);
+  const [slotEnd, setSlotEnd] = useState<HTMLDivElement | null>(null);
+  const slots = useMemo(() => ({ start: slotStart, end: slotEnd }), [slotStart, slotEnd]);
+
+  // ⌘K (macOS) / Ctrl+K (Windows, Linux) — écouté sur le document parce que le
+  // raccourci doit marcher où que soit le focus, y compris dans un écran qui
+  // n'a rien à voir avec la recherche. `capture` : certains champs de saisie
+  // arrêtent la propagation des touches, le raccourci serait alors muet là où
+  // l'utilisateur en a justement le plus besoin.
+  useEffect(() => {
+    if (!searchEnabled) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [searchEnabled]);
+
   // Rubriques dépliées manuellement. Celle qui contient l'écran courant est
   // toujours ouverte, qu'elle soit dans cet ensemble ou non : l'utilisateur ne
   // doit jamais voir un item actif dans un menu replié.
@@ -93,7 +152,7 @@ export function AppShell({
   // titre que les couleurs : elle vient du thème, pas des props. Le CSS pose
   // déjà les décalages via [data-nav-placement] ; ce qui suit ne décide que de
   // CE QU'ON MONTE — un rail ne devient pas une barre d'onglets par CSS.
-  const { state } = useTenantTheme();
+  const { state, navCollapsed, navCollapsible, toggleNavCollapsed } = useTenantTheme();
   const layout = state.layout;
   const horizontal = isHorizontalNav(layout.navPlacement);
   // `hideSectionLabels` reste un veto de l'écran (V1 n'a pas d'intitulés à
@@ -101,28 +160,11 @@ export function AppShell({
   const showSectionLabels = hideSectionLabels ? false : layout.showSectionLabels;
   const countOf = (n?: number) => (layout.showBadges ? n : undefined);
 
-  /* Rubrique parente de l'écran courant (« Personnalisation », « Activités »…),
-     lue dans le modèle de navigation plutôt que passée en prop.
-
-     Depuis le retrait des titres de page (28/08/2026), le fil d'Ariane est le
-     SEUL repère qui dit dans quelle rubrique on se trouve — rôle que tenait le
-     surtitre de l'en-tête. La déduire ici évite une n-ième table écran →
-     rubrique à garder d'accord avec la navigation : c'est la navigation qui
-     fait foi. Les écrans de premier niveau (Accueil, Support…) n'ont pas de
-     parent, le fil reste alors à deux segments. */
-  const parentSection = navSections
-    .flatMap(section => section.items)
-    .find(item => item.items?.some(sub => sub.key === activeScreen));
-
-  /* Une rubrique peut porter le même nom que sa première entrée — « Dossiers ›
-     Dossiers » dans la navigation V1. On n'affiche alors le segment qu'une
-     fois : répéter le mot ne dit rien de plus et fait douter le lecteur. */
-  const showParent = parentSection && parentSection.label !== breadcrumbCurrent;
-
-  const crumbItems = [
-    ...(breadcrumbRoot ? [{ label: breadcrumbRoot }] : []),
-    ...(showParent ? [{ label: parentSection.label }] : []),
-  ];
+  /* Le fil d'Ariane occupait le début de la topbar. Il en a été retiré le
+     01/09/2026 au profit des commandes de l'écran courant (les onglets de
+     l'accueil), et le calcul de la rubrique parente qu'il affichait est parti
+     avec lui. Il vivait ici, déduit de `navSections` plutôt que passé en prop —
+     à reprendre dans l'historique Git si le repère revient. */
 
   return (
     <div className="app is-active" id="app-main">
@@ -138,9 +180,26 @@ export function AppShell({
         />
       ) : (
         <Sidebar>
-          <SidebarBrand logoUrl={logoUrl} name="Espace Notarial" sub="Next" />
-          <TenantSwitcher name={officeName} role={officeRole} onClick={onSwitchOffice} />
-          <Nav>
+          {/* Le repli est une préférence de la personne, gardée dans son
+              navigateur ; la taille de rail choisie dans Personnalisation reste
+              celle de l'office. `navCollapsible` retire le bouton quand il n'y
+              a rien à replier — voir theme/engine.ts. */}
+          <SidebarBrand
+            logoUrl={logoUrl}
+            name="Espace Notarial"
+            sub="Next"
+            collapsed={navCollapsed}
+            onToggleCollapse={navCollapsible ? toggleNavCollapsed : undefined}
+            navId="app-nav"
+          />
+          <TenantSwitcher
+            name={officeName}
+            role={officeRole}
+            offices={offices}
+            currentSubdomain={officeSubdomain}
+            onSelect={onSelectOffice}
+          />
+          <Nav id="app-nav">
             {navSections.map(section => (
               <NavGroup key={section.label} label={showSectionLabels ? section.label : undefined}>
                 {section.items.map(item => {
@@ -214,33 +273,61 @@ export function AppShell({
       )}
 
       <div className="main" style={{ position: 'relative' }}>
-        <Decor preset="app" />
+        {/* Barre unique de l'application (01/09/2026) : la barre d'outils de
+            l'accueil a été supprimée, ses commandes se projettent ici — onglets
+            d'écrans au début, boutons avant la cloche. */}
         <Topbar>
-          <Breadcrumb items={crumbItems} current={breadcrumbCurrent} />
-          <TopbarSearch placeholder="Rechercher un dossier, un document, un contact…" shortcut="⌘K" />
+          <div className="topbar-slot topbar-slot-start" ref={setSlotStart} />
           <TopbarRight>
-            {noticeLabel && <ProtoPill label={noticeLabel} />}
+            {/* La recherche a rejoint le groupe de droite : au milieu de la
+                barre, elle coupait les onglets de l'accueil de leurs propres
+                commandes. Toutes les actions de la barre sont désormais du
+                même côté, la gauche étant réservée au repère d'écran. */}
+            <TopbarSearch
+              placeholder="Rechercher un dossier, une pièce, un tag, une personne, un écran…"
+              shortcut="⌘K"
+              onActivate={searchEnabled ? () => setSearchOpen(true) : undefined}
+            />
+            <div className="topbar-slot topbar-slot-end" ref={setSlotEnd} />
             {/* En barre d'onglets, le rail n'existe plus : le sélecteur d'office
                 et la déconnexion n'ont plus de pied de sidebar où vivre. Ils
                 remontent ici plutôt que de disparaître. */}
             {horizontal && (
-              <TenantSwitcher name={officeName} role={officeRole} onClick={onSwitchOffice} />
+              <TenantSwitcher
+                name={officeName}
+                role={officeRole}
+                offices={offices}
+                currentSubdomain={officeSubdomain}
+                onSelect={onSelectOffice}
+              />
             )}
             <IconButton icon="bell" hasDot={hasUnreadNotifications} />
-            {horizontal ? (
-              <IconButton icon="logout" onClick={onLogout} />
-            ) : (
-              <div className="avatar sm" style={{ width: 32, height: 32, fontSize: 12 }}>
-                {userInitials}
-              </div>
-            )}
+            {/* L'avatar a quitté la barre le 01/09/2026 : l'identité de
+                l'utilisateur reste lisible au pied de la sidebar. En barre
+                d'onglets ce pied n'existe pas — la déconnexion reste donc ici,
+                sans quoi cette disposition n'aurait plus aucune sortie. */}
+            {horizontal && <IconButton icon="logout" onClick={onLogout} />}
           </TopbarRight>
         </Topbar>
 
         <div className="content">
-          <div className="content-inner">{children}</div>
+          {/* Le fournisseur n'enveloppe que les écrans : eux seuls projettent
+              dans la topbar, et la limiter ici évite de rerendre la coquille
+              entière quand les conteneurs apparaissent. */}
+          <div className="content-inner">
+            <TopbarSlotsContext.Provider value={slots}>{children}</TopbarSlotsContext.Provider>
+          </div>
         </div>
       </div>
+
+      {onSearchSelect && (
+        <SearchPalette
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onSelect={onSearchSelect}
+          localEntries={searchLocalEntries}
+        />
+      )}
     </div>
   );
 }

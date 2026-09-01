@@ -245,7 +245,7 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
   `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
   « restreint à personne ».
-- `Template`/`TemplateFolder` : cinquième et sixième modèles métier tenant (fait
+- `Template`/`TemplateFolder` : modèles métier tenant (fait
   le 01/09/2026) — même patron que `Dataroom`/`Folder`/`Document`/
   `AccessRestriction` (absents de `SHARED_MODELS`, pas de FK vers `Office`/`User`).
   `Template` (`name`, `description`, `created_at`) est une structure de dossiers
@@ -277,6 +277,26 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   `True`) — un office désactivé devient inaccessible EXACTEMENT comme un
   sous-domaine inconnu (`TenantResolutionMiddleware`, voir "État réel du
   code"), sans suppression de données.
+- `Tag` : modèle métier tenant (fait le 01/09/2026) — même patron que
+  `Dataroom`/`Folder`/`Document`/`AccessRestriction` (absent de `SHARED_MODELS`). C'est
+  le **catalogue de tags de l'office** : deux offices peuvent avoir un tag « Vente » sans
+  aucun rapport, et `slug` n'a besoin d'être unique que dans la base tenant — l'isolation
+  est physique, pas une colonne `office_id`. Champs : `name`, `slug`, `color`,
+  `created_at`. `Dataroom` et `Document` gagnent chacun un `ManyToManyField(Tag)` ; les
+  deux tables pivot implicites sont, comme leurs deux extrémités, des tables tenant —
+  **rien à ajouter à `SHARED_MODELS`**, contrairement à `office_enabled_modules` qui,
+  lui, relie deux modèles partagés (piège déjà rencontré, voir `tenancy/router.py`).
+  - `slug` est le nom **replié** (accents et casse écrasés — `validators.tag_slug`) et
+    sert de clé de déduplication : créer « Vente » quand « vente » existe rend le tag
+    existant plutôt qu'un doublon. C'est ce qui rend la création à la volée depuis un
+    dossier sûre sans imposer un catalogue verrouillé.
+  - `color` est une **clé sémantique** (`brass`, `info`, `success`, `warning`,
+    `critical`, `neutral`), pas un hexadécimal : la couleur affichée est résolue par le
+    thème de l'office côté front (`components/atoms/Tag.tsx`, propriétaire de la
+    palette ; `validators.TAG_COLORS` en est le miroir qui borne). Un office qui
+    personnalise sa palette voit ses tags suivre — ce qu'un `#7c3aed` figé en base
+    empêcherait. Même parti pris que `Office.theme` : le catalogue vit côté front, le
+    backend stocke et borne.
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -1305,6 +1325,214 @@ session si le code a bougé.
   sur `officeb` → toujours `200` (exception préservée) ; `bob` sur `officeb`
   (vrai membre) → toujours `200` (inchangé).
 
+- **✅ Fait le 01/09/2026 — tags : catalogue d'office, pose sur dossiers ET pièces,
+  filtre et recherche** :
+  - **Backend** : modèle `Tag` (voir « Modèle de données clé »), migration
+    `0008_tag.py`, M2M vers `Dataroom` et `Document`. Endpoints : `GET/POST /api/tags/`
+    (catalogue + `usage` = nombre d'éléments portant le tag, dossiers et pièces
+    confondus), `PATCH/DELETE /api/tags/<id>/`, `PUT /api/datarooms/<id>/tags/`,
+    `PUT /api/datarooms/<id>/documents/<id>/tags/`. `GET /api/datarooms/` accepte
+    `?tags=1,2` (**OU** — au moins un des tags) et renvoie désormais les tags de chaque
+    dossier ; `folders_view`/`documents_view` renvoient ceux de chaque pièce.
+  - **Droits volontairement asymétriques** : tout membre peut créer un tag et en
+    poser/retirer (sans quoi le tagging meurt d'attendre un admin) ; seuls
+    admin/superadmin peuvent **renommer ou supprimer** une entrée du catalogue, les deux
+    seules actions qui touchent d'un coup tous les éléments déjà tagués. Renommer vers un
+    nom déjà pris est refusé (409) plutôt que de fusionner deux entrées en silence.
+  - **Affectation par `PUT` idempotent** (la sélection COMPLÈTE, pas un delta) : l'interface
+    manipule une sélection entière (on coche/décoche), et il n'y a rien à réconcilier
+    entre deux ordres d'arrivée concurrents. Un id de tag inconnu dans la base tenant est
+    rejeté en 400 — un id valide dans l'office voisin ne doit pas passer, même règle que
+    `_resolve_folder` pour un dossier d'une autre dataroom.
+  - **`?tags=` illisible → liste vide, pas liste complète** : `?tags=abc` doit dire que le
+    filtre a joué. Répondre « tout » ferait passer un filtre cassé pour une absence de
+    filtre.
+  - **Front** : `Tag` gagne une couleur et une croix de retrait ; deux composants
+    nouveaux — `TagFilter` (molécule : menu multi-sélection, décompte visible menu fermé)
+    et `TagPicker` (organisme : pastilles + « + », recherche repliée accents/casse comme
+    `tag_slug`, création à la volée avec choix de la couleur). Montés dans la colonne
+    « Tags » de la liste des dossiers, dans l'en-tête du dossier ouvert, et par pièce dans
+    l'explorateur ; le volet document les rappelle en lecture seule (un même réglage offert
+    à deux endroits finit par diverger). Hook `useTags` pour le catalogue.
+  - **Deux filtrages, deux endroits, pour une raison** : la liste des dossiers filtre côté
+    SERVEUR (le décompte affiché doit rester celui de l'office, pas celui de la page
+    chargée) ; les pièces d'un dossier filtrent côté CLIENT (`useDataroomTree` a déjà
+    chargé toute l'arborescence, un aller-retour par case cochée n'ajouterait qu'un délai).
+    La barre de recherche de la liste, elle, cherche aussi dans les **noms de tags** :
+    taper « vente » doit ramener les dossiers tagués Vente, pas seulement ceux qui portent
+    le mot dans leur intitulé.
+  - **Décompte sous le tableau** : sous filtre par tag, on n'annonce plus « x sur y » — le
+    total de l'office n'est plus connu du client, et l'annoncer serait inventer un chiffre.
+  - **Correction au passage dans `scripts/check-design-system.mjs`** : la règle
+    `composant-recopie` cherchait `\btag\b`, qui matche aussi `tag-menu`, `tag-dot`,
+    `tag-list`… Un `\b` s'arrête au tiret ; passé en `\btag(?![\w-])`, sans quoi 21 faux
+    positifs poussaient à ajouter des exemptions plutôt qu'à lire la sortie.
+  - **`seed_office_content`** pose maintenant un catalogue de six tags et tague le contenu
+    de démonstration. Le catalogue est créé même quand le contenu existe déjà : sans lui,
+    le menu « Tags » s'ouvre vide et la fonctionnalité passe pour absente.
+  - **Vérifications** : `python manage.py test` — 126 tests OK, dont 21 nouveaux
+    (`TagValidatorTests`, `TagRouterTests`, `TagApiTests` : repliage du slug, dédup à la
+    création, usage cumulé dossiers+pièces, droits admin, refus du renommage en doublon,
+    suppression qui retire le tag partout, OU du filtre, filtre illisible, id inconnu,
+    aller-retour sur une pièce, création de dossier avec tags, non-membre refusé).
+    `npm run lint` (0 erreur), `tsc -b` (0 erreur), `vite build` OK, `npm run check:ds`
+    (0 écart nouveau). **Non vérifié en navigateur** — la session de travail n'avait pas
+    accès au serveur de dev de cette machine ; le parcours à refaire à la main est :
+    créer un tag depuis la colonne « Tags » d'un dossier, le retrouver dans le menu de
+    filtre, filtrer, taguer une pièce, vérifier que le tag survit à un changement de
+    rubrique.
+  - **Reste à faire** : lancer `python manage.py migrate_all_tenants` (nouvelle
+    migration `0008_tag` à appliquer à CHAQUE base d'office) avant toute démo.
+
+- **✅ Fait le 01/09/2026 — recherche par tag dans la palette globale (⌘K)** :
+  - **Le manque** : les tags n'étaient cherchables que par la barre de la liste des
+    dossiers. Depuis la palette globale, taper « prioritaire » ne ramenait rien — la
+    fonctionnalité paraissait absente à qui n'ouvre pas le menu « Tags ».
+  - **`GET /api/search/`** fait maintenant DEUX passages : les noms d'abord (inchangé),
+    puis les tags — `Dataroom` et `Document` uniquement, un `Folder` et une personne
+    n'en portant pas. Même règle de correspondance (début de mot, `_name_starts_with`),
+    et **rigoureusement les mêmes helpers d'accès** (`_level_visible`,
+    `_user_can_access`) : un tag ne doit pas devenir un chemin de traverse vers une
+    pièce restreinte.
+  - **Pourquoi deux passages et non un `OR`** : chaque résultat porte désormais
+    `matched_tag` (le tag qui l'a fait remonter, `null` sur une correspondance par nom).
+    Avec un `OR`, la provenance serait indiscernable, et la palette afficherait un nom
+    où la frappe est introuvable — un résultat qui a l'air arbitraire. Les
+    `exclude(name__iregex=...)` du second passage garantissent qu'un élément ne remonte
+    jamais deux fois, le nom l'emportant même quand il a été coupé par la limite.
+  - **Limite par type propre au passage par tag**, non partagée avec celui par nom : une
+    étude qui étiquette large ne doit pas chasser de la palette les éléments dont c'est
+    le nom même qui correspond.
+  - **Front** : la ligne de résultat affiche la pastille du tag (composant `Tag` du
+    design system, pas une classe maison — les couleurs vivent sur `.tag.tag-<clé>`), et
+    c'est ELLE qui porte le surlignage, la frappe étant absente du nom. Surlignage
+    repassé en `currentColor` + soulignement dans ce contexte : le violet de `.hl` est
+    illisible sur un fond de tag rouge ou vert. Placeholders de la palette et de la
+    topbar mis à jour (« …, un tag, … »).
+  - **Vérifications** : `python manage.py test datarooms` — 132 tests OK, dont 6 nouveaux
+    dans `SearchApiTests` (un tag trouve ce qui le porte quand le nom ne dit rien ; une
+    correspondance par nom ne porte pas de justification ; nom + tag = un seul résultat ;
+    un tag n'ouvre aucun contournement d'`AccessRestriction`, avec contre-épreuve sur
+    l'utilisateur autorisé ; correspondance début de mot ; le tag d'un dossier ne remonte
+    pas son contenu). `tsc -b` et `npm run lint` (0 erreur). **Non vérifié en
+    navigateur** — parcours à refaire à la main : ⌘K puis « prioritaire » (doit ramener
+    « Vente Guerin - 8 avenue Foch », dont le nom ne contient pas le mot, avec la
+    pastille « Prioritaire »), puis « signé » (deux pièces, par leur tag), puis « vente »
+    (le même dossier remonte par son NOM, donc sans pastille).
+
+## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
+
+**⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**
+(pointant sur `565a388`, l'état de `back/EN_evolution_suite` juste avant le merge). En cas
+de souci découvert avant la démo de 17h, `git reset --hard back/EN_evolution_suite-backup-01-09`
+sur `back/EN_evolution_suite` revient instantanément à l'état d'avant fusion.
+
+**Contexte** : depuis la dernière fusion (28/08/2026, remplacement complet du frontend),
+les deux branches avaient divergé depuis le même point commun (`0fa0572`) — 4 commits
+côté `back/EN_evolution_suite` (Templates, interface hyperadmin, correction de la faille
+de connexion), 6 commits côté collègue (dashboard par widgets, recherche globale ⌘K,
+tags, repli du rail de navigation). Contrairement à la dernière fois, **pas de refonte
+frontend complète cette fois** — seuls 5 fichiers étaient touchés des deux côtés
+(`CLAUDE.md`, `models.py`, `tests.py`, `urls.py`, `views.py`, tous backend/doc), les 75
+autres fichiers frontend modifiés par le collègue (dashboard, recherche, tags — ~8600
+lignes) étaient additifs sans recouvrement avec quoi que ce soit touché ici. Une fusion
+`git merge` classique était donc le bon choix, vérifié avant de s'y engager (voir la
+demande explicite de ne pas supposer l'ampleur sans l'avoir vérifiée) — pas de reprise
+manuelle ciblée cette fois.
+
+**Conflits textuels (5 fichiers)** : résolus en conservant les deux côtés à chaque fois
+(aucun des deux chantiers ne remplaçait l'autre) :
+- `models.py` : collision d'insertion entre `HyperadminAccess` (nous) et `Tag` (collègue),
+  juste après `OfficeMembership` — les deux classes gardées, l'une après l'autre.
+- `urls.py` : import combiné (nos 6 nouvelles vues + leurs 5), la liste `urlpatterns`
+  elle-même avait déjà fusionné proprement toute seule (aucun recouvrement de ligne).
+- `views.py` : POST `/api/datarooms/` combine désormais `template_id` (nous) ET `tags`
+  (collègue) dans le même appel ; le filtre de `GET /api/datarooms/` combine
+  `_level_visible(..., office, ...)` (notre signature du jour) ET `_matches_tag_filter`
+  (leur filtre par tag).
+- `tests.py` : les deux côtés avaient ajouté des classes de test à la fin du fichier au
+  même point d'insertion (`RoleBasedDefaultAccessTests`/`DataroomTemplateTests`/
+  `HyperadminTests` vs `SearchApiTests`/`TagValidatorTests`/`TagRouterTests`/
+  `TagApiTests`) — les marqueurs de conflit s'entrelaçaient sur près de 1000 lignes de
+  code partagé (le canevas `unittest.TestCase` + tenant sqlite dédié est identique d'une
+  classe à l'autre). Résolu en reconstruisant la queue du fichier à partir des deux
+  sources complètes plutôt qu'en résolvant chaque marqueur isolément (risque d'erreur
+  trop élevé sur un entrelacement de cette taille) : les 3 classes d'un côté, les 4 de
+  l'autre, mises bout à bout après `PathVisibilityTests` (dernière classe commune,
+  confirmée identique octet pour octet entre les deux branches avant la reconstruction).
+- `CLAUDE.md` : sections "Modèle de données clé" et "État actuel du POC" combinées ; les
+  mentions "cinquième [modèle]"/"cinquième et sixième [modèles]" retirées des deux côtés
+  (devenues inexactes une fois les deux chantiers combinés, plus de compteur ordinal
+  entretenu désormais pour ce genre d'énoncé).
+
+**⚠️ Incohérence fonctionnelle SANS conflit textuel, trouvée en vérifiant** (exactement
+le risque signalé avant de fusionner) : le `search_view`/`dataroom_tags_view`/
+`document_tags_view` du collègue appelaient encore `_user_can_access`/`_level_visible`
+avec l'ANCIENNE signature à 2 arguments (`user, dataroom`), antérieure au changement de
+défaut d'accès par rôle fait aujourd'hui même (ajout du paramètre `office`, voir entrée
+du 01/09/2026 plus haut). Comme ces appels sont dans du code entièrement NOUVEAU côté
+collègue (pas de ligne en commun avec ce que j'ai modifié), git les a fusionnés sans
+broncher — un `TypeError` silencieux à l'exécution, jamais détecté par un conflit Git.
+Trouvé par lecture systématique du diff `views.py` avant de fusionner (pas après), puis
+confirmé par un `grep` de tous les appels aux trois fonctions une fois le merge fait : 7
+sites corrigés (`dataroom_tags_view`, `document_tags_view`, et 5 dans `search_view`).
+**Aucune incohérence trouvée dans `validators.py`** (vérifié comme demandé, malgré
+l'absence de conflit textuel) — les ajouts du collègue (validation `Tag`/`dashboard`) ne
+référencent rien touché ici, purement additifs.
+
+**Migrations, collision renumérotée** : `0007_template_templatefolder.py`/
+`0008_office_is_active_hyperadminaccess.py` (nous) contre
+`0007_officemembership_dashboard.py`/`0008_tag.py` (collègue) — même piège que la
+dernière fusion. Les 4 fichiers supprimés et régénérés en une seule migration propre
+(`0007_tag_template_office_is_active_and_more.py`, dépendance unique sur
+`0006_office_theme`) puisque `models.py` fusionné portait déjà tous les changements des
+deux côtés. **Décalage entre bases locales et nouvel historique** (spécifique à cet
+environnement de dev, pas un souci pour un clone neuf) : les bases SQLite locales
+(`db.sqlite3`, `tenants/officea.sqlite3`, `tenants/officeb.sqlite3`) avaient déjà les
+tables issues des anciennes migrations `0007`/`0008` supprimées — `migrate` échouait donc
+sur "table already exists". Corrigé en ajoutant à la main les seules tables/colonnes
+réellement manquantes (`OfficeMembership.dashboard` sur `default` ; `Tag`,
+`datarooms_dataroom_tags`, `datarooms_document_tags` sur chaque tenant — DDL extraite
+d'un tenant neuf migré à blanc pour éviter toute erreur de frappe), purge des entrées
+d'historique des anciennes migrations, puis `migrate --fake` sur la nouvelle. Aucune
+perte de données (le compte `hyperadmin` et son accès ont été vérifiés intacts après
+coup).
+
+**Test cassé par une incohérence fonctionnelle légitime** (1 échec sur 147 au premier
+run) : `TagApiTests.test_a_dataroom_can_be_created_with_tags` se connectait avec un
+`membre` pour créer une dataroom — comportement qui marchait avant le resserrement à
+admin/superadmin décidé aujourd'hui (chantier Templates). Corrigé en changeant l'acteur
+du test vers `self.admin` (déjà présent dans le `setUp` de la classe) : le test vérifie
+le rattachement des tags à la création, pas le rôle de l'appelant, donc aucune perte de
+couverture.
+
+**Vérifications, toutes vertes** :
+- `python manage.py test` → **147/147** (72 d'avant + les tests du collègue, aucune
+  régression après le correctif ci-dessus).
+- `npm run check:ds` → 173 fichiers vérifiés, aucun écart nouveau.
+- `npm run build` (`tsc -b && vite build`) → sans erreur.
+- `npm run lint` → seuls des avertissements préexistants des deux côtés (confirmés en
+  comparant contre `origin/front/design-system-suite` seule via un worktree temporaire),
+  aucun nouveau.
+- **Scénario de démo complet rejoué en Chrome réel**, pas seulement en `curl` : connexion
+  `carla` + TOTP sur `officea.localhost:5173`, bascule vers `officeb.localhost:5173` par
+  le sélecteur d'office SANS reconnexion ni MFA à ressaisir (ticket SSO), données/modules
+  bien différents entre les deux (4 dossiers actifs + module Coffre-fort sur A, 1 dossier
+  + aucun module sur B — deux bases tenant réellement distinctes), puis désactivation du
+  module Coffre-fort pour Office A depuis `/admin/` → disparition immédiate de l'entrée
+  de nav côté React après un simple rechargement, sans redéploiement — remis à l'état
+  d'origine (module réactivé) après vérification.
+  **Nécessité découverte en cours de route** : aucun compte Django `is_staff`/
+  `is_superuser` n'existait encore dans cet environnement pour accéder à `/admin/` — un
+  superutilisateur `admin`/`demo1234` a été créé (`createsuperuser`) pour cette
+  vérification et laissé en place, potentiellement utile pour la démo de 17h si besoin de
+  retoucher `/admin/` en direct. **Piège rencontré** : le cookie de session Django est
+  partagé entre `/admin/` (port 8000) et l'app React (port 5173) sur le même
+  sous-domaine — se connecter à `/admin/` dans un onglet remplace la session active de
+  l'autre onglet (vu passer de `carla` à `admin` après le login `/admin/`), il faut
+  rouvrir une session `carla` propre après être passé par `/admin/` pour continuer à
+  observer le scénario avec le bon compte.
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
@@ -1411,6 +1639,14 @@ session si le code a bougé.
       (décision explicite, voir "État réel du code"). `seed_demo` étendu
       (compte `hyperadmin`). Pas d'UI dans ce chantier (demande explicitement
       backend + tests + doc). Notifications globales laissées au backlog.
+- [x] **Tags** (catalogue par office, pose sur dossiers ET pièces, filtre et
+      recherche) — fait le 01/09/2026 : modèle `Tag`, création à la volée
+      dédupliquée sur le nom replié, filtre multi-sélection en OU, tags
+      cherchés par la barre de recherche de la liste au même titre que les
+      noms, **et par la palette globale ⌘K** (second passage de
+      `/api/search/`, résultat justifié par `matched_tag` — même date).
+      Renommage/suppression du catalogue réservés aux admins. Non vérifié en
+      navigateur (voir « État réel du code »).
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le

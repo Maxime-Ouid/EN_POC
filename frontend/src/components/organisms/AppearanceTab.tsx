@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import {
+  APP_BG,
+  APP_BG_KEYS,
   NAV_ACTIVE,
   NAV_ACTIVE_KEYS,
   NAV_DENSITY,
@@ -15,6 +17,7 @@ import {
   TYPOGRAPHY_KEYS,
 } from '../../theme/schema';
 import { useTenantTheme } from '../../theme/useTenantTheme';
+import { AppBgSwatch } from '../atoms/AppBgSwatch';
 import { Avatar } from '../atoms/Avatar';
 import { BarTrack } from '../atoms/BarTrack';
 import { Button } from '../atoms/Button';
@@ -28,12 +31,14 @@ import { Tag } from '../atoms/Tag';
 import { Toggle } from '../atoms/Toggle';
 import { TypographySample } from '../atoms/TypographySample';
 import { PresetCard } from '../molecules/PresetCard';
+import { TokenItem } from '../molecules/TokenItem';
 import { PresetRow } from '../molecules/PresetRow';
 import { StatCard } from '../molecules/StatCard';
 import { SubscreenPanel } from '../atoms/SubscreenPanel';
 import { TabStrip } from '../molecules/TabStrip';
 import { TokenEditor } from './TokenEditor';
 import type { TabDef } from '../molecules/TabStrip';
+import { TOKEN_SCHEMA } from '../../theme/schema';
 import type { ThemeMode } from '../../theme/schema';
 
 const EDIT_MODES: Array<{ key: ThemeMode; label: string }> = [
@@ -51,6 +56,7 @@ const EDIT_MODES: Array<{ key: ThemeMode; label: string }> = [
    affichés) tiennent dans un seul onglet : ils se règlent ensemble. */
 const APPEARANCE_TABS: TabDef[] = [
   { key: 'couleurs', label: 'Couleurs' },
+  { key: 'fond', label: 'Fond' },
   { key: 'typographie', label: 'Typographie' },
   { key: 'formes', label: 'Formes' },
   { key: 'navigation', label: 'Navigation' },
@@ -71,6 +77,7 @@ export function AppearanceTab() {
     setEditMode,
     setTypography,
     setShape,
+    setAppBg,
     setLayout,
     reset,
     justSaved,
@@ -127,7 +134,46 @@ export function AppearanceTab() {
                 </button>
               ))}
             </div>
-            <TokenEditor />
+            <TokenEditor exclude={['appbg']} />
+          </div>
+        </SubscreenPanel>
+
+        {/* --- Fond de l'espace connecté ---------------------------------
+            Les formes flottantes ont été retirées de l'espace connecté le
+            01/09/2026 (elles restent sur les écrans de connexion) : ce qui se
+            règle ici est le fond lui-même. Seuls les tokens que le fond
+            sélectionné consomme réellement sont affichés — proposer un réglage
+            sans effet visible est le piège déjà rencontré avec `shell-bg`. */}
+        <SubscreenPanel level={3} active={tab === 'fond'}>
+          <div className="appearance-block">
+            <div className="appearance-block-desc">
+              Fond des écrans une fois connecté. Les écrans de connexion gardent leur
+              décor animé, réglé plus bas dans l'onglet Couleurs.
+            </div>
+            <PresetRow label="Style de fond">
+              {APP_BG_KEYS.map(key => {
+                const preset = APP_BG[key];
+                return (
+                  <PresetCard
+                    key={key}
+                    active={state.appBg === key}
+                    onSelect={() => setAppBg(key)}
+                    preview={<AppBgSwatch bg={key} />}
+                    name={preset.label}
+                    desc={preset.desc}
+                  />
+                );
+              })}
+            </PresetRow>
+            <div className="token-group" style={{ marginTop: 18 }}>
+              <div className="token-group-title">Couleurs de ce fond</div>
+              <div className="token-grid">
+                {APP_BG[state.appBg].uses.map(key => {
+                  const token = TOKEN_SCHEMA.find(t => t.key === key);
+                  return token ? <TokenItem key={key} token={token} /> : null;
+                })}
+              </div>
+            </div>
           </div>
         </SubscreenPanel>
 

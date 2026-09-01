@@ -22,9 +22,10 @@ import zlib
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 
-from datarooms.models import Dataroom, Document, Folder, Office
+from datarooms.models import Dataroom, Document, Folder, Office, Tag
 from datarooms.tenancy.context import TenantContext, reset_current_tenant, set_current_tenant
 from datarooms.tenancy.registry import ensure_tenant_registered, tenant_alias
+from datarooms.validators import tag_slug
 
 
 def _pdf(title, lines):
@@ -90,8 +91,32 @@ def _png(width, height, rgb):
     )
 
 
+# Catalogue de tags de l'office. Il est posé même quand le contenu existe déjà :
+# sans lui, le menu « Tags » de la liste des dossiers s'ouvre vide et la
+# fonctionnalité passe pour absente alors qu'elle attend juste des entrées.
+TAGS = {
+    "Vente": "brass",
+    "Succession": "info",
+    "Diagnostic": "warning",
+    "Signé": "success",
+    "Prioritaire": "critical",
+    "Identité": "neutral",
+}
+
+# Tags posés sur les pièces, par nom de fichier — une table à part plutôt qu'une
+# troisième valeur dans chaque tuple de CONTENU, qui rendrait la structure des
+# fichiers illisible pour une information secondaire.
+TAGS_PAR_PIECE = {
+    "Compromis de vente.pdf": ["Vente", "Signé"],
+    "DPE.pdf": ["Diagnostic"],
+    "Plan cadastral.png": ["Diagnostic"],
+    "Piece identite vendeur.png": ["Identité"],
+    "Acte de notoriete.pdf": ["Succession", "Signé"],
+}
+
 CONTENU = {
     "Vente Guerin - 8 avenue Foch": {
+        "tags": ["Vente", "Prioritaire"],
         "racine": [
             ("Compromis de vente.pdf", lambda: _pdf("Compromis de vente", [
                 "Bien : appartement T3, 8 avenue Foch.",
@@ -118,6 +143,7 @@ CONTENU = {
         },
     },
     "Succession Martin": {
+        "tags": ["Succession"],
         "racine": [
             ("Acte de notoriete.pdf", lambda: _pdf("Acte de notoriete", [
                 "Succession de M. Martin, decede le 03/02/2026.",
@@ -153,32 +179,53 @@ class Command(BaseCommand):
         ensure_tenant_registered(subdomain)
         token = set_current_tenant(TenantContext(subdomain=subdomain, alias=tenant_alias(subdomain)))
         try:
+            catalogue = self._catalogue()
             for nom, plan in CONTENU.items():
                 dataroom = Dataroom.objects.filter(name=nom).first()
                 if dataroom is not None:
                     self.stdout.write(f"'{nom}' existe déjà — ignoré.")
                     continue
                 dataroom = Dataroom.objects.create(name=nom)
+                dataroom.tags.set([catalogue[t] for t in plan.get("tags", [])])
                 pieces = 0
 
                 for fichier, fabrique in plan["racine"]:
-                    self._document(dataroom, None, fichier, fabrique())
+                    self._document(dataroom, None, fichier, fabrique(), catalogue)
                     pieces += 1
 
                 for nom_dossier, fichiers in plan["dossiers"].items():
                     dossier = Folder.objects.create(dataroom=dataroom, parent=None, name=nom_dossier)
                     for fichier, fabrique in fichiers:
-                        self._document(dataroom, dossier, fichier, fabrique())
+                        self._document(dataroom, dossier, fichier, fabrique(), catalogue)
                         pieces += 1
 
                 self.stdout.write(self.style.SUCCESS(f"'{nom}' créé — {pieces} pièce(s)."))
         finally:
             reset_current_tenant(token)
 
-    def _document(self, dataroom, folder, filename, content):
-        Document.objects.create(
+    def _catalogue(self):
+        """Crée (ou retrouve) les tags de l'office et les rend indexés par nom.
+
+        Idempotent, et volontairement exécuté même quand tout le contenu existe
+        déjà : le catalogue est ce qui rend le filtre par tag démontrable. Les
+        tags posés à la main pendant une démo ne sont jamais retirés — seuls les
+        dossiers NOUVELLEMENT créés reçoivent leurs tags par défaut.
+        """
+        catalogue = {}
+        for nom, couleur in TAGS.items():
+            tag, cree = Tag.objects.get_or_create(
+                slug=tag_slug(nom), defaults={"name": nom, "color": couleur}
+            )
+            catalogue[nom] = tag
+            if cree:
+                self.stdout.write(f"Tag « {nom} » ajouté au catalogue.")
+        return catalogue
+
+    def _document(self, dataroom, folder, filename, content, catalogue):
+        document = Document.objects.create(
             dataroom=dataroom,
             folder=folder,
             name=filename,
             file=ContentFile(content, name=filename),
         )
+        document.tags.set([catalogue[t] for t in TAGS_PAR_PIECE.get(filename, [])])
