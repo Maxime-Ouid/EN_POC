@@ -1250,9 +1250,9 @@ session si le code a bougé.
     inconnus silencieusement ignorés (même défense en profondeur que
     `_clean_roles`/`_set_restriction`).
   **`seed_demo`** étendu : compte `hyperadmin` (mdp `demo1234`), avec
-  `HyperadminAccess`. Pas de `TOTPDevice` préconfiguré (contrairement à
-  `carla`, qui porte spécifiquement LE scénario d'identité partagée) — premier
-  login enrôle son dispositif comme `alice`/`bob`.
+  `HyperadminAccess`. Il a reçu depuis un `TOTPDevice` préconfiguré, comme
+  `carla` (voir « TOTP de démo pour `hyperadmin` ») : plus d'enrôlement à faire
+  devant l'audience.
   **⚠️ Décision explicite — pas de sous-domaine dédié pour cette version** : le
   gate `_is_hyperadmin` ne consulte jamais `request.office`, donc les routes
   `/api/hyperadmin/...` restent utilisables depuis N'IMPORTE QUEL sous-domaine
@@ -2498,6 +2498,23 @@ couverture.
   l'autre onglet (vu passer de `carla` à `admin` après le login `/admin/`), il faut
   rouvrir une session `carla` propre après être passé par `/admin/` pour continuer à
   observer le scénario avec le bon compte.
+
+## TOTP de démo pour `hyperadmin` (02/09/2026)
+
+**`hyperadmin` reçoit un dispositif TOTP préconfiguré** (`seed_demo`, même
+`DEMO_TOTP_KEY` que carla et alice) : `.\dev.ps1 totp` sort maintenant un code
+valable pour lui aussi, et son message le dit. Le compte n'avait pas de scénario
+de démo dédié quand il a été semé — la console lui en donne un, et personne ne
+veut scanner un QR code devant l'audience pour montrer l'activation d'un module.
+Sur une base déjà semée, le dispositif existant garde son ancienne clé
+(`get_or_create` ne réécrit pas) : mettre `key`/`confirmed` à jour à la main, ou
+supprimer le dispositif avant de relancer `seed_demo`.
+
+**Point d'attention non corrigé** : l'écran d'enrôlement MFA affiche le secret de
+saisie manuelle en HEXADÉCIMAL (`device.key` brut, mfa_setup). Une application
+d'authentification attend du base32 — le QR code marche, la saisie manuelle non.
+Antérieur à ce lot, laissé au back. (Conversion de dépannage :
+`base64.b32encode(binascii.unhexlify(cle_hex))`.)
 
 ## État actuel du POC
 

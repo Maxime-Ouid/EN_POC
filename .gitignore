@@ -2,7 +2,7 @@
 node_modules/
 __pycache__/
 *.pyc
-db.sqlite3
+db.sqlite3*
 tenants/
 media/
 .env
@@ -10,3 +10,4 @@ dist/
 tmp/
 .dev/
 *.pem
+*.avant-*
