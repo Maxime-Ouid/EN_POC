@@ -1,14 +1,19 @@
 import json
+import shutil
 import sqlite3
+import tempfile
 import unittest
 from binascii import unhexlify
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.sessions.models import Session
+from django.core.files.storage import default_storage
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connections
-from django.test import Client, RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
 from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
@@ -21,7 +26,7 @@ from .tenancy.registry import ensure_tenant_registered, tenant_alias, tenant_db_
 from .tenancy.router import TenantRouter
 from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
-    DASHBOARD_MAX_PAGES, DASHBOARD_MAX_PAGE_NAME, DASHBOARD_MAX_WIDGETS,
+    DASHBOARD_MAX_PAGES, DASHBOARD_MAX_PAGE_NAME, DASHBOARD_MAX_WIDGETS, LOGO_MAX_BYTES,
     DashboardValidationError, TagValidationError, ThemeValidationError,
     clean_dashboard_payload, clean_tag_payload, clean_theme_payload,
     is_accepted_extension, tag_slug,
@@ -212,6 +217,183 @@ class ThemeValidatorTests(TestCase):
             self._payload(layout={"navPlacement": "top", "navRainbow": True})
         )
         self.assertNotIn("navRainbow", cleaned["layout"])
+
+
+# Stockage local jetable : les tests ne doivent pas dépendre d'un MinIO qui tourne.
+# `default_storage` est reconstruit par le signal setting_changed d'override_settings,
+# le remplacement est donc bien pris en compte à l'intérieur de la classe.
+_LOGO_TMP_DIR = tempfile.mkdtemp(prefix="en-logo-tests-")
+
+
+@override_settings(
+    STORAGES={
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": _LOGO_TMP_DIR},
+        },
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+)
+class TenantLogoApiTests(TestCase):
+    """PATCH /api/tenant-config/ et GET /api/tenant-logo/ — logo par office (02/09/2026).
+
+    Le logo est le dernier morceau manquant de la « marque grise » : la couleur était
+    câblée depuis le 28/08, pas le logo. Il est stocké sous une clé dans
+    `Office.logo_url` (voir _logo_key : le champ porte une clé, pas une URL) et servi
+    par un relais, jamais depuis MinIO — dont l'URL est en http quand l'application
+    est en https.
+    """
+
+    HOST = "officea.localhost"
+    PNG = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(_LOGO_TMP_DIR, ignore_errors=True)
+
+    def setUp(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("officea"), None)
+        self.addCleanup(connections.databases.pop, tenant_alias("officeb"), None)
+        self.office = Office.objects.create(subdomain="officea", name="Office A")
+        self.other_office = Office.objects.create(subdomain="officeb", name="Office B")
+
+        self.admin = User.objects.create_user(username="logo-admin", password="motdepasse")
+        OfficeMembership.objects.create(user=self.admin, office=self.office, role="admin")
+
+        self.membre = User.objects.create_user(username="logo-membre", password="motdepasse")
+        OfficeMembership.objects.create(user=self.membre, office=self.office, role="membre")
+
+        self.etranger = User.objects.create_user(username="logo-etranger", password="motdepasse")
+        OfficeMembership.objects.create(user=self.etranger, office=self.other_office, role="admin")
+
+    def _upload(self, name="logo.png", content=None):
+        return self.client.patch(
+            "/api/tenant-config/",
+            data=encode_multipart(
+                BOUNDARY, {"logo": SimpleUploadedFile(name, content or self.PNG)}
+            ),
+            content_type=MULTIPART_CONTENT,
+            HTTP_HOST=self.HOST,
+        )
+
+    def test_config_reports_no_logo_before_any_upload(self):
+        self.client.force_login(self.membre)
+        res = self.client.get("/api/tenant-config/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 200)
+        # Chaîne vide, pas null : le front teste une valeur, pas la présence d'une clé.
+        self.assertEqual(res.json()["logo_url"], "")
+
+    def test_only_admins_can_change_the_identity(self):
+        # Un membre voit le logo de son étude mais ne le change pas — même partage
+        # lecture/écriture que tenant_theme : repeindre engage toute l'étude.
+        self.client.force_login(self.membre)
+        self.assertEqual(self._upload().status_code, 403)
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.logo_url, "")
+
+    def test_admin_uploads_a_logo_and_the_relay_serves_it(self):
+        self.client.force_login(self.admin)
+        res = self._upload()
+        self.assertEqual(res.status_code, 200)
+
+        # L'API renvoie une URL de RELAIS, pas la clé de stockage ni une URL MinIO.
+        url = res.json()["logo_url"]
+        self.assertIn("/api/tenant-logo/", url)
+        self.assertNotIn("9000", url)
+
+        self.office.refresh_from_db()
+        self.assertTrue(self.office.logo_url.startswith("offices/officea/logo-"))
+        self.assertTrue(default_storage.exists(self.office.logo_url))
+
+        served = self.client.get("/api/tenant-logo/", HTTP_HOST=self.HOST)
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served["Content-Type"], "image/png")
+        self.assertEqual(b"".join(served.streaming_content), self.PNG)
+        # Un SVG déposé ici s'exécuterait sur l'origine de l'API s'il était ouvert
+        # dans un onglet : la CSP est posée pour tous les formats, pas seulement lui.
+        self.assertIn("default-src 'none'", served["Content-Security-Policy"])
+        self.assertEqual(served["X-Content-Type-Options"], "nosniff")
+
+    def test_replacing_a_logo_changes_the_url_and_drops_the_old_file(self):
+        self.client.force_login(self.admin)
+        first_url = self._upload().json()["logo_url"]
+        self.office.refresh_from_db()
+        first_key = self.office.logo_url
+
+        second_url = self._upload().json()["logo_url"]
+        self.office.refresh_from_db()
+
+        # Sans URL distincte, le navigateur continuerait d'afficher l'ancien logo :
+        # c'est tout l'intérêt du suffixe aléatoire dans la clé.
+        self.assertNotEqual(first_url, second_url)
+        self.assertFalse(default_storage.exists(first_key))
+        self.assertTrue(default_storage.exists(self.office.logo_url))
+
+    def test_remove_logo_returns_to_the_notantis_brand(self):
+        self.client.force_login(self.admin)
+        self._upload()
+        self.office.refresh_from_db()
+        key = self.office.logo_url
+
+        res = self.client.patch(
+            "/api/tenant-config/",
+            data=encode_multipart(BOUNDARY, {"remove_logo": "true"}),
+            content_type=MULTIPART_CONTENT,
+            HTTP_HOST=self.HOST,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["logo_url"], "")
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.logo_url, "")
+        self.assertFalse(default_storage.exists(key))
+
+        self.assertEqual(self.client.get("/api/tenant-logo/", HTTP_HOST=self.HOST).status_code, 404)
+
+    def test_renaming_the_office_leaves_the_logo_alone(self):
+        self.client.force_login(self.admin)
+        self._upload()
+        self.office.refresh_from_db()
+        key = self.office.logo_url
+
+        res = self.client.patch(
+            "/api/tenant-config/",
+            data=encode_multipart(BOUNDARY, {"name": "Etude Renommee"}),
+            content_type=MULTIPART_CONTENT,
+            HTTP_HOST=self.HOST,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["name"], "Etude Renommee")
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.logo_url, key)
+
+    def test_refuses_a_format_that_is_not_an_image(self):
+        self.client.force_login(self.admin)
+        res = self._upload(name="logo.exe", content=b"MZ")
+        self.assertEqual(res.status_code, 400)
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.logo_url, "")
+
+    def test_refuses_a_file_heavier_than_the_cap(self):
+        self.client.force_login(self.admin)
+        res = self._upload(content=b"x" * (LOGO_MAX_BYTES + 1))
+        self.assertEqual(res.status_code, 400)
+        self.office.refresh_from_db()
+        self.assertEqual(self.office.logo_url, "")
+
+    def test_an_outsider_reaches_neither_the_config_nor_the_logo(self):
+        self.client.force_login(self.admin)
+        self._upload()
+
+        # Membre d'un AUTRE office, sur le sous-domaine de celui-ci : ni lecture de
+        # l'identité, ni du fichier. Le logo n'est pas public.
+        self.client.force_login(self.etranger)
+        self.assertEqual(self.client.get("/api/tenant-config/", HTTP_HOST=self.HOST).status_code, 403)
+        self.assertEqual(self.client.get("/api/tenant-logo/", HTTP_HOST=self.HOST).status_code, 403)
 
 
 class TenantThemeApiTests(TestCase):

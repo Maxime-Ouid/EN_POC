@@ -330,6 +330,9 @@ export default function App() {
   const [savingTemplateAccess, setSavingTemplateAccess] = useState(false);
   const [templateAccessSaveError, setTemplateAccessSaveError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  /** Enregistrement de l'identité de l'étude (nom + logo). */
+  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
   const [dataroomFilter, setDataroomFilter] = useState('');
@@ -760,7 +763,12 @@ export default function App() {
   }
 
   const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
-  const canManageTemplates = assignableRoles(currentOffice?.role).length > 0;
+  /* Un seul prédicat : « l'appelant administre cette étude » (admin ou
+     superadmin — assignableRoles ne rend une liste non vide qu'à eux). Il gate
+     les modèles de dossier ET l'identité de l'étude, qui sont réservés aux
+     mêmes rôles côté serveur ; deux noms pour la même condition finiraient par
+     diverger. */
+  const canManageOffice = assignableRoles(currentOffice?.role).length > 0;
 
   // Contenu de l'onglet « Template » de Personnalisation (02/09/2026 — déplacé
   // depuis l'ancienne entrée de navigation top-level « Modèles de dossier »,
@@ -776,7 +784,7 @@ export default function App() {
           rows={templates.items}
           loading={templates.loading}
           error={templates.error}
-          canManage={canManageTemplates}
+          canManage={canManageOffice}
           onOpen={id => setOpenTemplateId(id)}
           onCreate={() => {
             setTemplateModalError(null);
@@ -866,7 +874,7 @@ export default function App() {
             effectiveRoles={templateEffectiveRolesByRowId}
             loading={templateTree.loading || officeUsers.loading}
             error={templateAccessSaveError ?? officeUsers.error ?? templateTree.error}
-            canManage={canManageTemplates}
+            canManage={canManageOffice}
             onBackToList={() => setOpenTemplateId(null)}
             onCreateRootFolder={() => setNewTemplateFolderModal({ parentId: undefined })}
             onCreateFolder={rowId => setNewTemplateFolderModal({ parentId: rowId.slice('folder:'.length) })}
@@ -1413,11 +1421,37 @@ export default function App() {
             identity: {
               displayName: session.tenant?.name ?? '',
               subdomain: window.location.host,
-              logoUrl: session.tenant?.logo_url,
+              logoUrl: session.tenant?.logo_url || undefined,
             },
-            // Aucun endpoint d'écriture sur Office pour l'instant : l'onglet
-            // édite localement et le dit, plutôt que de simuler un succès.
-            error: "L'enregistrement de l'identité n'est pas encore exposé par l'API.",
+            saving: identitySaving,
+            error: identityError,
+            // Le serveur refuse déjà l'écriture à un non-administrateur : l'écran
+            // évite seulement de proposer un formulaire qui finirait en 403, et dit
+            // pourquoi plutôt que de masquer l'onglet.
+            readOnly: !canManageOffice,
+            readOnlyNote: canManageOffice
+              ? undefined
+              : "L'identité de l'étude est modifiable par ses administrateurs.",
+            onSave: async ({ displayName, logoFile, removeLogo }) => {
+              setIdentityError(null);
+              setIdentitySaving(true);
+              try {
+                await api.saveTenantIdentity({
+                  name: displayName,
+                  logoFile,
+                  removeLogo,
+                });
+                // Le nom et le logo sont lus depuis `session.tenant` par toute
+                // l'application (bandeau, fil d'Ariane, écran de connexion) :
+                // recharger la session est ce qui les fait suivre partout, sans
+                // état parallèle à tenir à jour ici.
+                await session.refresh();
+              } catch (err) {
+                setIdentityError(err instanceof Error ? err.message : 'Enregistrement impossible');
+              } finally {
+                setIdentitySaving(false);
+              }
+            },
           }}
           modules={{
             modules: modulesWithServerState,
