@@ -1632,7 +1632,17 @@ les écrans fonctionnent :
 **Point d'attention non corrigé** : l'écran d'enrôlement MFA affiche le secret de
 saisie manuelle en HEXADÉCIMAL (`device.key` brut, mfa_setup). Une application
 d'authentification attend du base32 — le QR code marche, la saisie manuelle non.
-Antérieur à ce lot, laissé au back.
+Antérieur à ce lot, laissé au back. (Conversion de dépannage :
+`base64.b32encode(binascii.unhexlify(cle_hex))`.)
+
+**`hyperadmin` reçoit un dispositif TOTP préconfiguré** (`seed_demo`, même
+`DEMO_TOTP_KEY` que carla et alice) : `.\dev.ps1 totp` sort maintenant un code
+valable pour lui aussi, et son message le dit. Le compte n'avait pas de scénario
+de démo dédié quand il a été semé — la console lui en donne un, et personne ne
+veut scanner un QR code devant l'audience pour montrer l'activation d'un module.
+Sur une base déjà semée, le dispositif existant garde son ancienne clé
+(`get_or_create` ne réécrit pas) : mettre `key`/`confirmed` à jour à la main, ou
+supprimer le dispositif avant de relancer `seed_demo`.
 
 **Piège d'environnement, à noter** : lancer une classe de test
 `unittest.TestCase` SEULE (`manage.py test datarooms.tests.HyperadminTests`) ne
