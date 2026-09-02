@@ -1700,6 +1700,28 @@ class HyperadminTests(unittest.TestCase):
     def _host(self):
         return f"{self.CONTROL_SUBDOMAIN}.localhost:8000"
 
+    def test_whoami_exposes_the_hyperadmin_flag(self):
+        """Le front a besoin de savoir s'il doit monter la console Notantis
+        AVANT d'appeler quoi que ce soit sous /api/hyperadmin/ — sans ce
+        drapeau, il ne lui reste qu'un 403 provoque exprès a chaque connexion,
+        ou une entree de menu montree a tout le monde. Le rang est transverse :
+        il ne depend pas de l'office du Host (ici l'office de controle, dont
+        l'hyperadmin n'est meme pas membre)."""
+        host = self._host()
+
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.get("/api/whoami/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["username"], "hat_hyperadmin")
+        self.assertIs(res.json()["is_hyperadmin"], True)
+
+        # Un admin d'office reste non-hyperadmin : le drapeau est present et
+        # faux, pas absent — le front teste une valeur, pas une clef.
+        self.client.force_login(self.regular_user)
+        res = self.client.get("/api/whoami/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        self.assertIs(res.json()["is_hyperadmin"], False)
+
     def test_non_hyperadmin_gets_403_on_all_endpoints(self):
         # Un admin d'office "classique" (même role="admin"/"superadmin" sur son
         # office) n'est PAS hyperadmin — rôles distincts, voir HyperadminAccess.

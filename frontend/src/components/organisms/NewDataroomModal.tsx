@@ -12,7 +12,13 @@ export interface NewDataroomModalProps {
   onCreate: (data: { name: string; portfolioId: string; clientSpaceId: string; templateId: string | null }) => void;
   portfolioOptions: Array<{ id: string; label: string }>;
   clientSpaceOptions: Array<{ id: string; label: string }>;
+  /**
+   * Modèles de l'étude (GET /api/templates/). Liste vide = la section se réduit
+   * à « Dossier vide » : proposer un choix qui n'existe pas serait pire que ne
+   * rien proposer.
+   */
   templates: DataroomTemplate[];
+  templatesLoading?: boolean;
 }
 
 // Modale "Nouveau dossier" — index_16.html #modal-new.
@@ -23,11 +29,16 @@ export function NewDataroomModal({
   portfolioOptions,
   clientSpaceOptions,
   templates,
+  templatesLoading,
 }: NewDataroomModalProps) {
   const [name, setName] = useState('');
   const [portfolioId, setPortfolioId] = useState(portfolioOptions[0]?.id ?? '');
   const [clientSpaceId, setClientSpaceId] = useState(clientSpaceOptions[0]?.id ?? '');
-  const [templateId, setTemplateId] = useState<string | null>(templates[0]?.id ?? null);
+  /* Aucun modèle par défaut : appliquer une arborescence — et les restrictions
+     d'accès qu'elle porte — parce que c'est la première ligne de la liste est
+     un effet que personne n'a demandé. « Dossier vide » est donc l'état initial,
+     et choisir un modèle est un geste explicite. */
+  const [templateId, setTemplateId] = useState<string | null>(null);
 
   return (
     <Modal
@@ -78,6 +89,13 @@ export function NewDataroomModal({
         </Field>
       </FieldRow>
       <Field label="Partir d'un modèle">
+        <TemplateOption
+          icon="file"
+          name="Dossier vide"
+          desc="Sans arborescence pré-remplie"
+          selected={templateId === null}
+          onClick={() => setTemplateId(null)}
+        />
         {templates.map(t => (
           <TemplateOption
             key={t.id}
@@ -88,6 +106,13 @@ export function NewDataroomModal({
             onClick={() => setTemplateId(t.id)}
           />
         ))}
+        {templatesLoading && <div className="tiny dim">Chargement des modèles…</div>}
+        {!templatesLoading && templates.length === 0 && (
+          <div className="tiny dim">
+            Aucun modèle enregistré pour cette étude — Personnalisation → Modules &amp;
+            modèles permet d'en créer.
+          </div>
+        )}
       </Field>
     </Modal>
   );

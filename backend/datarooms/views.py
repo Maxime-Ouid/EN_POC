@@ -132,7 +132,23 @@ def logout_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def whoami(request):
-    return Response({"username": request.user.username})
+    """Identite de l'appelant, plus le seul drapeau que le front ne peut pas
+    deduire d'ailleurs : `is_hyperadmin`.
+
+    Le role d'office est deja porte par /api/my-offices/ (un role par office),
+    mais le rang hyperadmin est TRANSVERSE (HyperadminAccess, base default) et
+    n'apparait dans aucune autre reponse. Sans lui, l'interface n'aurait le
+    choix qu'entre sonder /api/hyperadmin/offices/ a chaque connexion pour
+    recolter un 403 attendu, ou montrer a tout le monde une entree de menu qui
+    echouera pour presque tous : les deux se voient a l'ecran.
+
+    `_is_hyperadmin` est defini plus bas dans ce module, avec les vues
+    hyperadmin qu'il garde — resolu a l'appel, pas a l'import.
+    """
+    return Response({
+        "username": request.user.username,
+        "is_hyperadmin": _is_hyperadmin(request.user),
+    })
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

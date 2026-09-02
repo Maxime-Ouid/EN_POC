@@ -23,6 +23,14 @@ export type { TagColor };
 
 export interface WhoAmI {
   username: string;
+  /**
+   * Rang Notantis TRANSVERSE a tous les offices (HyperadminAccess cote Django),
+   * distinct du role `superadmin` d'un membership, qui reste scope a UN office.
+   * Il n'apparait dans aucune autre reponse — `my-offices` ne porte que des
+   * roles d'office — d'ou sa place ici : sans lui, l'interface ne pourrait
+   * decider de monter la console Notantis qu'en provoquant un 403.
+   */
+  is_hyperadmin: boolean;
 }
 
 export interface OfficeMembership {
@@ -185,6 +193,56 @@ export interface SearchResponse {
   truncated: boolean;
 }
 
+/**
+ * Un modele de dossier de l'office — GET /api/templates/.
+ *
+ * A ne pas confondre avec deux homonymes du front : `DataroomTemplate`
+ * (molecules/TemplateOption) est la forme d'AFFICHAGE d'une ligne de modele, et
+ * les « templates » du tableau de bord (dashboard/templates.ts) sont des
+ * dispositions de widgets, sans aucun rapport. Seul ce type-ci correspond au
+ * modele Django `Template`.
+ *
+ * Un modele est une definition PURE : l'appliquer copie son arborescence en
+ * vrais dossiers, et le lien est rompu aussitot — modifier le modele ensuite ne
+ * touche aucun dossier deja cree (voir models.Template).
+ */
+export interface TemplateSummary {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+/**
+ * Un dossier dans l'arborescence d'un modele — GET /api/templates/<id>/folders/.
+ *
+ * `visible_to_roles` porte des ROLES, pas des utilisateurs : ils ne sont
+ * resolus en personnes reelles qu'au moment ou le modele est applique a un
+ * dossier (views._apply_template), avec les membres que l'office a CE
+ * moment-la. Une liste vide = aucune restriction posee, le dossier cree suivra
+ * la regle d'acces par defaut.
+ */
+export interface TemplateFolderSummary {
+  id: number;
+  name: string;
+  parent: number | null;
+  visible_to_roles: string[];
+}
+
+/**
+ * Un office vu par la console Notantis — GET /api/hyperadmin/offices/.
+ *
+ * Reserve aux hyperadmins (403 sinon), et volontairement joignable depuis
+ * n'importe quel sous-domaine : le rang ne depend d'aucun office.
+ */
+export interface HyperadminOffice {
+  id: number;
+  subdomain: string;
+  name: string;
+  is_active: boolean;
+  enabled_modules: string[];
+}
+
 export interface OfficeUserRow {
   membership_id: number;
   user_id: number;
@@ -309,10 +367,17 @@ export const api = {
       { signal },
     ),
 
-  createDataroom: (name: string, tagIds?: number[]) =>
+  /**
+   * Cree un dossier — reserve admin/superadmin depuis le 01/09/2026 (meme gate
+   * que les modeles). `templateId` reproduit l'arborescence du modele en vrais
+   * dossiers ET pose les restrictions d'acces qu'il decrit, en une seule
+   * requete : le front n'enchaine pas des creations de dossiers a la main, ce
+   * qui laisserait un dossier a moitie prepare si l'une d'elles echouait.
+   */
+  createDataroom: (name: string, tagIds?: number[], templateId?: number | null) =>
     apiFetch<{ id: number; name: string; tags: TagSummary[] }>('/api/datarooms/', {
       method: 'POST',
-      body: { name, tags: tagIds ?? [] },
+      body: { name, tags: tagIds ?? [], ...(templateId ? { template_id: templateId } : {}) },
     }),
 
   /** Remplace l'ensemble des tags du dossier (PUT idempotent, pas d'ajout unitaire). */
@@ -399,6 +464,110 @@ export const api = {
    */
   documentContent: (dataroomId: number, documentId: number, signal?: AbortSignal) =>
     apiFetchBlob(`/api/datarooms/${dataroomId}/documents/${documentId}/content/`, signal),
+
+  /**
+   * Modeles de dossier de l'office — reserve admin/superadmin (403 sinon), la
+   * meme porte que la gestion des utilisateurs. La modale « Nouveau dossier »
+   * appelle donc cette liste seulement pour un appelant qui peut deja creer un
+   * dossier : depuis le 01/09/2026 les deux exigent le meme rang.
+   */
+  listTemplates: (signal?: AbortSignal) => apiFetch<TemplateSummary[]>('/api/templates/', { signal }),
+
+  createTemplate: (name: string, description = '') =>
+    apiFetch<TemplateSummary>('/api/templates/', { method: 'POST', body: { name, description } }),
+
+  updateTemplate: (templateId: number, patch: { name?: string; description?: string }) =>
+    apiFetch<TemplateSummary>(`/api/templates/${templateId}/`, { method: 'PATCH', body: patch }),
+
+  /**
+   * Supprime le modele et son arborescence. Les dossiers deja crees a partir de
+   * lui ne bougent pas : la copie est independante des l'application (voir
+   * TemplateSummary).
+   */
+  deleteTemplate: (templateId: number) =>
+    apiFetch<void>(`/api/templates/${templateId}/`, { method: 'DELETE' }),
+
+  /**
+   * Un NIVEAU de l'arborescence du modele — `parentId` omis = la racine. Meme
+   * forme que listFolderLevel, sans documents : un modele ne porte que des
+   * dossiers.
+   */
+  listTemplateFolders: (templateId: number, parentId?: number, signal?: AbortSignal) =>
+    apiFetch<{ folders: TemplateFolderSummary[] }>(
+      `/api/templates/${templateId}/folders/${parentId != null ? `?parent=${parentId}` : ''}`,
+      { signal },
+    ),
+
+  createTemplateFolder: (
+    templateId: number,
+    name: string,
+    parentId?: number | null,
+    visibleToRoles: string[] = [],
+  ) =>
+    apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/`, {
+      method: 'POST',
+      body: { name, parent: parentId ?? null, visible_to_roles: visibleToRoles },
+    }),
+
+  updateTemplateFolder: (
+    templateId: number,
+    folderId: number,
+    patch: { name?: string; visible_to_roles?: string[] },
+  ) =>
+    apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/${folderId}/`, {
+      method: 'PATCH',
+      body: patch,
+    }),
+
+  /** Supprime le dossier de modele ET sa descendance (cascade cote Django). */
+  deleteTemplateFolder: (templateId: number, folderId: number) =>
+    apiFetch<void>(`/api/templates/${templateId}/folders/${folderId}/`, { method: 'DELETE' }),
+
+  /** Tous les offices de la plateforme — reserve aux hyperadmins Notantis. */
+  listHyperadminOffices: (signal?: AbortSignal) =>
+    apiFetch<HyperadminOffice[]>('/api/hyperadmin/offices/', { signal }),
+
+  /**
+   * Cree un office ET son premier administrateur dans le meme appel — le
+   * serveur valide tout avant d'ecrire quoi que ce soit, il n'existe donc pas
+   * d'etat intermediaire « office sans admin ». `adminMode: 'create'` ouvre un
+   * nouveau compte (mot de passe requis, valide par Django), `'attach'`
+   * rattache un compte existant designe par son nom exact.
+   *
+   * L'appel provisionne aussi la base SQLite du nouvel office : il est lent a
+   * l'echelle d'un clic (migration complete), l'interface doit le dire.
+   */
+  createHyperadminOffice: (payload: {
+    subdomain: string;
+    name: string;
+    adminMode: 'create' | 'attach';
+    adminUsername: string;
+    adminPassword?: string;
+  }) =>
+    apiFetch<HyperadminOffice>('/api/hyperadmin/offices/', {
+      method: 'POST',
+      body: {
+        subdomain: payload.subdomain,
+        name: payload.name,
+        admin_mode: payload.adminMode,
+        admin_username: payload.adminUsername,
+        ...(payload.adminMode === 'create' ? { admin_password: payload.adminPassword ?? '' } : {}),
+      },
+    }),
+
+  /**
+   * Active/desactive un office et/ou remplace la liste de ses modules actives.
+   * Un office desactive devient inaccessible comme un sous-domaine inconnu
+   * (TenantResolutionMiddleware) — ses donnees restent, ses membres non.
+   */
+  updateHyperadminOffice: (
+    officeId: number,
+    patch: { is_active?: boolean; enabled_module_slugs?: string[] },
+  ) =>
+    apiFetch<HyperadminOffice>(`/api/hyperadmin/offices/${officeId}/`, {
+      method: 'PATCH',
+      body: patch,
+    }),
 
   /** Membres de l'office visibles par l'appelant (un admin ne voit pas les superadmin) — réservé admin/superadmin. */
   listOfficeUsers: (signal?: AbortSignal) =>

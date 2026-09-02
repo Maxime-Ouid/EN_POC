@@ -13,6 +13,11 @@ import {
   AccessRestrictionModal,
   ConfirmModal,
   DocumentPreview,
+  HyperadminScreen,
+  type HyperadminOfficeRow,
+  NewOfficeModal,
+  NewTemplateModal,
+  TemplateEditorModal,
   OfficeUsersScreen,
   type OfficeUserRowData,
   OfficeUserModal,
@@ -31,6 +36,8 @@ import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useD
 import { useTags } from './hooks/useTags';
 import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRestrictions';
 import { useOfficeUsers } from './hooks/useOfficeUsers';
+import { useTemplates, useTemplateTree } from './hooks/useTemplates';
+import { useHyperadminOffices } from './hooks/useHyperadminOffices';
 import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
 import { api, type DocumentSummary, type TagColor, type TagSummary } from './api/endpoints';
@@ -40,14 +47,12 @@ import {
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
   CONNECTED_USERS,
-  DATAROOM_TEMPLATES,
   DEMO_HOME_STATS,
   HISTORY,
   INVOICES,
   MEMBERS,
   MODULE_CATALOG,
   NAV_SECTIONS,
-  NEW_DATAROOM_TEMPLATES,
   PORTFOLIOS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
@@ -84,7 +89,8 @@ type ScreenKey =
   | 'dataroom'
   | 'stats'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'hyperadmin';
 
 /**
  * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
@@ -104,6 +110,7 @@ const CRUMB_LABELS: Record<ScreenKey, string> = {
   stats: 'Statistiques & facturation',
   users: "Annuaire de l'étude",
   settings: 'Personnalisation',
+  hyperadmin: 'Console Notantis',
 };
 
 /**
@@ -225,6 +232,10 @@ export default function App() {
   const session = useSession();
   const authenticated = session.status === 'authenticated';
   const username = session.user?.username ?? '';
+  /* Remonté au-dessus des hooks (il vivait juste avant le rendu) : le rôle de
+     l'appelant dans l'office courant décide désormais s'il faut charger les
+     modèles de dossier, pas seulement ce qu'un écran affiche. */
+  const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
 
   const [screen, setScreen] = useState<ScreenKey>('dashboard');
   const [moduleSlug, setModuleSlug] = useState<string | null>(null);
@@ -240,6 +251,15 @@ export default function App() {
   const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  /** Modèle de dossier ouvert dans l'éditeur (id serveur), et création en cours. */
+  const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
+  const [newTemplateOpen, setNewTemplateOpen] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  /** Ouverture d'une étude depuis la console Notantis — l'appel provisionne une
+      base, d'où l'état « occupé » distinct de l'ouverture de la modale. */
+  const [newOfficeOpen, setNewOfficeOpen] = useState(false);
+  const [newOfficeBusy, setNewOfficeBusy] = useState(false);
+  const [newOfficeError, setNewOfficeError] = useState<string | null>(null);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
   const [dataroomFilter, setDataroomFilter] = useState('');
@@ -264,6 +284,21 @@ export default function App() {
   // modale d'accès. Il n'est chargé que quand l'un des deux est à l'écran — un
   // membre simple n'y a de toute façon pas droit (403).
   const officeUsers = useOfficeUsers(authenticated && (screen === 'users' || accessTarget !== null));
+
+  // Le rang hyperadmin est transverse aux offices : il vient de /api/whoami/ et
+  // non du rôle porté par le membership de l'office courant (voir WhoAmI).
+  const isHyperadmin = session.user?.is_hyperadmin ?? false;
+  const hyperadminOffices = useHyperadminOffices(authenticated && isHyperadmin);
+
+  // Les modèles servent à DEUX endroits — la gestion dans Personnalisation et le
+  // choix « Partir d'un modèle » à la création d'un dossier — d'où un chargement
+  // au niveau de l'application. L'endpoint est réservé admin/superadmin, exactement
+  // comme la création d'un dossier depuis le 01/09/2026 : les deux écrans qui s'en
+  // servent sont donc déjà hors de portée d'un membre simple.
+  const canManageOffice = assignableRoles(currentOffice?.role).length > 0;
+  const templates = useTemplates(authenticated && canManageOffice);
+  const templateTree = useTemplateTree(openTemplateId);
+  const openTemplate = templates.items.find(t => t.id === openTemplateId) ?? null;
 
   // Restriction de la cible ouverte. Sans cible, `dataroomId` vaut null : le hook
   // ne déclenche aucune requête (voir sa clé interne).
@@ -316,10 +351,24 @@ export default function App() {
       ),
     }));
 
+    /* Section Notantis : contrairement aux entrées d'office, celle-ci
+       DISPARAÎT pour qui n'est pas hyperadmin, au lieu de rester visible et de
+       mener à un 403 expliqué à l'écran (le parti pris de « Annuaire de
+       l'étude »). La différence est voulue : un administrateur d'étude a de
+       bonnes raisons d'apprendre que l'annuaire existe et lui échappe, alors
+       que la console transverse à toutes les études n'a rien à faire dans le
+       menu d'un client. Le rang vient de /api/whoami/, pas d'une déduction. */
+    const withNotantis = isHyperadmin
+      ? [
+          ...withRealCounts,
+          { label: 'Notantis', items: [{ key: 'hyperadmin', icon: 'shield', label: 'Console Notantis' }] },
+        ]
+      : withRealCounts;
+
     const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
-    if (!active.length) return withRealCounts;
+    if (!active.length) return withNotantis;
     return [
-      ...withRealCounts,
+      ...withNotantis,
       {
         label: 'Modules',
         items: active.map(m => ({
@@ -329,7 +378,7 @@ export default function App() {
         })),
       },
     ];
-  }, [modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error]);
+  }, [modulesWithServerState, isHyperadmin, datarooms.items.length, datarooms.loading, datarooms.error]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
@@ -395,9 +444,21 @@ export default function App() {
       entries.push(demo(`cx-${u.id}`, 'i-users', u.name,
         `Statistiques & facturation / ${u.name}`, 'Connecté', () => navigate('stats')));
     }
-    for (const t of DATAROOM_TEMPLATES) {
-      entries.push(demo(`tpl-${t.id}`, 'i-seal', t.name, `Modèles / ${t.name}`,
-        'Modèle', () => setModalOpen(true)));
+    /* Les modèles de dossier existent maintenant côté serveur (/api/templates/) :
+       ils entrent dans la palette comme vrais résultats, sans la mention
+       « simulé », et mènent à leur éditeur plutôt qu'à la création d'un dossier. */
+    for (const t of templates.items) {
+      entries.push({
+        key: `tpl-${t.id}`,
+        icon: 'i-seal',
+        name: t.name,
+        path: `Personnalisation / Modèles / ${t.name}`,
+        kindLabel: 'Modèle',
+        open: () => {
+          navigate('settings');
+          setOpenTemplateId(t.id);
+        },
+      });
     }
     for (const q of QA_ENTRIES) {
       entries.push(demo(`qa-${q.id}`, 'i-msg', q.object, `Questions / Réponses`,
@@ -417,7 +478,7 @@ export default function App() {
     // capturé qui changerait son comportement) ; la lister forcerait un recalcul
     // à chaque rendu sans rien apporter.
     // oxlint-disable-next-line exhaustive-deps
-  }, [navSections]);
+  }, [navSections, templates.items]);
 
   // Filtrage local de la liste Dossiers — même sémantique que la recherche
   // globale : correspondance en DÉBUT DE MOT, pas sous-chaîne quelconque (voir
@@ -559,8 +620,6 @@ export default function App() {
       />
     );
   }
-
-  const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
 
   return (
     <AppShell
@@ -755,12 +814,22 @@ export default function App() {
           <NewDataroomModal
             open={modalOpen}
             onClose={() => setModalOpen(false)}
-            onCreate={({ name }) => {
-              void datarooms.create(name).then(() => setModalOpen(false));
+            onCreate={({ name, templateId }) => {
+              // Le modèle est appliqué PAR LE SERVEUR dans la même requête
+              // (POST /api/datarooms/ avec template_id) : dossiers et
+              // restrictions arrivent ensemble, ou pas du tout.
+              void datarooms
+                .create(name, [], templateId ? Number(templateId) : null)
+                .then(() => setModalOpen(false));
             }}
             portfolioOptions={PORTFOLIO_OPTIONS}
             clientSpaceOptions={CLIENT_SPACE_OPTIONS}
-            templates={NEW_DATAROOM_TEMPLATES}
+            templates={templates.items.map(t => ({
+              id: String(t.id),
+              name: t.name,
+              desc: t.description || 'Sans description',
+            }))}
+            templatesLoading={templates.loading}
           />
         </>
       )}
@@ -979,16 +1048,162 @@ export default function App() {
           }}
           modules={{
             modules: modulesWithServerState,
-            templates: DATAROOM_TEMPLATES,
-            // Aucun endpoint d'activation : les interrupteurs montrent l'état
-            // réel de l'office et ne prétendent pas agir. Un interrupteur qui
-            // bascule sans rien changer côté serveur est pire que pas
-            // d'interrupteur du tout — il fait croire la démo faite.
+            // Aucun endpoint d'activation À L'ÉCHELLE DE L'OFFICE : les
+            // interrupteurs montrent l'état réel et ne prétendent pas agir. Un
+            // interrupteur qui bascule sans rien changer côté serveur est pire
+            // que pas d'interrupteur du tout — il fait croire la démo faite.
+            // (L'activation existe désormais, mais côté Notantis : console
+            // hyperadmin, PATCH /api/hyperadmin/offices/<id>/.)
             readOnly: true,
             readOnlyNote:
-              "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
+              "L'activation d'un module relève de Notantis, pas de l'étude : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
+            templates: templates.items.map(t => ({
+              id: String(t.id),
+              name: t.name,
+              desc: t.description || 'Sans description',
+            })),
+            templatesLoading: templates.loading,
+            templatesError: templates.error,
+            onCreateTemplate: () => {
+              setTemplateError(null);
+              setNewTemplateOpen(true);
+            },
+            onOpenTemplate: id => {
+              setTemplateError(null);
+              setOpenTemplateId(Number(id));
+            },
           }}
         />
+      )}
+
+      {!openModuleEntry && screen === 'settings' && (
+        <>
+          <NewTemplateModal
+            open={newTemplateOpen}
+            error={templateError}
+            onClose={() => {
+              setNewTemplateOpen(false);
+              setTemplateError(null);
+            }}
+            onCreate={({ name, description }) => {
+              setTemplateError(null);
+              templates
+                .createTemplate(name, description)
+                .then(created => {
+                  setNewTemplateOpen(false);
+                  // On enchaîne sur l'éditeur : un modèle sans arborescence ne
+                  // sert à rien, et l'avoir créé sans rien à y mettre laisserait
+                  // l'utilisateur devant une liste où il faut recliquer.
+                  setOpenTemplateId(created.id);
+                })
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+          />
+          <TemplateEditorModal
+            // L'éditeur garde des brouillons de saisie : les remonter dans la
+            // clé évite qu'un nom tapé pour un modèle réapparaisse dans un autre.
+            key={openTemplateId ?? 'closed'}
+            open={openTemplate !== null}
+            name={openTemplate?.name ?? ''}
+            description={openTemplate?.description ?? ''}
+            tree={templateTree.tree}
+            loading={templateTree.loading}
+            error={templateError ?? templateTree.error}
+            onClose={() => {
+              setOpenTemplateId(null);
+              setTemplateError(null);
+            }}
+            onRename={patch => {
+              if (openTemplateId === null) return;
+              setTemplateError(null);
+              templates
+                .renameTemplate(openTemplateId, patch)
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+            onAddFolder={(name, parentId, roles) => {
+              setTemplateError(null);
+              templateTree
+                .addFolder(name, parentId, roles)
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+            onUpdateFolder={(folderId, patch) => {
+              setTemplateError(null);
+              templateTree
+                .updateFolder(folderId, patch)
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+            onRemoveFolder={folderId => {
+              setTemplateError(null);
+              templateTree
+                .removeFolder(folderId)
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+            onDeleteTemplate={() => {
+              if (openTemplateId === null) return;
+              setTemplateError(null);
+              templates
+                .deleteTemplate(openTemplateId)
+                .then(() => setOpenTemplateId(null))
+                .catch((err: Error) => setTemplateError(err.message));
+            }}
+          />
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'hyperadmin' && (
+        <>
+          <HyperadminScreen
+            rows={hyperadminOffices.items.map<HyperadminOfficeRow>(o => ({
+              id: o.id,
+              subdomain: o.subdomain,
+              name: o.name,
+              isActive: o.is_active,
+              enabledModules: o.enabled_modules,
+            }))}
+            // Le catalogue des modules vit côté front (libellés, icônes) ; les
+            // « à venir » n'ont pas de ligne Module en base, les proposer ici
+            // ferait un interrupteur que le serveur ignore silencieusement.
+            modules={MODULE_CATALOG.filter(m => !m.comingSoon).map(m => ({
+              slug: m.slug,
+              name: m.name,
+            }))}
+            loading={hyperadminOffices.loading}
+            error={hyperadminOffices.error}
+            currentSubdomain={currentOffice?.subdomain}
+            onCreateOffice={() => {
+              setNewOfficeError(null);
+              setNewOfficeOpen(true);
+            }}
+            onToggleActive={(office, next) => {
+              void hyperadminOffices.setOfficeActive(office.id, next);
+            }}
+            onToggleModule={(office, slug, next) => {
+              const slugs = next
+                ? [...office.enabledModules, slug]
+                : office.enabledModules.filter(s => s !== slug);
+              void hyperadminOffices.setOfficeModules(office.id, slugs);
+            }}
+          />
+          <NewOfficeModal
+            open={newOfficeOpen}
+            busy={newOfficeBusy}
+            error={newOfficeError}
+            onClose={() => {
+              if (newOfficeBusy) return;
+              setNewOfficeOpen(false);
+              setNewOfficeError(null);
+            }}
+            onCreate={payload => {
+              setNewOfficeError(null);
+              setNewOfficeBusy(true);
+              hyperadminOffices
+                .createOffice(payload)
+                .then(() => setNewOfficeOpen(false))
+                .catch((err: Error) => setNewOfficeError(err.message))
+                .finally(() => setNewOfficeBusy(false));
+            }}
+          />
+        </>
       )}
     </AppShell>
   );

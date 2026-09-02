@@ -6,6 +6,7 @@ export * from './DataroomsListScreen';
 // navigable (?view=prototype-preview) et le UI kit le montrent encore : c'est la
 // version de référence contre laquelle on compare le nouvel accueil.
 export * from './HomeScreen';
+export * from './HyperadminScreen';
 export * from './LoginScreen';
 export * from './MfaScreen';
 export * from './ModuleScreen';

@@ -1533,6 +1533,73 @@ couverture.
   rouvrir une session `carla` propre après être passé par `/admin/` pour continuer à
   observer le scénario avec le bon compte.
 
+## Interfaces Templates et hyperadmin (02/09/2026, front)
+
+Les deux chantiers du 01/09 étaient livrés backend + tests + doc, sans écran. Ce
+lot ajoute les interfaces, sans toucher à la logique métier — aucune règle
+d'accès, aucun sérialiseur, aucune vue existante n'a changé de comportement.
+
+**Une seule modification backend, assumée** : `/api/whoami/` renvoie désormais
+`is_hyperadmin` en plus de `username` (+ un test dans `HyperadminTests`). Sans
+ce drapeau, le front n'avait le choix qu'entre sonder `/api/hyperadmin/offices/`
+à chaque connexion pour récolter un 403 attendu, ou montrer à tout le monde une
+entrée de menu qui échouerait pour presque tous. Le rôle d'office est déjà porté
+par `/api/my-offices/`, mais le rang hyperadmin est transverse et n'apparaissait
+dans aucune réponse.
+
+**Modèles de dossier** — Personnalisation → « Modules & modèles ». La section
+« Modèles de dataroom » de cet onglet existait déjà dans la maquette et tournait
+sur `data/demo.tsx` : elle est branchée sur `/api/templates/`, et les faux
+modèles sont retirés de cet écran (ils restent dans `PrototypeDemo`/UiKit/V1,
+qui sont des surfaces de maquette). Cliquer un modèle ouvre
+`organisms/TemplateEditorModal` : intitulé, arborescence en liste indentée,
+ajout/renommage/suppression de dossiers, et les rôles de `visible_to_roles` en
+boutons à bascule. La modale dit à l'écran les deux choses que le backend fait
+sans que rien ne les laisse deviner — les rôles sont résolus en personnes
+réelles seulement à l'application (un modèle ne vieillit donc pas quand l'étude
+change), et aucun rôle coché veut dire ouvert à l'étude, pas « personne ».
+
+La modale « Nouveau dossier » consomme la même liste : `template_id` part avec
+le POST, l'arborescence et les restrictions sont donc posées par le serveur en
+une requête. Le choix par défaut est **« Dossier vide »**, pas le premier modèle
+de la liste — appliquer des restrictions d'accès parce qu'une option était en
+tête n'est pas un effet qu'on peut laisser par défaut.
+
+**Console Notantis** — `pages/HyperadminScreen`, entrée de menu dans une section
+« Notantis » qui n'apparaît que pour un hyperadmin. Écart volontaire avec
+« Annuaire de l'étude », qui reste visible pour tous et explique son 403 : un
+administrateur d'étude a de bonnes raisons d'apprendre que l'annuaire existe et
+lui échappe, une console transverse à toutes les études n'a rien à faire dans le
+menu d'un client. Liste des offices avec recherche/pagination locales, bascule
+`is_active`, modules activés en boutons (le catalogue vient du front, les
+« à venir » sont exclus — ils n'ont pas de ligne `Module` en base et le serveur
+les ignorerait en silence), et `organisms/NewOfficeModal` pour ouvrir une étude
+avec son premier administrateur dans le même appel (bouton tenu occupé pendant
+le provisionnement de la base, qui n'est pas instantané).
+
+C'est cet écran qui rend le pari n°1 démontrable en direct : activer un module
+pour une étude et pas pour une autre, et le menu de l'étude concernée change au
+rechargement suivant, sans redéploiement — ce qui se faisait jusqu'ici par
+`/admin/` Django. L'onglet Modules de l'étude reste volontairement en lecture
+seule : l'activation relève de Notantis, et sa note le dit maintenant.
+
+**Vérifications** : `npx tsc -b --force` propre ; `npm run check:ds` → 179
+fichiers, aucun écart nouveau ; `python manage.py test` sur
+`TenantContextTests`/`HyperadminTests`/`DataroomTemplateTests`/
+`RoleBasedDefaultAccessTests` → 14/14. Cinq aperçus HTML statiques (rendu SSR)
+ont été produits pour validation visuelle. **Pas encore exercé dans un vrai
+navigateur** — `vite build` et `oxlint` ne sont pas lançables depuis le sandbox
+Linux (binaires natifs installés pour Windows), même limite que les lots
+précédents.
+
+**Piège d'environnement, à noter** : lancer une classe de test
+`unittest.TestCase` SEULE (`manage.py test datarooms.tests.HyperadminTests`) ne
+crée aucune base de test — Django ne provisionne les bases que pour les classes
+dérivant de `SimpleTestCase`, et ces tests tapent alors la vraie `db.sqlite3`,
+avec des échecs trompeurs (« table datarooms_office has no column named
+is_active »). Il faut inclure au moins une classe `TestCase` Django dans la
+sélection, par exemple `datarooms.tests.TenantContextTests`.
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
@@ -1624,8 +1691,10 @@ couverture.
       au moment de l'application, aucun lien conservé vers le template ensuite
       — voir "État réel du code"). **Changement connexe décidé en revue** :
       créer une dataroom (avec ou sans template) est désormais réservé
-      admin/superadmin, ce qui n'était pas le cas avant. Pas d'UI dans ce
-      chantier (demande explicitement backend + tests + doc).
+      admin/superadmin, ce qui n'était pas le cas avant. **UI faite le
+      02/09/2026** : gestion dans Personnalisation → « Modules & modèles »
+      (`organisms/TemplateEditorModal`), et choix du modèle branché dans la
+      modale « Nouveau dossier » — voir la section datée plus haut.
 - [x] Interface hyperadmin (rôle Notantis transverse) — **backend fait le
       01/09/2026** : modèle `HyperadminAccess` (base default, distinct du rôle
       `superadmin` d'`OfficeMembership` qui reste scopé à un office),
@@ -1637,8 +1706,10 @@ couverture.
       activés). Gate `_is_hyperadmin`, volontairement indépendant de
       `request.office` — pas de sous-domaine dédié pour cette première version
       (décision explicite, voir "État réel du code"). `seed_demo` étendu
-      (compte `hyperadmin`). Pas d'UI dans ce chantier (demande explicitement
-      backend + tests + doc). Notifications globales laissées au backlog.
+      (compte `hyperadmin`). **UI faite le 02/09/2026** :
+      `pages/HyperadminScreen` + `organisms/NewOfficeModal`, entrée de menu
+      « Notantis » visible seulement si `whoami.is_hyperadmin` — voir la section
+      datée plus haut. Notifications globales laissées au backlog.
 - [x] **Tags** (catalogue par office, pose sur dossiers ET pièces, filtre et
       recherche) — fait le 01/09/2026 : modèle `Tag`, création à la volée
       dédupliquée sur le nom replié, filtre multi-sélection en OU, tags

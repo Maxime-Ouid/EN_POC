@@ -14,9 +14,12 @@ export * from './NavBar';
 // portant NavSection/NavEntry rendraient le nom ambigu dans components/index.ts
 // (TypeScript le supprime alors silencieusement du barrel).
 export * from './NewDataroomModal';
+export * from './NewOfficeModal';
+export * from './NewTemplateModal';
 export * from './NewFolderModal';
 export * from './OfficeContentTab';
 export * from './OfficeUserModal';
+export * from './TemplateEditorModal';
 export * from './officeRoles';
 export * from './QACard';
 export * from './SearchPalette';

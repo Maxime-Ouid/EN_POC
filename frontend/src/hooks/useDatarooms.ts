@@ -77,9 +77,11 @@ export function useDatarooms(enabled: boolean, tagIds: number[] = []) {
     await load();
   }, [load]);
 
+  /** `templateId` reproduit l'arborescence du modèle — et ses restrictions
+      d'accès — dès la création, côté serveur. */
   const create = useCallback(
-    async (name: string, tagIdsForNew?: number[]) => {
-      await api.createDataroom(name, tagIdsForNew);
+    async (name: string, tagIdsForNew?: number[], templateId?: number | null) => {
+      await api.createDataroom(name, tagIdsForNew, templateId);
       await refresh();
     },
     [refresh],
