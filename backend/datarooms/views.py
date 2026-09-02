@@ -1,10 +1,12 @@
 import mimetypes
 import re
+import secrets
 from urllib.parse import quote
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.core.management import call_command
 from django.http import FileResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import render
@@ -22,9 +24,10 @@ from .models import (
 from .tenancy.registry import ensure_tenant_registered
 from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
+    LOGO_CONTENT_TYPES, LOGO_MAX_BYTES,
     DashboardValidationError, TagValidationError, ThemeValidationError,
     clean_dashboard_payload, clean_tag_ids, clean_tag_payload, clean_theme_payload,
-    is_accepted_extension, tag_slug,
+    is_accepted_extension, logo_extension, tag_slug,
 )
 
 User = get_user_model()
@@ -159,21 +162,159 @@ def my_offices(request):
         for m in memberships
     ])
 
-@api_view(['GET'])
+def _logo_key(office):
+    """Clé de stockage du logo, ou "" si l'office n'en a pas.
+
+    ⚠️ `Office.logo_url` porte la CLÉ DE STOCKAGE (« offices/officeb/logo-a1b2c3d4.png »),
+    pas une URL — malgré son nom et son type `URLField`. Le champ propre serait un
+    `FileField`, mais l'ajouter demande une migration, et une migration poussée depuis
+    le front juste avant une fusion est exactement ce qui a coûté deux rattrapages de
+    bases (voir CLAUDE.md). Le champ est donc réutilisé tel quel, et la conversion
+    clé → URL servable se fait à la frontière de l'API, dans `_logo_public_url`.
+    À reprendre en `FileField` quand une migration sera de toute façon nécessaire.
+    """
+    return office.logo_url or ""
+
+
+def _logo_public_url(request, office):
+    """URL que le front peut mettre dans un `<img src>`, ou "" sans logo.
+
+    Le fichier n'est JAMAIS servi depuis MinIO : son URL est en http alors que
+    l'application est en https (contenu mixte bloqué), même raison que pour les pièces
+    — voir document_content_view. Il passe donc par le relais /api/tenant-logo/.
+
+    Le suffixe aléatoire de la clé se retrouve dans `?v=` : deux logos successifs ont
+    deux URL différentes, le navigateur ne sert donc pas l'ancien depuis son cache
+    après un remplacement. Sans lui, l'étude changerait de logo sans rien voir changer.
+    """
+    key = _logo_key(office)
+    if not key:
+        return ""
+    version = key.rsplit("-", 1)[-1].rsplit(".", 1)[0]
+    return request.build_absolute_uri(f"/api/tenant-logo/?v={version}")
+
+
+def _serialize_tenant_config(request, office):
+    return {
+        "name": office.name,
+        "logo_url": _logo_public_url(request, office),
+        "primary_color": office.primary_color,
+        "enabled_modules": list(office.enabled_modules.values_list('slug', flat=True)),
+    }
+
+
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def tenant_config(request):
+    """Identité de l'office courant.
+
+    GET   → ouvert à tout membre : le nom et le logo s'affichent pour chacun.
+    PATCH → réservé admin/superadmin, comme `tenant_theme` : renommer l'étude ou
+            changer son logo engage toute l'étude, pas seulement l'appelant.
+
+    PATCH accepte du multipart : `name` (texte) et/ou `logo` (fichier), plus
+    `remove_logo` pour revenir à la marque Notantis. Les champs absents ne sont pas
+    touchés — envoyer seulement `name` ne supprime pas le logo.
+    """
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    membership = request.user.memberships.filter(office=office).first()
+    if membership is None:
+        return Response({"error": "accès non autorisé à cet office"}, status=403)
+
+    if request.method == 'PATCH':
+        if membership.role not in ('superadmin', 'admin'):
+            return Response(
+                {"error": "seul un administrateur de l'office peut modifier son identité"},
+                status=403,
+            )
+
+        changed = []
+
+        if 'name' in request.data:
+            name = (request.data.get('name') or '').strip()
+            if not name:
+                return Response({"error": "nom requis"}, status=400)
+            office.name = name
+            changed.append('name')
+
+        upload = request.FILES.get('logo')
+        remove = str(request.data.get('remove_logo', '')).lower() in ('1', 'true', 'yes')
+
+        if upload is not None and remove:
+            return Response(
+                {"error": "logo et remove_logo sont contradictoires"}, status=400
+            )
+
+        if upload is not None:
+            ext = logo_extension(upload.name)
+            if ext is None:
+                return Response(
+                    {"error": "format de logo non pris en charge (png, jpg, webp ou svg)"},
+                    status=400,
+                )
+            if upload.size > LOGO_MAX_BYTES:
+                return Response(
+                    {"error": f"logo trop lourd ({upload.size} octets, maximum {LOGO_MAX_BYTES})"},
+                    status=400,
+                )
+            # Clé neuve à chaque dépôt : c'est ce qui change l'URL publique et évite
+            # qu'un navigateur continue d'afficher l'ancien logo (voir _logo_public_url).
+            new_key = f"offices/{office.subdomain}/logo-{secrets.token_hex(4)}.{ext}"
+            previous = _logo_key(office)
+            default_storage.save(new_key, upload)
+            office.logo_url = new_key
+            changed.append('logo_url')
+            # Suppression de l'ancien APRÈS l'écriture du nouveau : un échec de stockage
+            # laisse l'office avec son logo précédent plutôt que sans rien.
+            if previous and previous != new_key:
+                default_storage.delete(previous)
+
+        elif remove:
+            previous = _logo_key(office)
+            office.logo_url = ""
+            changed.append('logo_url')
+            if previous:
+                default_storage.delete(previous)
+
+        if changed:
+            office.save(update_fields=changed)
+
+    return Response(_serialize_tenant_config(request, office))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tenant_logo_view(request):
+    """Relais du logo de l'office courant — voir _logo_public_url pour le pourquoi.
+
+    Ouvert à tout membre, comme la lecture de `tenant_config` : le logo s'affiche dans
+    l'en-tête de chacun. Le paramètre `?v=` n'est pas lu, il ne sert qu'à distinguer
+    deux logos successifs pour le cache du navigateur.
+    """
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
     if not request.user.memberships.filter(office=office).exists():
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
-    return Response({
-        "name": office.name,
-        "logo_url": office.logo_url,
-        "primary_color": office.primary_color,
-        "enabled_modules": list(office.enabled_modules.values_list('slug', flat=True)),
-    })
+    key = _logo_key(office)
+    if not key or not default_storage.exists(key):
+        return Response({"error": "cet office n'a pas de logo"}, status=404)
+
+    ext = key.rsplit(".", 1)[-1].lower()
+    response = FileResponse(
+        default_storage.open(key, 'rb'),
+        content_type=LOGO_CONTENT_TYPES.get(ext, "application/octet-stream"),
+    )
+    # Un SVG est un document : ouvert DIRECTEMENT dans un onglet (et non dans une
+    # balise <img>, où les scripts ne s'exécutent pas), il s'exécuterait sur l'origine
+    # de l'API. La CSP le neutralise, et nosniff empêche de faire passer autre chose
+    # pour une image.
+    response["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 @api_view(['GET', 'PUT'])
 @permission_classes([IsAuthenticated])

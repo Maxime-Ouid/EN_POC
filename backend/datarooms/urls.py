@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    ping, login_view, logout_view, mfa_setup, mfa_verify, whoami, my_offices, tenant_config, tenant_theme,
+    ping, login_view, logout_view, mfa_setup, mfa_verify, whoami, my_offices, tenant_config, tenant_logo_view, tenant_theme,
     dashboard_view, coffre_fort_view, issue_sso_ticket, consume_sso_ticket, datarooms_view,
     documents_view,
     folders_view, office_users_view, office_user_detail_view, attach_office_user_view,
@@ -19,6 +19,7 @@ urlpatterns = [
     path('whoami/', whoami),
     path('my-offices/', my_offices),
     path('tenant-config/', tenant_config),
+    path('tenant-logo/', tenant_logo_view),
     path('tenant-theme/', tenant_theme),
     path('dashboard/', dashboard_view),
     path('modules/coffre-fort/', coffre_fort_view),

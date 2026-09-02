@@ -1652,6 +1652,49 @@ avec des échecs trompeurs (« table datarooms_office has no column named
 is_active »). Il faut inclure au moins une classe `TestCase` Django dans la
 sélection, par exemple `datarooms.tests.TenantContextTests`.
 
+## Logo par office (02/09/2026)
+
+Troisième pari du POC — la personnalisation visuelle — complété : la couleur suivait
+le thème de l'office depuis le 28/08, le logo restait la marque Notantis pour tout le
+monde.
+
+**Le compromis à connaître** : `Office.logo_url` porte désormais une **clé de
+stockage** (« offices/officeb/logo-59a84baa.png »), pas une URL, malgré son nom et son
+type `URLField`. Le champ propre serait un `FileField`, mais l'ajouter demande une
+migration — et une migration poussée depuis le front juste avant une fusion est
+exactement ce qui a coûté deux rattrapages de bases locales. Le champ est donc réutilisé
+tel quel et la conversion clé → URL servable se fait à la frontière de l'API
+(`_logo_public_url`). **À reprendre en `FileField` à la prochaine migration de toute
+façon nécessaire.**
+
+**Le fichier n'est jamais servi depuis MinIO** : son URL est en http quand
+l'application est en https, le navigateur bloquerait l'image — même raison que pour les
+pièces, même patron que `document_content_view`. Il passe par
+`GET /api/tenant-logo/`, ouvert à tout membre de l'office (le logo s'affiche pour
+chacun), l'écriture restant réservée aux admins.
+
+**Le suffixe aléatoire de la clé n'est pas décoratif** : il se retrouve dans le `?v=`
+de l'URL publique. Deux logos successifs ont donc deux URL différentes, sans quoi le
+navigateur continuerait de servir l'ancien depuis son cache — l'étude changerait de
+logo sans rien voir changer. L'ancien fichier est supprimé APRÈS l'écriture du nouveau :
+un échec de stockage laisse l'office avec son logo précédent plutôt que sans rien.
+
+**SVG accepté, mais neutralisé** : ouvert directement dans un onglet (pas dans une
+balise `<img>`, où les scripts ne s'exécutent pas), un SVG s'exécuterait sur l'origine
+de l'API. Le relais pose donc `Content-Security-Policy: default-src 'none'` et
+`X-Content-Type-Options: nosniff` sur tous les formats.
+
+Côté front, rien n'est envoyé au dépôt du fichier : le choix rejoint le nom dans le même
+enregistrement, pour qu'un formulaire abandonné ne laisse pas l'étude avec un logo
+qu'elle n'a pas validé. Après l'enregistrement, `session.refresh()` fait suivre le
+nouveau logo partout (bandeau, fil d'Ariane) sans état parallèle à tenir à jour.
+
+**Vérifications** : `TenantLogoApiTests` (9 tests : gate admin, formats refusés, taille,
+remplacement qui purge l'ancien fichier, retrait, renommage qui ne touche pas au logo,
+isolation entre offices, en-têtes du relais) — 25/25 avec les classes voisines ;
+`tsc -b` et `check:ds` propres ; **dépôt réel vérifié dans Chrome** sur officeb, le logo
+apparaît dans le bandeau et officea garde la marque Notantis.
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
@@ -1679,7 +1722,12 @@ sélection, par exemple `datarooms.tests.TenantContextTests`.
 - [x] **Vrai routage par sous-domaine** (`*.localhost`) avec identité partagée sans
       reconnexion — fait le 26/08/2026, via échange de ticket signé plutôt qu'un cookie
       de domaine partagé (rejeté par les navigateurs — voir "État réel du code")
-- [ ] Logo dynamique par office (la couleur est câblée, pas encore le logo)
+- [x] Logo dynamique par office — fait le 02/09/2026, dernier morceau de la « marque
+      grise ». `PATCH /api/tenant-config/` (multipart : `name`, `logo`, `remove_logo`,
+      réservé admin/superadmin comme `tenant_theme`) et relais `GET /api/tenant-logo/`.
+      Onglet Personnalisation → Identité branché pour de vrai, avec aperçu du logo
+      enregistré et retrait. **Aucune migration** : voir la section datée plus bas pour
+      le compromis assumé sur `Office.logo_url`.
 - [x] Arborescence de dataroom minimale (créer / uploader / naviguer) — API backend
       faite le 26/08/2026, hiérarchie de dossiers ajoutée côté **API** le 27/08/2026
       (modèle `Folder`, voir "État réel du code" et "Modèle de données clé").

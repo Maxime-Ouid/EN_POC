@@ -262,6 +262,9 @@ export default function App() {
   const [newOfficeError, setNewOfficeError] = useState<string | null>(null);
   /** Avertissement non bloquant de la console (module refusé en silence…). */
   const [hyperadminNotice, setHyperadminNotice] = useState<string | null>(null);
+  /** Enregistrement de l'identité de l'étude (nom + logo). */
+  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
   const [dataroomFilter, setDataroomFilter] = useState('');
@@ -1070,11 +1073,37 @@ export default function App() {
             identity: {
               displayName: session.tenant?.name ?? '',
               subdomain: window.location.host,
-              logoUrl: session.tenant?.logo_url,
+              logoUrl: session.tenant?.logo_url || undefined,
             },
-            // Aucun endpoint d'écriture sur Office pour l'instant : l'onglet
-            // édite localement et le dit, plutôt que de simuler un succès.
-            error: "L'enregistrement de l'identité n'est pas encore exposé par l'API.",
+            saving: identitySaving,
+            error: identityError,
+            // Le serveur refuse déjà l'écriture à un non-administrateur : l'écran
+            // évite seulement de proposer un formulaire qui finirait en 403, et dit
+            // pourquoi plutôt que de masquer l'onglet.
+            readOnly: !canManageOffice,
+            readOnlyNote: canManageOffice
+              ? undefined
+              : "L'identité de l'étude est modifiable par ses administrateurs.",
+            onSave: async ({ displayName, logoFile, removeLogo }) => {
+              setIdentityError(null);
+              setIdentitySaving(true);
+              try {
+                await api.saveTenantIdentity({
+                  name: displayName,
+                  logoFile,
+                  removeLogo,
+                });
+                // Le nom et le logo sont lus depuis `session.tenant` par toute
+                // l'application (bandeau, fil d'Ariane, écran de connexion) :
+                // recharger la session est ce qui les fait suivre partout, sans
+                // état parallèle à tenir à jour ici.
+                await session.refresh();
+              } catch (err) {
+                setIdentityError(err instanceof Error ? err.message : 'Enregistrement impossible');
+              } finally {
+                setIdentitySaving(false);
+              }
+            },
           }}
           modules={{
             modules: modulesWithServerState,
