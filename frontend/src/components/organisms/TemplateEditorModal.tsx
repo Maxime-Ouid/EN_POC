@@ -248,7 +248,11 @@ export function TemplateEditorModal({
               </div>
               {node.children.length > 0 && (
                 <div className="tiny dim" style={{ marginTop: 6 }}>
-                  Supprimer ce dossier emporte les {node.children.length} qu'il contient.
+                  {/* Le decompte porte sur les enfants DIRECTS ; la cascade cote
+                      Django descend plus loin, d'ou « et leur contenu ». */}
+                  {node.children.length === 1
+                    ? "Supprimer ce dossier emporte le sous-dossier qu'il contient, et leur contenu."
+                    : `Supprimer ce dossier emporte les ${node.children.length} sous-dossiers qu'il contient, et leur contenu.`}
                 </div>
               )}
             </div>

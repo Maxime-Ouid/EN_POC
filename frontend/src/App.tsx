@@ -260,6 +260,8 @@ export default function App() {
   const [newOfficeOpen, setNewOfficeOpen] = useState(false);
   const [newOfficeBusy, setNewOfficeBusy] = useState(false);
   const [newOfficeError, setNewOfficeError] = useState<string | null>(null);
+  /** Avertissement non bloquant de la console (module refusé en silence…). */
+  const [hyperadminNotice, setHyperadminNotice] = useState<string | null>(null);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
   const [dataroomFilter, setDataroomFilter] = useState('');
@@ -289,6 +291,21 @@ export default function App() {
   // non du rôle porté par le membership de l'office courant (voir WhoAmI).
   const isHyperadmin = session.user?.is_hyperadmin ?? false;
   const hyperadminOffices = useHyperadminOffices(authenticated && isHyperadmin);
+
+  /**
+   * `/api/tenant-config/` répond 403 à qui n'est pas membre de l'office du
+   * sous-domaine : un `tenant` nul vaut donc « connecté, mais pas membre ICI ».
+   *
+   * Le cas existe et n'est pas une anomalie : `login_view` laisse entrer un
+   * hyperadmin sur n'importe quel sous-domaine précisément parce qu'il n'a, par
+   * construction, aucun OfficeMembership nulle part (pas de sous-domaine dédié à
+   * la console, décision documentée dans CLAUDE.md). Tous les écrans d'office
+   * lui répondraient alors 403 — d'où `consoleOnly` : il n'a qu'une destination,
+   * autant l'y mener directement plutôt que de lui présenter un menu dont chaque
+   * entrée échoue.
+   */
+  const isOfficeMember = session.tenant !== null;
+  const consoleOnly = isHyperadmin && !isOfficeMember;
 
   // Les modèles servent à DEUX endroits — la gestion dans Personnalisation et le
   // choix « Partir d'un modèle » à la création d'un dossier — d'où un chargement
@@ -358,12 +375,16 @@ export default function App() {
        bonnes raisons d'apprendre que l'annuaire existe et lui échappe, alors
        que la console transverse à toutes les études n'a rien à faire dans le
        menu d'un client. Le rang vient de /api/whoami/, pas d'une déduction. */
-    const withNotantis = isHyperadmin
-      ? [
-          ...withRealCounts,
-          { label: 'Notantis', items: [{ key: 'hyperadmin', icon: 'shield', label: 'Console Notantis' }] },
-        ]
-      : withRealCounts;
+    const notantisSection = {
+      label: 'Notantis',
+      items: [{ key: 'hyperadmin', icon: 'shield', label: 'Console Notantis' }],
+    };
+    // Hyperadmin sans appartenance : le menu se réduit à la console. Les
+    // rubriques d'office ne sont pas masquées par prudence mais parce qu'elles
+    // sont TOUTES inaccessibles pour lui (403 sur tenant-config, datarooms,
+    // annuaire, thème) — les laisser serait un menu de portes fermées.
+    if (consoleOnly) return [notantisSection];
+    const withNotantis = isHyperadmin ? [...withRealCounts, notantisSection] : withRealCounts;
 
     const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
     if (!active.length) return withNotantis;
@@ -378,7 +399,7 @@ export default function App() {
         })),
       },
     ];
-  }, [modulesWithServerState, isHyperadmin, datarooms.items.length, datarooms.loading, datarooms.error]);
+  }, [modulesWithServerState, isHyperadmin, consoleOnly, datarooms.items.length, datarooms.loading, datarooms.error]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
@@ -621,13 +642,19 @@ export default function App() {
     );
   }
 
+  /* `screen` reste l'état de navigation ; `activeScreenKey` est ce qui s'affiche.
+     Passer par une valeur dérivée plutôt que par un setState au montage évite un
+     premier rendu sur l'accueil — accueil qui, pour un hyperadmin sans office,
+     tenterait aussitôt d'enregistrer une disposition que le serveur refuse. */
+  const activeScreenKey: ScreenKey = consoleOnly ? 'hyperadmin' : screen;
+
   return (
     <AppShell
-      officeName={session.tenant?.name ?? 'Office'}
-      officeRole={currentOffice?.role ?? '—'}
+      officeName={session.tenant?.name ?? (isHyperadmin ? 'Notantis' : 'Office')}
+      officeRole={currentOffice?.role ?? (isHyperadmin ? 'Hyperadmin' : '—')}
       logoUrl={session.tenant?.logo_url || undefined}
       navSections={navSections}
-      activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
+      activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : activeScreenKey}
       onNavigate={navigate}
       offices={session.offices}
       officeSubdomain={currentOffice?.subdomain}
@@ -635,7 +662,7 @@ export default function App() {
       onLogout={() => setLogoutConfirm(true)}
       userInitials={initialsOf(username)}
       userName={username}
-      userRole={currentOffice?.role ?? 'Membre'}
+      userRole={currentOffice?.role ?? (isHyperadmin ? 'Hyperadmin' : 'Membre')}
       breadcrumbRoot={session.tenant?.name}
       breadcrumbCurrent={
         openModuleEntry?.name ?? (openDataroom ? openDataroom.name : CRUMB_LABELS[screen])
@@ -708,10 +735,13 @@ export default function App() {
         />
       )}
 
-      {!openModuleEntry && screen === 'dashboard' && (
+      {!openModuleEntry && activeScreenKey === 'dashboard' && (
         <DashboardScreen
           role={currentOffice?.role}
-          ready={authenticated}
+          // Un non-membre ne peut ni lire ni enregistrer sa disposition
+          // (/api/dashboard/ répond 403) : ne pas essayer, plutôt que d'afficher
+          // « Disposition non enregistrée : accès non autorisé à cet office ».
+          ready={authenticated && isOfficeMember}
           // Seul le nombre de dossiers et la liste des dossiers sont réels ; les
           // autres compteurs n'ont pas encore de source côté backend. Chaque
           // widget reçoit ses données ici plutôt que d'aller les chercher :
@@ -774,7 +804,7 @@ export default function App() {
         />
       )}
 
-      {!openModuleEntry && screen === 'portfolios' && (
+      {!openModuleEntry && activeScreenKey === 'portfolios' && (
         <PortfoliosScreen
           portfolios={PORTFOLIOS}
           onCreate={() => {}}
@@ -783,7 +813,7 @@ export default function App() {
         />
       )}
 
-      {!openModuleEntry && screen === 'datarooms' && (
+      {!openModuleEntry && activeScreenKey === 'datarooms' && (
         <>
           <DataroomsListScreen
             totalCount={datarooms.items.length}
@@ -834,7 +864,7 @@ export default function App() {
         </>
       )}
 
-      {!openModuleEntry && screen === 'dataroom' && openDataroom && (
+      {!openModuleEntry && activeScreenKey === 'dataroom' && openDataroom && (
         <>
           <DataroomDetailScreen
             // La clé remonte l'identité de la dataroom : l'écran garde en état
@@ -942,7 +972,7 @@ export default function App() {
         </>
       )}
 
-      {!openModuleEntry && screen === 'users' && (
+      {!openModuleEntry && activeScreenKey === 'users' && (
         <>
           <OfficeUsersScreen
             rows={officeUsers.items.map(u => ({
@@ -1030,11 +1060,11 @@ export default function App() {
         </>
       )}
 
-      {!openModuleEntry && screen === 'stats' && (
+      {!openModuleEntry && activeScreenKey === 'stats' && (
         <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
       )}
 
-      {!openModuleEntry && screen === 'settings' && (
+      {!openModuleEntry && activeScreenKey === 'settings' && (
         <SettingsScreen
           identity={{
             identity: {
@@ -1076,7 +1106,7 @@ export default function App() {
         />
       )}
 
-      {!openModuleEntry && screen === 'settings' && (
+      {!openModuleEntry && activeScreenKey === 'settings' && (
         <>
           <NewTemplateModal
             open={newTemplateOpen}
@@ -1150,7 +1180,7 @@ export default function App() {
         </>
       )}
 
-      {!openModuleEntry && screen === 'hyperadmin' && (
+      {!openModuleEntry && activeScreenKey === 'hyperadmin' && (
         <>
           <HyperadminScreen
             rows={hyperadminOffices.items.map<HyperadminOfficeRow>(o => ({
@@ -1169,9 +1199,11 @@ export default function App() {
             }))}
             loading={hyperadminOffices.loading}
             error={hyperadminOffices.error}
+            notice={hyperadminNotice}
             currentSubdomain={currentOffice?.subdomain}
             onCreateOffice={() => {
               setNewOfficeError(null);
+              setHyperadminNotice(null);
               setNewOfficeOpen(true);
             }}
             onToggleActive={(office, next) => {
@@ -1181,7 +1213,19 @@ export default function App() {
               const slugs = next
                 ? [...office.enabledModules, slug]
                 : office.enabledModules.filter(s => s !== slug);
-              void hyperadminOffices.setOfficeModules(office.id, slugs);
+              setHyperadminNotice(null);
+              void hyperadminOffices.setOfficeModules(office.id, slugs).then(updated => {
+                // Le serveur ignore SANS ERREUR un slug qui n'a pas de ligne
+                // `Module` en base : l'interrupteur reviendrait alors à sa place
+                // sans que rien n'explique pourquoi. Le catalogue de modules
+                // vivant côté front, l'écart est possible et doit se dire.
+                if (next && !updated.enabled_modules.includes(slug)) {
+                  const label = MODULE_CATALOG.find(m => m.slug === slug)?.name ?? slug;
+                  setHyperadminNotice(
+                    `« ${label} » n'est pas installé sur la plateforme : le serveur ne connaît pas ce module, l'activation n'a rien changé.`,
+                  );
+                }
+              });
             }}
           />
           <NewOfficeModal

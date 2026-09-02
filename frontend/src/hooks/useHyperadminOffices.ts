@@ -89,11 +89,19 @@ export function useHyperadminOffices(enabled: boolean) {
     [refresh],
   );
 
-  /** Remplace l'ensemble des modules activés (pas d'ajout unitaire côté API). */
+  /**
+   * Remplace l'ensemble des modules activés (pas d'ajout unitaire côté API).
+   *
+   * Renvoie l'office tel que le serveur l'a enregistré — pas ce qui a été
+   * demandé : les slugs qu'il ne connaît pas sont ignorés EN SILENCE (défense en
+   * profondeur côté Django). Sans cette valeur de retour, l'appelant ne pourrait
+   * pas distinguer un module refusé d'un module activé.
+   */
   const setOfficeModules = useCallback(
     async (officeId: number, slugs: string[]) => {
-      await api.updateHyperadminOffice(officeId, { enabled_module_slugs: slugs });
+      const updated = await api.updateHyperadminOffice(officeId, { enabled_module_slugs: slugs });
       await refresh();
+      return updated;
     },
     [refresh],
   );

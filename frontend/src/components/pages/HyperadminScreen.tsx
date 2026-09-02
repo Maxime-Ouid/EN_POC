@@ -32,6 +32,12 @@ export interface HyperadminScreenProps {
   loading?: boolean;
   /** Message de l'API affiché tel quel (« réservé aux hyperadmins Notantis »…). */
   error?: string | null;
+  /**
+   * Avertissement non bloquant, affiché au-dessus du tableau : la liste reste
+   * lisible. Sert au cas où le serveur n'a pas fait ce que le clic demandait
+   * sans pour autant renvoyer d'erreur.
+   */
+  notice?: string | null;
   /** Sous-domaine de l'étude depuis laquelle la console est ouverte, repéré dans la liste. */
   currentSubdomain?: string;
   onCreateOffice?: () => void;
@@ -65,6 +71,7 @@ export function HyperadminScreen({
   modules,
   loading,
   error,
+  notice,
   currentSubdomain,
   onCreateOffice,
   onToggleActive,
@@ -98,6 +105,12 @@ export function HyperadminScreen({
           Ouvrir une étude
         </Button>
       </Toolbar>
+
+      {notice && (
+        <div className="tiny" style={{ margin: '4px 2px 10px', color: 'var(--critical)' }}>
+          {notice}
+        </div>
+      )}
 
       <ListControls
         unit="études"

@@ -1592,6 +1592,48 @@ navigateur** — `vite build` et `oxlint` ne sont pas lançables depuis le sandb
 Linux (binaires natifs installés pour Windows), même limite que les lots
 précédents.
 
+**Vérifié en navigateur réel le 02/09/2026** (Chrome, base locale rattrapée — voir
+le piège de migration plus bas). Ce que la campagne a montré, au-delà du fait que
+les écrans fonctionnent :
+
+- Le circuit modèle complet tient : création du modèle, arborescence à deux
+  niveaux, rôles posés, puis dossier créé à partir du modèle → les dossiers sont
+  reproduits avec le bon emboîtement ET la restriction d'accès est bien résolue
+  en personne réelle (`AccessRestriction.user_ids = [3]`, la seule superadmin de
+  l'office). C'est la partie que le rendu SSR ne pouvait pas prouver.
+- Le pari n°1 est démontrable en direct : « Coffre-fort » activé pour officeb
+  depuis la console, puis reconnexion en carla → l'entrée apparaît dans son menu,
+  sans redéploiement.
+- Ouvrir une étude depuis la console provisionne bien sa base tenant complète
+  (Template/TemplateFolder compris) et crée son premier administrateur.
+
+**Trois défauts trouvés à cette occasion, corrigés dans le même lot** :
+
+1. *Hyperadmin sans office*. `login_view` le laisse entrer sur n'importe quel
+   sous-domaine (il n'a par construction aucun membership), mais TOUT le reste de
+   la coquille d'office lui répond alors 403 : `tenant-config` d'abord, donc
+   `session.tenant` nul, l'office affiché « Office — », le rôle « Membre », et
+   surtout l'accueil qui tentait d'enregistrer une disposition → bandeau rouge
+   « Disposition non enregistrée : accès non autorisé à cet office » dès la
+   connexion. Corrigé par `isOfficeMember` (= `session.tenant !== null`) et
+   `consoleOnly` : pour un hyperadmin non membre, le menu se réduit à la console,
+   l'application ouvre dessus, l'accueil n'est plus monté, et l'en-tête dit
+   « Notantis / Hyperadmin » au lieu d'un office fantôme.
+2. *Module ignoré en silence*. Le catalogue de modules vit côté front alors que
+   `enabled_module_slugs` ne retient que les slugs ayant une ligne `Module` en
+   base (ignorés sans erreur, par choix). « Chatbot de support client » est dans
+   le catalogue mais pas en base : l'interrupteur revenait à sa place sans un mot.
+   La console compare désormais la réponse du serveur à ce qui a été demandé et
+   le dit : « … n'est pas installé sur la plateforme ». Le vrai correctif serait
+   que l'API expose le catalogue des `Module` — à voir avec le back.
+3. *Pluriel*. « Supprimer ce dossier emporte les 1 qu'il contient » dans
+   l'éditeur de modèle.
+
+**Point d'attention non corrigé** : l'écran d'enrôlement MFA affiche le secret de
+saisie manuelle en HEXADÉCIMAL (`device.key` brut, mfa_setup). Une application
+d'authentification attend du base32 — le QR code marche, la saisie manuelle non.
+Antérieur à ce lot, laissé au back.
+
 **Piège d'environnement, à noter** : lancer une classe de test
 `unittest.TestCase` SEULE (`manage.py test datarooms.tests.HyperadminTests`) ne
 crée aucune base de test — Django ne provisionne les bases que pour les classes
