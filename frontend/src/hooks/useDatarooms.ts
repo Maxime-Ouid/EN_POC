@@ -78,8 +78,8 @@ export function useDatarooms(enabled: boolean, tagIds: number[] = []) {
   }, [load]);
 
   const create = useCallback(
-    async (name: string, tagIdsForNew?: number[]) => {
-      await api.createDataroom(name, tagIdsForNew);
+    async (name: string, tagIdsForNew?: number[], templateId?: number | null) => {
+      await api.createDataroom(name, tagIdsForNew, templateId);
       await refresh();
     },
     [refresh],

@@ -8,10 +8,18 @@ import {
 } from '../components';
 import {
   CLIENT_SPACE_OPTIONS, DATAROOM_TEMPLATES, DOCS_BY_FOLDER, MODULE_CATALOG,
-  NEW_DATAROOM_TEMPLATES, PORTFOLIO_OPTIONS, TREE,
+  PORTFOLIO_OPTIONS, TREE,
 } from '../data/demo';
 import { Specimen, Stage } from './Specimen';
-import type { TagRef } from '../components';
+import type { NewDataroomTemplateOption, TagRef } from '../components';
+
+// NewDataroomModal attend désormais de vrais Template (GET /api/templates/,
+// voir CLAUDE.md) — cette fiche du UI kit n'a pas de backend derrière elle
+// (NEW_DATAROOM_TEMPLATES a disparu de data/demo.tsx, devenu sans appelant réel).
+const DEMO_TEMPLATE_OPTIONS: NewDataroomTemplateOption[] = [
+  { id: 1, name: 'Vente immobilière — standard', description: 'Recommandé · le plus utilisé par les offices' },
+  { id: 2, name: 'Dossier de divorce', description: 'Groupes prédéfinis' },
+];
 
 // Spécimens des organismes : blocs autonomes, souvent porteurs de leur propre
 // état. Ceux qui se positionnent en `fixed` (modale, volets) sont enfermés dans
@@ -139,7 +147,7 @@ function NewDataroomModalDemo() {
       <Stage height={560}>
         <NewDataroomModal open={open} onClose={() => setOpen(false)} onCreate={() => setOpen(false)}
           portfolioOptions={PORTFOLIO_OPTIONS} clientSpaceOptions={CLIENT_SPACE_OPTIONS}
-          templates={NEW_DATAROOM_TEMPLATES} />
+          templates={DEMO_TEMPLATE_OPTIONS} />
       </Stage>
     </>
   );

@@ -44,11 +44,13 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Office',
     items: [
-      // Annuaire de l'étude : seule entrée de cette section adossée à un vrai
-      // endpoint (/api/office-users/). Elle reste visible pour tout le monde —
-      // c'est le serveur qui répond 403 aux non-administrateurs, et l'écran qui
+      // Annuaire de l'étude et Modèles : les deux seules entrées de cette
+      // section adossées à un vrai endpoint (/api/office-users/,
+      // /api/templates/). Elles restent visibles pour tout le monde — c'est le
+      // serveur qui répond 403 aux non-administrateurs, et l'écran qui
       // l'explique, plutôt qu'une entrée qui disparaît sans dire pourquoi.
       { key: 'users', icon: 'users', label: "Annuaire de l'étude" },
+      { key: 'templates', icon: 'clip', label: 'Modèles de dossier' },
       { key: 'settings', icon: 'settings', label: 'Personnalisation' },
     ],
   },
@@ -431,12 +433,6 @@ export const DATAROOM_TEMPLATES: DataroomTemplate[] = [
 ];
 
 /** Options proposées dans la modale de création de dossier. */
-export const NEW_DATAROOM_TEMPLATES = [
-  { id: 'vente', icon: 'folder', name: 'Vente immobilière — standard', desc: 'Recommandé · le plus utilisé par les offices' },
-  { id: 'divorce', icon: 'folder', name: 'Dossier de divorce', desc: 'Groupes prédéfinis' },
-  { id: 'vide', icon: 'file', name: 'Dataroom vide', desc: 'Sans arborescence pré-remplie' },
-];
-
 export const PORTFOLIO_OPTIONS = [
   { id: 'ivry', label: 'Opération Ivry — Le Monde Commerce' },
   { id: 'jo2024', label: 'JO 2024 — Parc immobilier' },

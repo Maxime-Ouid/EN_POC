@@ -23,6 +23,11 @@ import {
   ModuleScreen,
   Card,
   type TreeNodeData,
+  TemplatesListScreen,
+  type TemplateRowData,
+  TemplateDetailScreen,
+  NewTemplateModal,
+  NewTemplateFolderModal,
 } from './components';
 import { DashboardScreen } from './dashboard';
 import { useSession } from './hooks/useSession';
@@ -33,6 +38,8 @@ import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRe
 import { useOfficeUsers } from './hooks/useOfficeUsers';
 import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
+import { useTemplates } from './hooks/useTemplates';
+import { useTemplateTree, type TemplateFolderTreeNode } from './hooks/useTemplateTree';
 import { api, type DocumentSummary, type TagColor, type TagSummary } from './api/endpoints';
 import { matchesWordStart } from './search/match';
 import type { LocalEntry } from './search/localEntries';
@@ -47,7 +54,6 @@ import {
   MEMBERS,
   MODULE_CATALOG,
   NAV_SECTIONS,
-  NEW_DATAROOM_TEMPLATES,
   PORTFOLIOS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
@@ -84,6 +90,8 @@ type ScreenKey =
   | 'dataroom'
   | 'stats'
   | 'users'
+  | 'templates'
+  | 'template'
   | 'settings';
 
 /**
@@ -103,6 +111,8 @@ const CRUMB_LABELS: Record<ScreenKey, string> = {
   dataroom: 'Dossiers',
   stats: 'Statistiques & facturation',
   users: "Annuaire de l'étude",
+  templates: 'Modèles de dossier',
+  template: 'Modèles de dossier',
   settings: 'Personnalisation',
 };
 
@@ -186,6 +196,28 @@ function countAllDocuments(nodes: FolderTreeNode[]): number {
   return nodes.reduce((sum, node) => sum + node.documentCount + countAllDocuments(node.children), 0);
 }
 
+/** Mappe l'arbre d'un Template (id numériques, forme API) vers TreeNodeData (id string, forme Explorer). */
+function toTemplateTreeNodes(nodes: TemplateFolderTreeNode[]): TreeNodeData[] {
+  return nodes.map(node => ({
+    id: String(node.id),
+    label: node.name,
+    children: node.children.length ? toTemplateTreeNodes(node.children) : undefined,
+  }));
+}
+
+/** Rôles visibles par défaut de chaque TemplateFolder, indexés par id d'arbre (string). */
+function templateRolesByFolderId(nodes: TemplateFolderTreeNode[]): Record<string, string[]> {
+  const acc: Record<string, string[]> = {};
+  function walk(list: TemplateFolderTreeNode[]) {
+    for (const node of list) {
+      acc[String(node.id)] = node.visible_to_roles;
+      walk(node.children);
+    }
+  }
+  walk(nodes);
+  return acc;
+}
+
 function findFolderLabel(nodes: TreeNodeData[], id: string): string | undefined {
   for (const node of nodes) {
     if (node.id === id) return node.label;
@@ -231,6 +263,14 @@ export default function App() {
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
+  const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
+  const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
+  const [templateModalError, setTemplateModalError] = useState<string | null>(null);
+  const [templateToDelete, setTemplateToDelete] = useState<TemplateRowData | null>(null);
+  const [deleteTemplateError, setDeleteTemplateError] = useState<string | null>(null);
+  const [newTemplateFolderModal, setNewTemplateFolderModal] = useState<{ parentId: string | undefined } | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleteFolderError, setDeleteFolderError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | undefined>();
   const [mfaError, setMfaError] = useState<string | undefined>();
   const [userModal, setUserModal] = useState<OfficeUserModalMode | null>(null);
@@ -265,6 +305,12 @@ export default function App() {
   // membre simple n'y a de toute façon pas droit (403).
   const officeUsers = useOfficeUsers(authenticated && (screen === 'users' || accessTarget !== null));
 
+  // Le catalogue de modèles alimente deux endroits : l'écran de gestion des
+  // modèles ET le sélecteur de la modale « Nouveau dossier » (modalOpen) — un
+  // membre simple n'a de toute façon pas droit d'y accéder (403).
+  const templates = useTemplates(authenticated && (screen === 'templates' || screen === 'template' || modalOpen));
+  const templateTree = useTemplateTree(screen === 'template' ? openTemplateId : null);
+
   // Restriction de la cible ouverte. Sans cible, `dataroomId` vaut null : le hook
   // ne déclenche aucune requête (voir sa clé interne).
   const access = useAccessRestriction(
@@ -282,6 +328,9 @@ export default function App() {
   }, [authenticated, syncFromServer]);
 
   const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
+  const openTemplate = templates.items.find(t => t.id === openTemplateId) ?? null;
+  const templateTreeNodes = toTemplateTreeNodes(templateTree.tree);
+  const templateRoles = templateRolesByFolderId(templateTree.tree);
 
   // Les modules réellement activés viennent de /api/tenant-config/ ; le
   // catalogue (libellés, icônes, « à venir ») reste côté front faute de
@@ -561,6 +610,7 @@ export default function App() {
   }
 
   const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
+  const canManageTemplates = assignableRoles(currentOffice?.role).length > 0;
 
   return (
     <AppShell
@@ -755,12 +805,12 @@ export default function App() {
           <NewDataroomModal
             open={modalOpen}
             onClose={() => setModalOpen(false)}
-            onCreate={({ name }) => {
-              void datarooms.create(name).then(() => setModalOpen(false));
+            onCreate={({ name, templateId }) => {
+              void datarooms.create(name, undefined, templateId).then(() => setModalOpen(false));
             }}
             portfolioOptions={PORTFOLIO_OPTIONS}
             clientSpaceOptions={CLIENT_SPACE_OPTIONS}
-            templates={NEW_DATAROOM_TEMPLATES}
+            templates={templates.items}
           />
         </>
       )}
@@ -955,6 +1005,153 @@ export default function App() {
                   Le compte lui-même n'est pas supprimé : il reste membre de ses autres
                   études, et peut être rattaché à nouveau ici.
                 </div>
+              </>
+            )}
+          </ConfirmModal>
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'templates' && (
+        <>
+          <TemplatesListScreen
+            rows={templates.items}
+            loading={templates.loading}
+            error={templates.error}
+            canManage={canManageTemplates}
+            onOpen={id => {
+              setOpenTemplateId(id);
+              setScreen('template');
+            }}
+            onCreate={() => {
+              setTemplateModalError(null);
+              setTemplateModal({ mode: 'create' });
+            }}
+            onEdit={template => {
+              setTemplateModalError(null);
+              setTemplateModal({ mode: 'edit', target: template });
+            }}
+            onDelete={template => {
+              setDeleteTemplateError(null);
+              setTemplateToDelete(template);
+            }}
+          />
+          <NewTemplateModal
+            // Remonter le mode ET la cible dans la clé remet les champs à zéro
+            // en passant d'un modèle à l'autre — même convention que
+            // OfficeUserModal (create/attach) plus haut.
+            key={templateModal ? `${templateModal.mode}-${templateModal.target?.id ?? 'new'}` : 'closed'}
+            open={templateModal !== null}
+            mode={templateModal?.mode ?? 'create'}
+            initial={
+              templateModal?.target
+                ? { name: templateModal.target.name, description: templateModal.target.description }
+                : undefined
+            }
+            error={templateModalError}
+            onClose={() => {
+              setTemplateModal(null);
+              setTemplateModalError(null);
+            }}
+            onSubmit={({ name, description }) => {
+              setTemplateModalError(null);
+              const done =
+                templateModal?.mode === 'edit' && templateModal.target
+                  ? templates.update(templateModal.target.id, { name, description })
+                  : templates.create(name, description);
+              done.then(() => setTemplateModal(null)).catch((err: Error) => setTemplateModalError(err.message));
+            }}
+          />
+          <ConfirmModal
+            open={templateToDelete !== null}
+            title="Supprimer le modèle"
+            confirmLabel="Supprimer"
+            destructive
+            error={deleteTemplateError}
+            onCancel={() => {
+              setTemplateToDelete(null);
+              setDeleteTemplateError(null);
+            }}
+            onConfirm={() => {
+              if (!templateToDelete) return;
+              setDeleteTemplateError(null);
+              templates
+                .remove(templateToDelete.id)
+                .then(() => setTemplateToDelete(null))
+                .catch((err: Error) => setDeleteTemplateError(err.message));
+            }}
+          >
+            {templateToDelete && (
+              <>
+                <strong>{templateToDelete.name}</strong> et son arborescence de dossiers seront
+                supprimés.
+                <div style={{ marginTop: 8 }}>
+                  Les datarooms déjà créées à partir de ce modèle ne sont pas affectées : la
+                  copie qu'elles portent leur est propre, sans lien vivant vers ce modèle.
+                </div>
+              </>
+            )}
+          </ConfirmModal>
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'template' && openTemplate && (
+        <>
+          <TemplateDetailScreen
+            // Même remontage que DataroomDetailScreen : le nœud sélectionné
+            // dans l'explorateur n'a aucun sens d'un modèle à l'autre.
+            key={openTemplate.id}
+            templateName={openTemplate.name}
+            templateDescription={openTemplate.description}
+            tree={templateTreeNodes}
+            rolesByFolderId={templateRoles}
+            loading={templateTree.loading}
+            error={templateTree.error}
+            canManage={canManageTemplates}
+            onBackToList={() => navigate('templates')}
+            onCreateFolder={parentId => setNewTemplateFolderModal({ parentId })}
+            onRenameFolder={(folderId, name) => void templateTree.renameFolder(Number(folderId), name)}
+            onDeleteFolder={folderId => {
+              setDeleteFolderError(null);
+              setFolderToDelete({ id: folderId, name: findFolderLabel(templateTreeNodes, folderId) ?? '' });
+            }}
+            onSetFolderRoles={(folderId, roles) => void templateTree.setFolderRoles(Number(folderId), roles)}
+          />
+          <NewTemplateFolderModal
+            open={newTemplateFolderModal !== null}
+            onClose={() => setNewTemplateFolderModal(null)}
+            parentLabel={
+              newTemplateFolderModal?.parentId
+                ? findFolderLabel(templateTreeNodes, newTemplateFolderModal.parentId)
+                : 'Racine du modèle'
+            }
+            onCreate={name => {
+              const parentId = newTemplateFolderModal?.parentId ? Number(newTemplateFolderModal.parentId) : undefined;
+              void templateTree.createFolder(name, parentId).then(() => setNewTemplateFolderModal(null));
+            }}
+          />
+          <ConfirmModal
+            open={folderToDelete !== null}
+            title="Supprimer ce dossier"
+            confirmLabel="Supprimer"
+            destructive
+            error={deleteFolderError}
+            onCancel={() => {
+              setFolderToDelete(null);
+              setDeleteFolderError(null);
+            }}
+            onConfirm={() => {
+              if (!folderToDelete) return;
+              setDeleteFolderError(null);
+              templateTree
+                .removeFolder(Number(folderToDelete.id))
+                .then(() => setFolderToDelete(null))
+                .catch((err: Error) => setDeleteFolderError(err.message));
+            }}
+          >
+            {folderToDelete && (
+              <>
+                <strong>{folderToDelete.name}</strong> et tous ses sous-dossiers seront
+                supprimés du modèle.
               </>
             )}
           </ConfirmModal>

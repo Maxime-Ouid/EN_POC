@@ -50,13 +50,21 @@ def login_view(request):
     # n'aurait jamais dû aboutir). _is_hyperadmin en exception délibérée : un
     # hyperadmin n'a par construction AUCUN OfficeMembership nulle part (voir
     # HyperadminAccess) et doit pouvoir se connecter depuis n'importe quel
-    # sous-domaine d'office, conformément à la décision de ne pas lui dédier un
-    # sous-domaine séparé (voir CLAUDE.md).
-    office = request.office
-    if office is None:
-        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not user.memberships.filter(office=office).exists() and not _is_hyperadmin(user):
-        return Response({"error": "accès non autorisé à cet office"}, status=403)
+    # sous-domaine d'office.
+    #
+    # hyperadmin.localhost (02/09/2026, TenantResolutionMiddleware) est un
+    # troisième cas : request.office y est toujours None (ce n'est jamais un
+    # Office), donc le contrôle habituel ne peut pas s'appliquer — seule
+    # l'appartenance au rôle transverse compte.
+    if request.hyperadmin_host:
+        if not _is_hyperadmin(user):
+            return Response({"error": "réservé aux hyperadmins Notantis"}, status=403)
+    else:
+        office = request.office
+        if office is None:
+            return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+        if not user.memberships.filter(office=office).exists() and not _is_hyperadmin(user):
+            return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     # Mot de passe validé, mais pas de session ouverte tant que la MFA n'est pas
     # passée — voir mfa_setup/mfa_verify. request.session['mfa_user_id'] atteste
@@ -1711,3 +1719,17 @@ def hyperadmin_office_detail_view(request, office_id):
         office.enabled_modules.set(Module.objects.filter(slug__in=slugs))
     office.save()
     return Response(_serialize_office(office))
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def hyperadmin_modules_view(request):
+    """Catalogue COMPLET des Module existants (pas seulement ceux activés pour
+    un office précis, contrairement à _serialize_office) — nécessaire pour que
+    l'écran hyperadmin de gestion des modules sache quoi proposer à cocher,
+    plutôt que de faire taper des slugs à la main."""
+    if not _is_hyperadmin(request.user):
+        return Response({"error": "réservé aux hyperadmins Notantis"}, status=403)
+    modules = Module.objects.order_by('name')
+    return Response([
+        {"slug": m.slug, "name": m.name, "description": m.description} for m in modules
+    ])

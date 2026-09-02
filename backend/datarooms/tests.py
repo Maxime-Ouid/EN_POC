@@ -612,6 +612,45 @@ class TenantResolutionMiddlewareTests(TestCase):
 
         self.assertIsNone(seen["office"])
 
+    def test_hyperadmin_host_is_recognized_and_never_resolves_an_office(self):
+        # "hyperadmin" est réservé (Office.RESERVED_SUBDOMAINS) : même si un
+        # Office portait ce subdomain (il ne peut normalement pas exister),
+        # ce branchement empêche toute tentative de résolution — la
+        # distinction avec un Host vraiment inconnu se fait uniquement via
+        # request.hyperadmin_host, jamais via request.office.
+        seen = {}
+
+        def get_response(request):
+            seen["tenant"] = get_current_tenant()
+            seen["office"] = request.office
+            seen["hyperadmin_host"] = request.hyperadmin_host
+            return "ok"
+
+        middleware = TenantResolutionMiddleware(get_response)
+        request = self.factory.get("/api/login/", HTTP_HOST="hyperadmin.localhost:8000")
+
+        middleware(request)
+
+        self.assertIsNone(seen["tenant"])
+        self.assertIsNone(seen["office"])
+        self.assertTrue(seen["hyperadmin_host"])
+        self.assertIsNone(get_current_tenant())
+
+    def test_office_host_sets_hyperadmin_host_to_false(self):
+        self.addCleanup(connections.databases.pop, tenant_alias("officea"), None)
+        seen = {}
+
+        def get_response(request):
+            seen["hyperadmin_host"] = request.hyperadmin_host
+            return "ok"
+
+        middleware = TenantResolutionMiddleware(get_response)
+        request = self.factory.get("/api/tenant-config/", HTTP_HOST="officea.localhost:8000")
+
+        middleware(request)
+
+        self.assertFalse(seen["hyperadmin_host"])
+
 
 class SsoTicketTests(TestCase):
     # _consumed_tickets est un set module-global : deux tickets émis pour le même
@@ -703,6 +742,39 @@ class MfaLoginFlowTests(TestCase):
         )
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), {"mfa_required": True, "enrollment": True})
+
+    def test_login_succeeds_for_hyperadmin_on_hyperadmin_host(self):
+        # hyperadmin.localhost (02/09/2026) : request.office y est toujours
+        # None (voir TenantResolutionMiddlewareTests), donc login_view ne peut
+        # pas appliquer son contrôle habituel — seul _is_hyperadmin compte ici.
+        hyperadmin = User.objects.create_user(username="hat_dedicated", password="pw123456")
+        HyperadminAccess.objects.create(user=hyperadmin)
+        res = self.client.post(
+            "/api/login/",
+            {"username": "hat_dedicated", "password": "pw123456"},
+            content_type="application/json",
+            HTTP_HOST="hyperadmin.localhost:8000",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"mfa_required": True, "enrollment": True})
+
+    def test_login_rejects_non_hyperadmin_on_hyperadmin_host(self):
+        # "enrollee" a des identifiants valides et même un OfficeMembership
+        # (sur un AUTRE office), mais aucun HyperadminAccess : refusé sur ce
+        # host précisément parce qu'il n'est pas hyperadmin, pas parce que son
+        # compte est invalide.
+        res = self.client.post(
+            "/api/login/",
+            {"username": "enrollee", "password": "pw123456"},
+            content_type="application/json",
+            HTTP_HOST="hyperadmin.localhost:8000",
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json(), {"error": "réservé aux hyperadmins Notantis"})
+        # Aucune session MFA en attente, même principe que le correctif de
+        # faille du 01/09/2026 : un accès qui sera de toute façon refusé ne
+        # doit jamais entamer la mécanique MFA.
+        self.assertIsNone(self.client.session.get('mfa_user_id'))
 
     def test_login_without_device_requires_enrollment(self):
         res = self._login()
@@ -1852,6 +1924,47 @@ class HyperadminTests(unittest.TestCase):
         # "coffre-fort" (créé par seed_demo, réutilisé ici) appliqué, le slug
         # inconnu silencieusement ignoré — pas d'erreur bloquante.
         self.assertEqual(res.json()["enabled_modules"], ["coffre-fort"])
+
+    def test_office_creation_rejects_reserved_subdomain(self):
+        # "hyperadmin" est réservé au sous-domaine dédié (Office.
+        # RESERVED_SUBDOMAINS) — jamais un Office, même créé depuis
+        # l'interface hyperadmin elle-même.
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": "hyperadmin", "name": "Ne devrait pas exister",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+            },
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Office.objects.filter(subdomain="hyperadmin").exists())
+
+    def test_hyperadmin_modules_catalogue(self):
+        coffre_fort, created_cf = Module.objects.get_or_create(
+            slug="coffre-fort", defaults={"name": "Coffre-fort"}
+        )
+        if created_cf:
+            self.addCleanup(coffre_fort.delete)
+        confiance_rib, created_cr = Module.objects.get_or_create(
+            slug="confiance-rib", defaults={"name": "ConfianceRIB"}
+        )
+        if created_cr:
+            self.addCleanup(confiance_rib.delete)
+
+        host = self._host()
+
+        self.client.force_login(self.regular_user)
+        res = self.client.get("/api/hyperadmin/modules/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.get("/api/hyperadmin/modules/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        slugs = {m["slug"] for m in res.json()}
+        self.assertIn("coffre-fort", slugs)
+        self.assertIn("confiance-rib", slugs)
 
 
 class SearchApiTests(unittest.TestCase):

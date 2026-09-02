@@ -78,8 +78,14 @@ cd backend && source .venv/Scripts/activate && python manage.py runserver_plus -
 # Régénérer les certificats mkcert si besoin (racine du projet). IMPORTANT : lister les
 # sous-domaines EXACTS en plus du wildcard — *.localhost seul ne suffit pas, voir
 # "État réel du code" pour l'explication (wildcard rejeté sur un domaine à un seul
-# label par tous les validateurs TLS, pas juste une bizarrerie Windows).
-mkcert localhost "*.localhost" officea.localhost officeb.localhost 127.0.0.1 ::1
+# label par tous les validateurs TLS, pas juste une bizarrerie Windows). -cert-file/
+# -key-file explicites (depuis le 02/09/2026, sous-domaine hyperadmin.localhost) pour
+# garder les noms de fichiers stables : sans eux, mkcert renumérote le fichier de
+# sortie selon le nombre de SAN, ce qui casserait les chemins en dur dans
+# vite.config.ts et dev.ps1.
+mkcert -cert-file localhost+5.pem -key-file localhost+5-key.pem \
+  localhost "*.localhost" officea.localhost officeb.localhost hyperadmin.localhost \
+  127.0.0.1 ::1
 
 # MinIO (stockage S3-compatible des Document) — conteneur sans volume ni --name : les
 # données ne survivent pas à la suppression du conteneur, le bucket est à recréer à
@@ -351,11 +357,12 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
 | `alice` | `demo1234` | Office A uniquement (rôle admin) |
 | `bob` | `demo1234` | Office B uniquement (rôle membre) |
 | `carla` | `demo1234` | **Office A + Office B** (rôle superadmin sur les deux) — compte à utiliser pour démontrer l'identité partagée |
+| `hyperadmin` | `demo1234` | **Rôle transverse** (`HyperadminAccess`, aucun `OfficeMembership`) — se connecte sur `hyperadmin.localhost` uniquement, pas sur un sous-domaine d'office |
 
 `carla` a un dispositif TOTP **déjà confirmé** (secret fixe préconfiguré par
 `seed_demo`, pas d'enrôlement à faire en démo) — voir Commandes pour générer un code
-valide au moment de la présentation. `alice` et `bob` n'ont pas de dispositif : leur
-premier login demande un enrôlement (QR code).
+valide au moment de la présentation. `alice`, `bob` et `hyperadmin` n'ont pas de
+dispositif préconfiguré : leur premier login demande un enrôlement (QR code).
 
 ## Scénario de démo cible
 
@@ -1420,6 +1427,195 @@ session si le code a bougé.
     pastille « Prioritaire »), puis « signé » (deux pièces, par leur tag), puis « vente »
     (le même dossier remonte par son NOM, donc sans pastille).
 
+- **✅ Fait le 02/09/2026 — sous-domaine dédié `hyperadmin.localhost`** :
+  l'interface hyperadmin (entrée du 01/09/2026 ci-dessus) gagne son propre
+  sous-domaine, distinct de `/admin/` Django (déjà pris) et des sous-domaines
+  d'office — nommé `hyperadmin.localhost` et non `admin.localhost`
+  précisément pour éviter la confusion avec `/admin/`.
+  - **`Office.RESERVED_SUBDOMAINS = {"hyperadmin"}`** (`models.py`), vérifié
+    dans `Office.clean()` — appelé par `full_clean()` aussi bien depuis
+    `hyperadmin_offices_view` (déjà en place) que depuis `/admin/` Django
+    (comportement `ModelForm` standard) : aucun des deux points de création
+    d'un `Office` ne peut créer la collision. Pas de migration (validation
+    Python pure, aucun changement de schéma).
+  - **`TenantResolutionMiddleware`** reconnaît désormais ce sous-domaine
+    explicitement (`request.hyperadmin_host`, toujours posé comme
+    `request.office`) AVANT toute tentative de résolution d'`Office` — un hôte
+    connu et légitime, pas une erreur, mais qui ne résout jamais d'office
+    (`request.office` y reste `None`, comme pour un Host inconnu).
+  - **`login_view` ne fonctionnait PAS tel quel sur ce sous-domaine** : elle
+    exigeait inconditionnellement `request.office is not None` (404 sinon)
+    avant même de regarder qui se connecte. Un seul branchement ajouté (pas
+    une nouvelle vue) : sur `request.hyperadmin_host`, seul `_is_hyperadmin`
+    compte (`403 "réservé aux hyperadmins Notantis"` sinon, avant même de
+    poser `session['mfa_user_id']` — même principe que le correctif de faille
+    du 01/09/2026). `mfa_setup`/`mfa_verify`/`logout_view`/`whoami` sont
+    restés inchangés : déjà host-agnostiques (aucun ne lit `request.office`),
+    donc le reste du flux MFA fonctionne sans modification une fois la porte
+    d'entrée corrigée.
+  - **`GET /api/hyperadmin/modules/`** (nouveau, même gate `_is_hyperadmin`
+    que les deux vues hyperadmin existantes) : catalogue COMPLET des `Module`
+    (slug/name/description), pas seulement ceux activés pour un office précis
+    (`_serialize_office` ne portait que des slugs) — nécessaire pour que
+    l'écran de gestion des modules propose de vraies cases à cocher plutôt que
+    de faire taper des slugs à la main.
+  - **Décision : pas de restriction d'hôte sur `/api/hyperadmin/...`** — les
+    trois vues restent gatées par `_is_hyperadmin(request.user)` seul,
+    indépendamment de `request.hyperadmin_host` : un hyperadmin peut toujours
+    les appeler depuis un sous-domaine d'office (rétrocompatible). Le nouveau
+    sous-domaine devient le lieu où vit l'UI et où la CONNEXION est
+    désormais gatée, pas une restriction supplémentaire sur les endpoints.
+  - **Certificat mkcert régénéré EN PLACE** (`-cert-file`/`-key-file`
+    explicites, pour ne pas renommer `localhost+5.pem`/`localhost+5-key.pem`
+    et donc n'avoir à toucher ni `vite.config.ts` ni `dev.ps1`) :
+    ```
+    mkcert -cert-file localhost+5.pem -key-file localhost+5-key.pem \
+      localhost "*.localhost" officea.localhost officeb.localhost \
+      hyperadmin.localhost 127.0.0.1 ::1
+    ```
+    Vérifié par `openssl x509 -noout -text` : le SAN liste bien
+    `hyperadmin.localhost` en plus des noms existants.
+  - **`CORS_ALLOWED_ORIGIN_REGEXES`/`CSRF_TRUSTED_ORIGINS`/`ALLOWED_HOSTS`
+    n'ont PAS eu besoin d'être modifiés** — contrairement à ce qui avait été
+    demandé au départ. Les trois sont déjà des wildcards génériques sur
+    `*.localhost` (pas une liste de sous-domaines d'office énumérés), donc
+    `hyperadmin.localhost` était déjà couvert. Confirmé en Chrome réel (aucune
+    erreur CORS/CSRF, TLS accepté sans avertissement) plutôt que supposé.
+  - **Frontend** : `main.tsx` court-circuite le branchement `?view=` existant
+    quand `window.location.hostname === 'hyperadmin.localhost'` et rend
+    `hyperadmin/HyperadminApp.tsx` — une racine séparée, même statut
+    architectural que `V1AppView`/`PrototypeDemo`, PAS l'`AppShell` des
+    offices (pas de sélecteur d'office, pas de thème, pas de navigation par
+    module — rien de tout ça n'a de sens pour un rôle transverse). Réutilise
+    `useSession()` tel quel (`LoginScreen`/`MfaScreen` inchangés,
+    `myOffices`/`tenantConfig` déjà avalés en `.catch(() => [] / null)`) et un
+    header bespoke minimal (marque, nom d'utilisateur, déconnexion).
+    `hooks/useHyperadminOffices.ts` (même patron que `useOfficeUsers.ts`,
+    **avec le même garde-fou `enabled`** — piège rencontré en vérification :
+    sans lui, le hook se déclenche au montage AVANT que la session ne soit
+    authentifiée, essuie un 401 pendant l'écran de connexion/MFA, et ne se
+    relance jamais une fois connecté puisque rien ne dépendait de
+    `authenticated`), `components/pages/HyperadminOfficesScreen.tsx` (même
+    patron que `OfficeUsersScreen.tsx` : `TableCard`/`ListControls`/
+    `useListPaging`/`TablePager`), `organisms/NewOfficeModal.tsx` (création
+    office + admin, bascule create/attach comme `OfficeUserModal`) et
+    `organisms/OfficeModulesModal.tsx` (cases à cocher à partir du catalogue).
+  - **`dev.ps1`** affiche désormais l'URL `hyperadmin.localhost` et le compte
+    `hyperadmin` dans son résumé de démarrage.
+  - **Tests** (`backend/datarooms/tests.py`) : 6 nouveaux —
+    `TenantResolutionMiddlewareTests` gagne 2 tests (hôte hyperadmin jamais
+    résolu en office, hôte d'office met bien `hyperadmin_host` à `False`) ;
+    `MfaLoginFlowTests` gagne 2 tests (connexion hyperadmin réussie sur ce
+    host, connexion non-hyperadmin refusée AVANT toute session MFA en
+    attente) ; `HyperadminTests` gagne 2 tests (création d'office avec
+    `subdomain: "hyperadmin"` refusée, catalogue de modules gaté et complet).
+    Suite complète : **153/153 tests verts** (147 existants + 6 nouveaux).
+  - **Vérifié en Chrome réel** (pas seulement `curl`) : connexion `hyperadmin`
+    (mot de passe + TOTP, dispositif déjà confirmé dans cet environnement) →
+    shell hyperadmin distinct de l'`AppShell` des offices ; création d'un
+    office de test (« Office C », mode `create`) → apparaît aussitôt dans la
+    liste, base tenant provisionnée ; gestion des modules (case à cocher
+    ConfianceRIB) → reflétée immédiatement dans la colonne Modules ;
+    désactivation → pastille « Désactivé », et confirmé en `curl` qu'une
+    connexion sur ce sous-domaine devenu inactif répond exactement
+    `404 "sous-domaine d'office non résolu"`, comme un sous-domaine jamais
+    enregistré ; `alice` (admin d'office, pas hyperadmin) → message
+    « réservé aux hyperadmins Notantis » affiché à l'écran, pas de crash, pas
+    de 404 générique. Office de test nettoyé après vérification (office,
+    admin, base tenant supprimés).
+
+- **✅ Fait le 02/09/2026 — Templates câblés au frontend** : le système
+  `Template`/`TemplateFolder` existait côté backend depuis le 01/09/2026
+  (`/api/templates/...`, voir entrée dédiée plus haut) mais aucun écran ne le
+  consommait — deux systèmes de templates coexistaient silencieusement :
+  `NEW_DATAROOM_TEMPLATES` (`data/demo.tsx`, trois entrées factices sans
+  équivalent en base) alimentait le sélecteur de `NewDataroomModal`, et le
+  `templateId` choisi n'était de toute façon jamais transmis à la création.
+  - **`NewDataroomModal` corrigée** : son prop `templates` attend désormais de
+    vrais `TemplateSummary` (`GET /api/templates/`, via `useTemplates`), pas
+    `NEW_DATAROOM_TEMPLATES` — supprimée de `data/demo.tsx`, devenue sans
+    appelant réel. `onCreate` transmet maintenant `templateId: number | null`
+    (`null` = « Dataroom vide », option toujours proposée en tête de liste,
+    ajoutée par le composant lui-même plutôt que par le jeu de démo — un
+    office sans aucun modèle garde donc une modale utilisable). `PrototypeDemo.tsx`
+    et `uikit/organisms.tsx` (les deux seules autres consommatrices,
+    entièrement hors backend — voir `main.tsx`, "Seule v1-app parle au
+    backend") gardent leur propre petit tableau local (`DEMO_TEMPLATE_OPTIONS`,
+    2 entrées, forme `NewDataroomTemplateOption`) : ce ne sont pas des écrans
+    connectés, retirer `NEW_DATAROOM_TEMPLATES` de `data/demo.tsx` ne les
+    prive donc de rien qu'un jeu de données local ne remplace.
+  - **8 nouvelles fonctions dans `api/endpoints.ts`** (les 4 groupes de routes
+    déjà exposées côté Django) : `listTemplates`/`createTemplate`/
+    `updateTemplate`/`deleteTemplate`, `listTemplateFolderLevel`/
+    `createTemplateFolder`/`updateTemplateFolder`/`deleteTemplateFolder`. Types
+    `TemplateSummary`/`TemplateFolderSummary`/`TemplateFolderLevel`, même
+    forme que leurs pendants `Dataroom`/`Folder` déjà en place.
+    `createDataroom` gagne un troisième paramètre `templateId?: number | null`
+    (`template_id` dans le corps, omis si absent — `JSON.stringify` élimine
+    déjà les clés `undefined`, pas de logique supplémentaire nécessaire).
+  - **Deux nouveaux hooks** : `hooks/useTemplates.ts` (liste + CRUD, même
+    patron que `useOfficeUsers.ts`) et `hooks/useTemplateTree.ts` (assemblage
+    récursif de l'arborescence, même patron que `useDataroomTree` — mais SANS
+    nœud racine synthétique : contrairement à une dataroom réelle, un
+    `Template` n'a pas de documents à la racine à porter, donc rien à
+    accrocher à un `ROOT_NODE_ID`). `useTemplates` alimente à la fois l'écran
+    de gestion ET le sélecteur de `NewDataroomModal` (`enabled` inclut
+    `modalOpen` dans `App.tsx`).
+  - **Nouvel écran `TemplatesListScreen`** (liste, même patron que
+    `OfficeUsersScreen` : barre d'outils, « afficher N », tableau, pagination)
+    → **`TemplateDetailScreen`** (arborescence, `Explorer` réutilisé tel quel
+    — organisme déjà générique, aucune modification nécessaire — avec un
+    panneau latéral bien plus simple que celui de `DataroomDetailScreen` :
+    pas de documents, pas d'onglets Q&R/Membres/Historique, aucun de ces
+    concepts n'existant pour un `Template`). Sélectionner un dossier permet de
+    le renommer, de régler les rôles qui le verront par défaut une fois le
+    modèle appliqué (cases à cocher `OFFICE_ROLES`/`roleLabel`, réutilisés
+    tels quels depuis `organisms/officeRoles.ts`), et de le supprimer. Deux
+    nouvelles modales, mêmes patrons que leurs équivalents dataroom :
+    `NewTemplateModal` (create/edit, mêmes libellés/mode que `OfficeUserModal`
+    create/attach) et `NewTemplateFolderModal` (copie conforme de
+    `NewFolderModal`, sans réglage de rôle à la création — les rôles se
+    règlent après coup, une fois le dossier sélectionné dans l'arborescence).
+  - **Nouvelle entrée de nav** `{ key: 'templates', icon: 'clip', label:
+    'Modèles de dossier' }` dans la section « Office » de `NAV_SECTIONS`, même
+    principe que « Annuaire de l'étude » : visible à tout le monde, c'est le
+    serveur qui répond 403 aux non-administrateurs (`_manager_role`, déjà en
+    place côté backend), l'écran qui l'explique plutôt qu'une entrée qui
+    disparaît sans dire pourquoi.
+  - **Écart assumé, hors périmètre de ce chantier** : `SettingsScreen` /
+    `ModulesTab` (Personnalisation) affiche déjà un onglet « Templates »
+    séparé, alimenté par `DATAROOM_TEMPLATES` (`data/demo.tsx`, données
+    figées, DISTINCT de `NEW_DATAROOM_TEMPLATES` retiré ci-dessus) — resté
+    inchangé, non demandé par ce chantier. Cet onglet reste donc doublement
+    obsolète (il affichait déjà un contenu figé avant même que `Template`
+    existe côté serveur) à côté du nouvel écran réel « Modèles de dossier » —
+    à corriger dans un chantier séparé si la confusion gêne en démo.
+  - **Vérifié en Chrome réel** (connexion `carla`, superadmin sur
+    `officea.localhost`) : création d'un modèle à 2 niveaux (`Pieces
+  identite` > `Confidentiel`, `visible_to_roles` réglé sur `Confidentiel` en
+    cochant Superadmin + Administrateur — confirmé aussi par inspection
+    directe de la base tenant : `TemplateFolder` 4 avec `roles=
+    ['superadmin', 'admin']`) ; création d'une dataroom depuis ce modèle via
+    `NewDataroomModal` → arborescence reproduite à l'identique en vrais
+    `Folder` ; panneau « Accès du sous-dossier » sur `Confidentiel` confirme
+    « Restreint à 2 utilisateur(s) », `alice` (admin) et `carla` (superadmin)
+    cochées, `bob`/`daniel` (membres) non cochés — résolution des rôles en
+    comptes réels de l'office exactement conforme à `_apply_template`.
+    Suppression du modèle testée via l'écran (`ConfirmModal`, bouton
+    destructif) : disparaît de la liste, la dataroom déjà créée à partir de
+    lui n'est pas affectée (comportement backend déjà couvert par
+    `DataroomTemplateTests`, reconfirmé ici côté UI). Données de test
+    nettoyées après vérification (modèle supprimé via l'écran, dataroom
+    supprimée en shell Django — aucune UI de suppression de dataroom
+    n'existe dans cette app, hors périmètre de ce chantier).
+  - **Vérifications automatisées** : `tsc -b` et `npm run check:ds` (184
+    fichiers, aucun écart nouveau) sans erreur ; `npm run lint` (0 erreur,
+    2 nouveaux avertissements `react/set-state-in-effect` sur
+    `TemplateDetailScreen.tsx`, même famille déjà tolérée ailleurs — ex.
+    `DataroomDetailScreen.tsx:185` — pour resynchroniser un état local
+    depuis une prop qui change). `python manage.py test` (153/153, aucun
+    changement backend dans ce chantier).
+
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
 **⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**
@@ -1624,8 +1820,11 @@ couverture.
       au moment de l'application, aucun lien conservé vers le template ensuite
       — voir "État réel du code"). **Changement connexe décidé en revue** :
       créer une dataroom (avec ou sans template) est désormais réservé
-      admin/superadmin, ce qui n'était pas le cas avant. Pas d'UI dans ce
-      chantier (demande explicitement backend + tests + doc).
+      admin/superadmin, ce qui n'était pas le cas avant. **UI faite le
+      02/09/2026** : écrans `TemplatesListScreen`/`TemplateDetailScreen`
+      (nav « Modèles de dossier »), `NewDataroomModal` câblée sur les vrais
+      `Template` (voir "État réel du code") — `NEW_DATAROOM_TEMPLATES` (jeu
+      de démo factice) a disparu de `data/demo.tsx`.
 - [x] Interface hyperadmin (rôle Notantis transverse) — **backend fait le
       01/09/2026** : modèle `HyperadminAccess` (base default, distinct du rôle
       `superadmin` d'`OfficeMembership` qui reste scopé à un office),
@@ -1634,11 +1833,16 @@ couverture.
       /api/hyperadmin/offices/` (liste, création d'un office + son premier
       admin dans le même flux, provisionnement de sa base tenant), `PATCH
       /api/hyperadmin/offices/<id>/` (activer/désactiver, gérer les modules
-      activés). Gate `_is_hyperadmin`, volontairement indépendant de
-      `request.office` — pas de sous-domaine dédié pour cette première version
-      (décision explicite, voir "État réel du code"). `seed_demo` étendu
-      (compte `hyperadmin`). Pas d'UI dans ce chantier (demande explicitement
-      backend + tests + doc). Notifications globales laissées au backlog.
+      activés). Gate `_is_hyperadmin`, alors volontairement indépendant de
+      `request.office` (pas de sous-domaine dédié pour cette première
+      version). `seed_demo` étendu (compte `hyperadmin`). **Sous-domaine dédié
+      + UI faits le 02/09/2026** : `hyperadmin.localhost` (voir "État réel du
+      code"), `hyperadmin/HyperadminApp.tsx` (racine séparée, pas l'`AppShell`
+      des offices) avec les 4 actions — liste, création d'office + admin,
+      activation/désactivation, gestion des modules (`GET
+      /api/hyperadmin/modules/`, nouveau). Les endpoints `/api/hyperadmin/...`
+      eux-mêmes restent volontairement indépendants de l'hôte (décision
+      inchangée). Notifications globales laissées au backlog.
 - [x] **Tags** (catalogue par office, pose sur dossiers ET pièces, filtre et
       recherche) — fait le 01/09/2026 : modèle `Tag`, création à la volée
       dédupliquée sur le nom replié, filtre multi-sélection en OU, tags

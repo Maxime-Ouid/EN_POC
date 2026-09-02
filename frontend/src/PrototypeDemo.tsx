@@ -10,6 +10,7 @@ import {
   StatsScreen,
   SettingsScreen,
 } from './components';
+import type { NewDataroomTemplateOption } from './components';
 import {
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
@@ -25,13 +26,21 @@ import {
   MEMBERS,
   MODULE_CATALOG,
   NAV_SECTIONS,
-  NEW_DATAROOM_TEMPLATES,
   PORTFOLIOS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
   RECENT_ACTIVITY,
   TREE,
 } from './data/demo';
+
+// Maquette locale : NewDataroomModal attend désormais de vrais Template
+// (GET /api/templates/, voir CLAUDE.md), qui n'existent pas dans cette
+// démo hors-backend — deux entrées d'exemple, sans lien avec data/demo.tsx
+// (NEW_DATAROOM_TEMPLATES a disparu de ce fichier, devenu sans appelant réel).
+const DEMO_TEMPLATE_OPTIONS: NewDataroomTemplateOption[] = [
+  { id: 1, name: 'Vente immobilière — standard', description: 'Recommandé · le plus utilisé par les offices' },
+  { id: 2, name: 'Dossier de divorce', description: 'Groupes prédéfinis' },
+];
 
 // Reconstitution complète du prototype « Espace Notarial Next » (index_16.html)
 // à partir de src/components et src/screens, sur données de démonstration
@@ -129,7 +138,7 @@ export function PrototypeDemo() {
             onCreate={() => setModalOpen(false)}
             portfolioOptions={PORTFOLIO_OPTIONS}
             clientSpaceOptions={CLIENT_SPACE_OPTIONS}
-            templates={NEW_DATAROOM_TEMPLATES}
+            templates={DEMO_TEMPLATE_OPTIONS}
           />
         </>
       )}

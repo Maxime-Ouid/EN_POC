@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -13,6 +14,13 @@ class Module(models.Model):
         return self.name
 
 class Office(models.Model):
+    # "hyperadmin" est réservé au sous-domaine dédié de l'interface hyperadmin
+    # (frontend/src/hyperadmin/, TenantResolutionMiddleware) — jamais un Office
+    # réel. Bloqué ici (clean(), appelé par full_clean() aussi bien depuis
+    # hyperadmin_offices_view que depuis /admin/ Django) pour qu'aucun des deux
+    # points de création ne puisse créer la collision.
+    RESERVED_SUBDOMAINS = {"hyperadmin"}
+
     subdomain = models.SlugField(unique=True)  # "officea"
     name = models.CharField(max_length=255)
     logo_url = models.URLField(blank=True)
@@ -38,6 +46,10 @@ class Office(models.Model):
     #
     # null = cet office n'a jamais rien personnalisé — l'API répond alors 204 et
     # le front applique les valeurs Notantis d'origine.
+
+    def clean(self):
+        if self.subdomain in self.RESERVED_SUBDOMAINS:
+            raise ValidationError({"subdomain": "réservé à l'interface hyperadmin"})
 
     def __str__(self):
         return self.name

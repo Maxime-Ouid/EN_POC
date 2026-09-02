@@ -15,7 +15,11 @@ export * from './NavBar';
 // (TypeScript le supprime alors silencieusement du barrel).
 export * from './NewDataroomModal';
 export * from './NewFolderModal';
+export * from './NewOfficeModal';
+export * from './NewTemplateFolderModal';
+export * from './NewTemplateModal';
 export * from './OfficeContentTab';
+export * from './OfficeModulesModal';
 export * from './OfficeUserModal';
 export * from './officeRoles';
 export * from './QACard';

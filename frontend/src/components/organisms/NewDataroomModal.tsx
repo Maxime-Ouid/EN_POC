@@ -4,18 +4,30 @@ import { Field } from '../molecules/Field';
 import { FieldRow } from '../molecules/FieldRow';
 import { TemplateOption } from '../molecules/TemplateOption';
 import { Modal } from './Modal';
-import type { DataroomTemplate } from '../molecules/TemplateOption';
+
+/** Un Template réel de l'office (GET /api/templates/), réduit à ce que le sélecteur affiche. */
+export interface NewDataroomTemplateOption {
+  id: number;
+  name: string;
+  description: string;
+}
 
 export interface NewDataroomModalProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: { name: string; portfolioId: string; clientSpaceId: string; templateId: string | null }) => void;
+  /** `templateId` null = « Dataroom vide », toujours proposée en tête de liste. */
+  onCreate: (data: { name: string; portfolioId: string; clientSpaceId: string; templateId: number | null }) => void;
   portfolioOptions: Array<{ id: string; label: string }>;
   clientSpaceOptions: Array<{ id: string; label: string }>;
-  templates: DataroomTemplate[];
+  /** Modèles RÉELS de l'office (backend/datarooms/models.py::Template) — voir App.tsx/useTemplates. */
+  templates: NewDataroomTemplateOption[];
 }
 
-// Modale "Nouveau dossier" — index_16.html #modal-new.
+// Modale "Nouveau dossier" — index_16.html #modal-new. Le sélecteur de modèle
+// pointait jusqu'au 02/09/2026 vers NEW_DATAROOM_TEMPLATES (data/demo.tsx,
+// trois entrées factices sans équivalent en base) et le templateId choisi
+// n'était jamais transmis à onCreate — câblé sur les vrais Template de
+// l'office (GET /api/templates/), voir CLAUDE.md.
 export function NewDataroomModal({
   open,
   onClose,
@@ -27,7 +39,7 @@ export function NewDataroomModal({
   const [name, setName] = useState('');
   const [portfolioId, setPortfolioId] = useState(portfolioOptions[0]?.id ?? '');
   const [clientSpaceId, setClientSpaceId] = useState(clientSpaceOptions[0]?.id ?? '');
-  const [templateId, setTemplateId] = useState<string | null>(templates[0]?.id ?? null);
+  const [templateId, setTemplateId] = useState<number | null>(null);
 
   return (
     <Modal
@@ -78,16 +90,28 @@ export function NewDataroomModal({
         </Field>
       </FieldRow>
       <Field label="Partir d'un modèle">
+        <TemplateOption
+          icon="file"
+          name="Dataroom vide"
+          desc="Sans arborescence pré-remplie"
+          selected={templateId === null}
+          onClick={() => setTemplateId(null)}
+        />
         {templates.map(t => (
           <TemplateOption
             key={t.id}
-            icon={t.icon}
+            icon="folder"
             name={t.name}
-            desc={t.desc}
+            desc={t.description || 'Aucune description'}
             selected={t.id === templateId}
             onClick={() => setTemplateId(t.id)}
           />
         ))}
+        {templates.length === 0 && (
+          <div className="tiny dim" style={{ marginTop: 6 }}>
+            Aucun autre modèle — un admin peut en créer depuis « Modèles » dans le menu Office.
+          </div>
+        )}
       </Field>
     </Modal>
   );

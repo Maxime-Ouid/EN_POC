@@ -192,6 +192,49 @@ export interface OfficeUserRow {
   role: string;
 }
 
+/** Un modèle de dataroom réutilisable — GET/POST/PATCH/DELETE /api/templates/. */
+export interface TemplateSummary {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+/**
+ * Un nœud de l'arborescence d'un Template — GET/POST/PATCH/DELETE
+ * /api/templates/<id>/folders/... `visible_to_roles` n'est résolu en
+ * utilisateurs réels qu'au moment où le template est appliqué à une dataroom
+ * (voir createDataroom) : ici, ce ne sont que des rôles, pas des ids.
+ */
+export interface TemplateFolderSummary {
+  id: number;
+  name: string;
+  parent: number | null;
+  visible_to_roles: string[];
+}
+
+/** Contenu d'un niveau de l'arborescence d'un Template (racine si `parent` omis). */
+export interface TemplateFolderLevel {
+  folders: TemplateFolderSummary[];
+}
+
+/** Un office tel que vu par l'interface hyperadmin — GET/POST/PATCH /api/hyperadmin/offices/. */
+export interface HyperadminOfficeRow {
+  id: number;
+  subdomain: string;
+  name: string;
+  is_active: boolean;
+  /** Slugs des modules activés — voir ModuleSummary pour le catalogue complet. */
+  enabled_modules: string[];
+}
+
+/** Une entrée du catalogue COMPLET des modules — GET /api/hyperadmin/modules/. */
+export interface ModuleSummary {
+  slug: string;
+  name: string;
+  description: string;
+}
+
 export const api = {
   ping: () => apiFetch<{ status: string }>('/api/ping/'),
 
@@ -309,10 +352,16 @@ export const api = {
       { signal },
     ),
 
-  createDataroom: (name: string, tagIds?: number[]) =>
+  /**
+   * `templateId` reproduit récursivement l'arborescence du Template choisi en
+   * vrais Folder/AccessRestriction (voir _apply_template côté serveur) — copie
+   * ponctuelle, jamais un lien vivant : modifier le Template ensuite n'affecte
+   * jamais les datarooms déjà créées à partir de lui.
+   */
+  createDataroom: (name: string, tagIds?: number[], templateId?: number | null) =>
     apiFetch<{ id: number; name: string; tags: TagSummary[] }>('/api/datarooms/', {
       method: 'POST',
-      body: { name, tags: tagIds ?? [] },
+      body: { name, tags: tagIds ?? [], template_id: templateId ?? undefined },
     }),
 
   /** Remplace l'ensemble des tags du dossier (PUT idempotent, pas d'ajout unitaire). */
@@ -423,4 +472,85 @@ export const api = {
    */
   removeOfficeUser: (membershipId: number) =>
     apiFetch<void>(`/api/office-users/${membershipId}/`, { method: 'DELETE' }),
+
+  /** Réservé au rôle transverse HyperadminAccess — 403 sinon, quel que soit l'hôte appelant. */
+  listHyperadminOffices: (signal?: AbortSignal) =>
+    apiFetch<HyperadminOfficeRow[]>('/api/hyperadmin/offices/', { signal }),
+
+  /**
+   * Crée un office ET son premier admin dans le même appel. `admin_mode: 'create'`
+   * ouvre un nouveau compte (mot de passe requis) ; `'attach'` rattache un compte
+   * EXISTANT par son nom exact (pas d'annuaire, même parti pris que
+   * attachOfficeUser).
+   */
+  createHyperadminOffice: (payload: {
+    subdomain: string;
+    name: string;
+    admin_mode: 'create' | 'attach';
+    admin_username: string;
+    admin_password?: string;
+  }) => apiFetch<HyperadminOfficeRow>('/api/hyperadmin/offices/', { method: 'POST', body: payload }),
+
+  /** Partiel : n'envoyer que ce qui change (is_active et/ou enabled_module_slugs). */
+  updateHyperadminOffice: (
+    officeId: number,
+    patch: { is_active?: boolean; enabled_module_slugs?: string[] },
+  ) => apiFetch<HyperadminOfficeRow>(`/api/hyperadmin/offices/${officeId}/`, { method: 'PATCH', body: patch }),
+
+  /** Catalogue COMPLET des modules existants (pas seulement ceux activés quelque part). */
+  listHyperadminModules: (signal?: AbortSignal) =>
+    apiFetch<ModuleSummary[]>('/api/hyperadmin/modules/', { signal }),
+
+  /** Modèles de dataroom de l'office courant — réservé admin/superadmin (403 sinon). */
+  listTemplates: (signal?: AbortSignal) => apiFetch<TemplateSummary[]>('/api/templates/', { signal }),
+
+  createTemplate: (name: string, description?: string) =>
+    apiFetch<TemplateSummary>('/api/templates/', {
+      method: 'POST',
+      body: { name, description: description ?? '' },
+    }),
+
+  /** Partiel : n'envoyer que ce qui change (name et/ou description). */
+  updateTemplate: (templateId: number, patch: { name?: string; description?: string }) =>
+    apiFetch<TemplateSummary>(`/api/templates/${templateId}/`, { method: 'PATCH', body: patch }),
+
+  /** Supprime le modèle ET son arborescence de TemplateFolder (cascade) — sans effet sur les datarooms déjà créées à partir de lui. */
+  deleteTemplate: (templateId: number) => apiFetch<void>(`/api/templates/${templateId}/`, { method: 'DELETE' }),
+
+  /**
+   * Contenu (sous-dossiers uniquement, pas de documents) d'un niveau de
+   * l'arborescence d'un Template. `parentId` omis = racine du modèle.
+   */
+  listTemplateFolderLevel: (templateId: number, parentId?: number, signal?: AbortSignal) =>
+    apiFetch<TemplateFolderLevel>(
+      `/api/templates/${templateId}/folders/${parentId != null ? `?parent=${parentId}` : ''}`,
+      { signal },
+    ),
+
+  /** `parentId` omis = dossier créé à la racine du modèle. */
+  createTemplateFolder: (
+    templateId: number,
+    name: string,
+    parentId?: number,
+    visibleToRoles?: string[],
+  ) =>
+    apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/`, {
+      method: 'POST',
+      body: { name, parent: parentId ?? null, visible_to_roles: visibleToRoles ?? [] },
+    }),
+
+  /** Partiel : n'envoyer que ce qui change (name et/ou visible_to_roles). */
+  updateTemplateFolder: (
+    templateId: number,
+    folderId: number,
+    patch: { name?: string; visible_to_roles?: string[] },
+  ) =>
+    apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/${folderId}/`, {
+      method: 'PATCH',
+      body: patch,
+    }),
+
+  /** Supprime le dossier ET ses sous-dossiers (cascade, self-FK). */
+  deleteTemplateFolder: (templateId: number, folderId: number) =>
+    apiFetch<void>(`/api/templates/${templateId}/folders/${folderId}/`, { method: 'DELETE' }),
 };

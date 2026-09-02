@@ -192,10 +192,12 @@ function Start-Dev {
   }
 
   Write-Host ""
-  Write-Host "  Office A : https://officea.localhost:$FrontendPort" -ForegroundColor Cyan
-  Write-Host "  Office B : https://officeb.localhost:$FrontendPort" -ForegroundColor Cyan
-  Write-Host "  Comptes  : carla / demo1234 (superadmin, MFA déjà confirmée - .\dev.ps1 totp)" -ForegroundColor DarkGray
-  Write-Host "             alice / demo1234 (admin office A, enrôlement MFA au 1er login)" -ForegroundColor DarkGray
+  Write-Host "  Office A   : https://officea.localhost:$FrontendPort" -ForegroundColor Cyan
+  Write-Host "  Office B   : https://officeb.localhost:$FrontendPort" -ForegroundColor Cyan
+  Write-Host "  Hyperadmin : https://hyperadmin.localhost:$FrontendPort" -ForegroundColor Cyan
+  Write-Host "  Comptes    : carla / demo1234 (superadmin, MFA déjà confirmée - .\dev.ps1 totp)" -ForegroundColor DarkGray
+  Write-Host "               alice / demo1234 (admin office A, enrôlement MFA au 1er login)" -ForegroundColor DarkGray
+  Write-Host "               hyperadmin / demo1234 (rôle transverse, enrôlement MFA au 1er login)" -ForegroundColor DarkGray
   Write-Host ""
   Write-Host "  Arrêter : .\dev.ps1 stop" -ForegroundColor DarkGray
 }

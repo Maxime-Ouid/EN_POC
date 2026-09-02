@@ -10,6 +10,7 @@ import './styles/components.css'
 // classes de components.css (.icon, .bar-track…) sans jamais les redéfinir.
 import './styles/dashboard.css'
 import App from './App.tsx'
+import { HyperadminApp } from './hyperadmin/HyperadminApp'
 import { PrototypeDemo } from './PrototypeDemo'
 import { UiKit } from './uikit/UiKit'
 import { V1AppView } from './v1/V1AppView'
@@ -41,16 +42,25 @@ const view = params.get('view');
 const initialScreen = params.get('screen') as V1ScreenKey | null;
 const usesBackend = !view || view === 'v1-app';
 
+// hyperadmin.localhost est un hôte réservé (Office.RESERVED_SUBDOMAINS, voir
+// CLAUDE.md) : jamais un office, toujours le shell hyperadmin — prioritaire
+// sur tout `?view=`, qui n'a aucun sens ici (ni thème d'office ni maquette à
+// prévisualiser sur cet hôte).
+const isHyperadminHost = window.location.hostname === 'hyperadmin.localhost';
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider
       initialState={initialTheme}
-      // Le UI kit et les maquettes n'ont pas de backend : ils restent en
-      // personnalisation locale, sans transport.
-      transport={usesBackend ? apiThemeTransport : undefined}
+      // Le UI kit, les maquettes et le shell hyperadmin n'ont pas de thème
+      // d'office à charger/persister : ils restent en personnalisation locale,
+      // sans transport.
+      transport={!isHyperadminHost && usesBackend ? apiThemeTransport : undefined}
     >
       <IconSprite />
-      {view === 'ui-kit' ? (
+      {isHyperadminHost ? (
+        <HyperadminApp />
+      ) : view === 'ui-kit' ? (
         <UiKit />
       ) : view === 'prototype-preview' ? (
         <PrototypeDemo />
