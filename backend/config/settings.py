@@ -31,7 +31,11 @@ ALLOWED_HOSTS = ['.localhost']
 # Application definition
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://[a-z0-9-]*\.?localhost:5173$",
+    # Un seul label optionnel avant "localhost" ne suffit plus depuis le prototype
+    # *.office.localhost (03/09/2026, voir CLAUDE.md) : un office créé en direct
+    # depuis la console hyperadmin vit sous <nom>.office.localhost, deux labels
+    # avant "localhost". Autorise désormais N labels, pas juste 0 ou 1.
+    r"^https://([a-z0-9-]+\.)*localhost:5173$",
 ]
 CORS_ALLOW_CREDENTIALS = True
 

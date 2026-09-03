@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { officeLoginUrl } from '../../hyperadmin/officeUrl';
 import { Button } from '../atoms/Button';
 import { Select } from '../atoms/Select';
 import { TextInput } from '../atoms/TextInput';
@@ -86,11 +87,18 @@ export function NewOfficeModal({ open, error, onClose, onSubmit }: NewOfficeModa
 
       <Field label="Sous-domaine" style={{ marginTop: 10 }}>
         <TextInput
-          placeholder="Ex. officec"
+          placeholder="Ex. notaires-durand"
           value={subdomain}
           onChange={e => setSubdomain(e.target.value)}
           autoFocus
         />
+        {/* Aperçu en direct de l'adresse de connexion — le certificat local ne
+            couvre qu'un wildcard sous .office.localhost, voir officeUrl.ts. */}
+        <div className="tiny dim" style={{ marginTop: 4 }}>
+          {subdomain.trim()
+            ? `Accessible sur ${officeLoginUrl(subdomain.trim().toLowerCase())}`
+            : "L'office sera accessible sur <sous-domaine>.office.localhost"}
+        </div>
       </Field>
 
       <Field label="Nom de l'étude">

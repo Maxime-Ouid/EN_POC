@@ -16,6 +16,36 @@ def is_accepted_extension(filename: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Logo d'office (Office.logo_url) — repris de front/templates-hyperadmin-ui
+# (commit "Logo par office, dernier morceau de la marque grise", 02/09/2026)
+#
+# Liste volontairement PLUS ÉTROITE qu'ACCEPTED_EXTENSIONS : un logo est une image
+# affichée dans l'interface, pas une pièce à archiver. Les formats retenus sont ceux
+# qu'un navigateur rend nativement et qu'une étude a sous la main.
+# ---------------------------------------------------------------------------
+
+LOGO_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "svg"}
+
+# 2 Mio : un logo qui dépasse est une photo, pas un logo. La borne protège aussi le
+# relais, qui sert le fichier à chaque chargement de page.
+LOGO_MAX_BYTES = 2 * 1024 * 1024
+
+LOGO_CONTENT_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "svg": "image/svg+xml",
+}
+
+
+def logo_extension(filename: str) -> str | None:
+    """Extension normalisée d'un logo acceptable, None si le format est refusé."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext if ext in LOGO_EXTENSIONS else None
+
+
+# ---------------------------------------------------------------------------
 # Personnalisation visuelle par office (Office.theme)
 #
 # Ce validateur BORNE, il ne connaît pas le catalogue de tokens : celui-ci vit

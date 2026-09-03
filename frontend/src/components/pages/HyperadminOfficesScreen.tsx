@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { HyperadminOfficeRow, ModuleSummary } from '../../api/endpoints';
 import { pagerInfo, useListPaging } from '../../hooks/useListPaging';
+import { officeLoginUrl } from '../../hyperadmin/officeUrl';
 import { Button } from '../atoms/Button';
 import { Card } from '../atoms/Card';
 import { Icon } from '../atoms/Icon';
@@ -87,7 +88,19 @@ export function HyperadminOfficesScreen({
             <RowName icon="building" iconBg="var(--info-bg)" iconColor="var(--info)">
               {office.name}
             </RowName>
-            <td className="mono dim">{office.subdomain}</td>
+            <td>
+              <a
+                className="mono tiny"
+                href={officeLoginUrl(office.subdomain)}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--info)' }}
+                title="Ouvrir l'écran de connexion de cet office dans un nouvel onglet"
+              >
+                <Icon id="link" />
+                {office.subdomain}
+              </a>
+            </td>
             <td>
               <Pill kind={office.is_active ? 'success' : 'critical'}>
                 {office.is_active ? 'Actif' : 'Désactivé'}

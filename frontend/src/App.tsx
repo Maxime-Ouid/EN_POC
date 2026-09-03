@@ -329,6 +329,8 @@ export default function App() {
   const [dataroomAccessSaveError, setDataroomAccessSaveError] = useState<string | null>(null);
   const [savingTemplateAccess, setSavingTemplateAccess] = useState(false);
   const [templateAccessSaveError, setTemplateAccessSaveError] = useState<string | null>(null);
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identitySaveError, setIdentitySaveError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
@@ -484,6 +486,20 @@ export default function App() {
       }),
     );
     await templateTree.refresh();
+  }
+
+  // Repris de front/templates-hyperadmin-ui (03/09/2026) : PATCH /api/tenant-config/
+  // (nom + logo) n'était jusqu'ici branché nulle part, IdentityTab affichait
+  // "L'enregistrement de l'identité n'est pas encore exposé par l'API" en dur.
+  // session.refresh() plutôt qu'une mise à jour locale de session.tenant : un
+  // renommage change aussi le `name` que `currentOffice` (ligne ~770) recherche
+  // dans session.offices (rempli par /api/my-offices/, pas reconstruit ici) — un
+  // rechargement complet évite que ce rapprochement se désynchronise après un
+  // renommage, au prix d'un bref écran de chargement (même mécanisme qu'après la
+  // MFA, jamais utilisé jusqu'ici en cours de session).
+  async function saveIdentity(next: { displayName: string; logoFile: File | null; removeLogo: boolean }) {
+    await api.saveTenantIdentity({ name: next.displayName, logoFile: next.logoFile, removeLogo: next.removeLogo });
+    await session.refresh();
   }
 
   // Les modules réellement activés viennent de /api/tenant-config/ ; le
@@ -946,7 +962,7 @@ export default function App() {
   return (
     <AppShell
       officeName={session.tenant?.name ?? 'Office'}
-      officeRole={currentOffice?.role ?? '—'}
+      officeRole={currentOffice?.role ?? (session.user?.is_hyperadmin ? 'Hyperadmin' : '—')}
       logoUrl={session.tenant?.logo_url || undefined}
       navSections={navSections}
       activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
@@ -957,7 +973,7 @@ export default function App() {
       onLogout={() => setLogoutConfirm(true)}
       userInitials={initialsOf(username)}
       userName={username}
-      userRole={currentOffice?.role ?? 'Membre'}
+      userRole={currentOffice?.role ?? (session.user?.is_hyperadmin ? 'Hyperadmin' : 'Membre')}
       breadcrumbRoot={session.tenant?.name}
       breadcrumbCurrent={
         openModuleEntry?.name ?? (openDataroom ? openDataroom.name : CRUMB_LABELS[screen])
@@ -1415,9 +1431,21 @@ export default function App() {
               subdomain: window.location.host,
               logoUrl: session.tenant?.logo_url,
             },
-            // Aucun endpoint d'écriture sur Office pour l'instant : l'onglet
-            // édite localement et le dit, plutôt que de simuler un succès.
-            error: "L'enregistrement de l'identité n'est pas encore exposé par l'API.",
+            onSave: next => {
+              setIdentitySaveError(null);
+              setSavingIdentity(true);
+              saveIdentity(next)
+                .catch((err: Error) => setIdentitySaveError(err.message))
+                .finally(() => setSavingIdentity(false));
+            },
+            saving: savingIdentity,
+            error: identitySaveError,
+            // Même gate que la gestion des Templates (assignableRoles) : renommer
+            // l'étude ou changer son logo engage tout le monde, réservé admin/superadmin.
+            readOnly: !canManageTemplates,
+            readOnlyNote: canManageTemplates
+              ? undefined
+              : "Seul un administrateur de l'office peut modifier son identité.",
           }}
           modules={{
             modules: modulesWithServerState,

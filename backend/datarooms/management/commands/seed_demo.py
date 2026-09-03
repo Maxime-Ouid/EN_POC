@@ -60,11 +60,20 @@ class Command(BaseCommand):
 
         # hyperadmin : rôle Notantis transverse à tous les offices (HyperadminAccess),
         # distinct du rôle "superadmin" d'OfficeMembership porté par carla (scopé,
-        # lui, à office_a/office_b précisément). Pas de TOTPDevice préconfiguré
-        # (contrairement à carla) : ce compte n'a pas de scénario de démo en direct
-        # dédié, premier login enrôle son dispositif comme alice/bob.
+        # lui, à office_a/office_b précisément).
         hyperadmin = make_user("hyperadmin")
         HyperadminAccess.objects.get_or_create(user=hyperadmin)
+
+        # Dispositif TOTP préconfiguré, même secret que carla (repris de
+        # front/templates-hyperadmin-ui, 03/09/2026) : ce compte n'avait pas de
+        # scénario de démo dédié quand il a été semé — la console Notantis lui en
+        # donne un, et `dev.ps1 totp` sort désormais un code valable pour lui aussi.
+        # Sur une base déjà semée, get_or_create ne réécrit pas la clé d'un dispositif
+        # existant : supprimer le dispositif avant de relancer seed_demo si besoin.
+        TOTPDevice.objects.get_or_create(
+            user=hyperadmin, name="demo",
+            defaults={"key": DEMO_TOTP_KEY, "confirmed": True},
+        )
 
         self.stdout.write(self.style.SUCCESS(
             "Données de démo créées (alice, bob, carla, hyperadmin / mdp: demo1234)."

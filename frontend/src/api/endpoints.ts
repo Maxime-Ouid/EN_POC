@@ -23,6 +23,7 @@ export type { TagColor };
 
 export interface WhoAmI {
   username: string;
+  is_hyperadmin: boolean;
 }
 
 export interface OfficeMembership {
@@ -280,6 +281,27 @@ export const api = {
   myOffices: (signal?: AbortSignal) => apiFetch<OfficeMembership[]>('/api/my-offices/', { signal }),
 
   tenantConfig: (signal?: AbortSignal) => apiFetch<TenantConfig>('/api/tenant-config/', { signal }),
+
+  /**
+   * Identité de l'office — nom et logo. Réservé admin/superadmin (403 sinon), même
+   * porte que l'apparence : renommer l'étude ou changer son logo engage tout le monde.
+   *
+   * Multipart parce qu'un fichier peut accompagner le nom, et les champs omis ne sont
+   * pas touchés : enregistrer un nom seul ne retire pas le logo. `removeLogo` est le
+   * chemin explicite du retour à la marque Notantis.
+   *
+   * Le `logo_url` renvoyé est une URL de RELAIS Django (`/api/tenant-logo/?v=…`), pas
+   * l'adresse du stockage : MinIO sert en http quand l'application est en https, et le
+   * navigateur bloquerait l'image. Le `?v=` change à chaque dépôt, sans quoi le
+   * navigateur continuerait d'afficher l'ancien logo depuis son cache.
+   */
+  saveTenantIdentity: (patch: { name?: string; logoFile?: File | null; removeLogo?: boolean }) => {
+    const formData = new FormData();
+    if (patch.name !== undefined) formData.append('name', patch.name);
+    if (patch.logoFile) formData.append('logo', patch.logoFile);
+    if (patch.removeLogo) formData.append('remove_logo', 'true');
+    return apiFetch<TenantConfig>('/api/tenant-config/', { method: 'PATCH', formData });
+  },
 
   /** Thème de l'office. `undefined` = 204, l'office n'a jamais personnalisé. */
   tenantTheme: (signal?: AbortSignal) =>

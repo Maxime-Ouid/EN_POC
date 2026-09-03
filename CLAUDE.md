@@ -2386,6 +2386,252 @@ session si le code a bougé.
     modèles réels de l'office sans erreur. Déconnexion en fin de vérification
     (ferme toutes les sessions, comportement du 02/09/2026, inchangé ici).
 
+- **✅ Fait le 03/09/2026 (fin de journée) — quatre éléments repris de
+  `origin/front/templates-hyperadmin-ui`** : branche du collègue, divergée au
+  même point que la dernière fusion (`02a97e5`), examinée à la demande de
+  l'utilisateur ("est-ce qu'il y a des éléments intéressants à récupérer sur
+  ma branche ?"). Beaucoup de son contenu fait double emploi avec le travail
+  déjà fait ici en parallèle (leur "console Notantis"
+  `HyperadminScreen.tsx`/`TemplateEditorModal.tsx` refont, en moins découplé,
+  ce que `hyperadmin.localhost` + `TemplatesListScreen`/`TemplateDetailScreen`
+  font déjà, testé en Chrome) — non repris. Quatre éléments COMPLÉMENTAIRES
+  retenus, un par un plutôt qu'en bloc :
+  - **Logo par office** (dernier morceau de la « marque grise », leur commit
+    "Logo par office, dernier morceau de la marque grise", 02/09/2026) —
+    comblait un trou déjà documenté ici (case non cochée dans "État actuel du
+    POC"). `PATCH /api/tenant-config/` accepte désormais `name`/`logo`
+    (multipart, réservé admin/superadmin — même porte que `tenant_theme`) et
+    `GET /api/tenant-logo/` relaie le fichier (jamais servi depuis MinIO
+    directement : son URL est en http quand l'app est en https, contenu mixte
+    bloqué — même raison que `document_content_view`). `Office.logo_url`
+    porte une CLÉ de stockage, pas une URL (`URLField` réutilisé tel quel,
+    volontairement PAS de migration vers un vrai `FileField` — une migration
+    poussée juste avant une fusion est ce qui a déjà coûté deux rattrapages de
+    bases, voir plus bas dans ce fichier) ; la conversion clé → URL servable
+    se fait à la frontière de l'API (`_logo_public_url`, suffixe aléatoire
+    dans `?v=` pour invalider le cache navigateur à chaque remplacement). Un
+    SVG déposé est neutralisé par CSP (`default-src 'none'`) + `nosniff` sur
+    le relais — ouvert directement dans un onglet, il s'exécuterait sinon sur
+    l'origine de l'API. `validators.py` gagne `LOGO_EXTENSIONS`/
+    `LOGO_MAX_BYTES` (2 Mio)/`LOGO_CONTENT_TYPES`/`logo_extension()`,
+    volontairement plus étroit qu'`ACCEPTED_EXTENSIONS` (un logo est une
+    image affichée, pas une pièce à archiver). **Seule adaptation par rapport
+    à la branche d'origine** : gate réécrit sur `_effective_role` au lieu
+    d'un `membership.role` brut, pour qu'un hyperadmin (aucun
+    `OfficeMembership` réel, voir plus haut le 03/09/2026 matin) puisse aussi
+    modifier l'identité de n'importe quel office — conflit textuel réel avec
+    `tenant_config`, déjà modifiée le jour même pour la même raison, fusionné
+    à la main plutôt que par cherry-pick direct. `IdentityTab.tsx` reprise à
+    l'identique (elle n'avait pas divergé de la version d'origine du
+    collègue) — aperçu du logo enregistré/du fichier choisi avant envoi,
+    bouton « Retirer », gagne `readOnly`/`readOnlyNote` (même pattern déjà
+    utilisé par `ModulesTab.tsx`). Câblée dans `App.tsx` via un nouveau
+    `saveIdentity()` qui appelle `session.refresh()` après écriture plutôt
+    qu'une mise à jour locale de `session.tenant` : un renommage change aussi
+    le `name` que `currentOffice` (ligne ~770) recherche dans
+    `session.offices`, un rafraîchissement complet évite que ce rapprochement
+    se désynchronise après un renommage (au prix d'un bref écran de
+    chargement, déjà le comportement après la MFA). 9 tests repris
+    (`TenantLogoApiTests`, stockage `FileSystemStorage` de test via
+    `override_settings`, pas de dépendance à un MinIO qui tourne).
+    **Non vérifié en conditions réelles (MinIO) dans cette session** — Docker
+    n'est pas disponible dans cet environnement (`docker ps` échoue,
+    `Docker Desktop.exe` absent) : le dépôt réel d'un fichier a été tenté en
+    Chrome (upload simulé via `DataTransfer` sur l'input caché du
+    `Dropzone`, `file_upload` du MCP refusant les chemins hors de son
+    allow-list) et est resté bloqué en `pending` (PATCH qui attend une
+    connexion à `localhost:9000` qui n'existe pas) jusqu'à un `Failed to
+    fetch` côté navigateur — comportement attendu de l'ABSENCE de MinIO, pas
+    un bug du code (`office.logo_url` confirmé toujours vide après coup,
+    aucune écriture partielle). L'enregistrement du NOM SEUL (ne touche pas
+    `default_storage`) a en revanche été vérifié de bout en bout en Chrome
+    réel (`alice`, admin sur `officea.localhost`) : `PATCH` réussi, valeur
+    relue immédiatement via `/api/tenant-config/`, reverti après
+    vérification. À revérifier avec le dépôt réel d'un logo la prochaine fois
+    que MinIO tourne dans cet environnement.
+  - **Dispositif TOTP préconfiguré pour `hyperadmin`** (`seed_demo.py`, même
+    `DEMO_TOTP_KEY` que carla) — sans lui, `dev.ps1 totp` ne sortait pas de
+    code pour ce compte sur une base fraîchement semée, premier login
+    exigeait un enrôlement QR code. `get_or_create` ne réécrit pas un
+    dispositif déjà présent (sans effet sur CET environnement, où
+    `hyperadmin` a déjà un dispositif confirmé posé manuellement lors d'une
+    session précédente).
+  - **`is_hyperadmin` exposé sur `/api/whoami/`** — absent jusqu'ici de toute
+    réponse malgré le rôle transverse (`HyperadminAccess`). Utilisé ici pour
+    un détail cosmétique repéré en Chrome dans la session du matin même : un
+    hyperadmin browsant un sous-domaine d'office (il y a désormais tous les
+    droits, voir plus haut) affichait « — » puis « Membre » en repli dans la
+    sidebar, faute de rôle réel — remplacé par « Hyperadmin » quand
+    `session.user.is_hyperadmin` est vrai et qu'aucun `OfficeMembership` ne
+    donne de rôle réel (`App.tsx`, `officeRole`/`userRole` de `AppShell`).
+  - **Correctif indépendant, trouvé en marge de la revue** : leur commit
+    "Corrections issues du passage en navigateur réel" (02/09/2026) notait un
+    défaut non corrigé, antérieur à leur propre lot : l'écran d'enrôlement
+    MFA affiche le secret de saisie manuelle en HEXADÉCIMAL
+    (`device.key` brut, `mfa_setup`) là où une application d'authentification
+    attend du BASE32 (le QR code, lui, fonctionne — il encode `config_url`,
+    pas cette valeur directement). Vérifié : le même bug existe dans ce
+    code, partagé et non touché par la duplication d'UI entre les deux
+    branches. Corrigé ici (`mfa_setup`, GET) :
+    `base64.b32encode(device.bin_key).decode('ascii')` au lieu de
+    `device.key`. Aucun test ne couvrait le FORMAT du secret avant ce
+    correctif (`valid_code_for` traite déjà tout comme du hex, donc rien
+    n'aurait détecté l'écart) — `test_enrollment_flow` gagne une assertion
+    dédiée (`base64.b32decode(secret) == device.bin_key`) et sa conversion
+    du secret pour calculer un code de test valide.
+  - **Tests ciblés relancés pour ce lot uniquement** (pas la suite complète,
+    sur demande explicite — "tu lanceras tous les tests quand je te le
+    dirai") : `TenantLogoApiTests` (9), `MfaLoginFlowTests` (9, dont le
+    correctif base32 et la régression whoami — `test_sso_ticket_consumption_
+    never_triggers_mfa` attendait une égalité stricte sur le corps de
+    `/api/whoami/`, mise à jour pour inclure `is_hyperadmin: False`),
+    `TenantThemeApiTests` (11, classe voisine de `TenantLogoApiTests`,
+    relancée par prudence bien qu'non touchée) — **29/29 verts**.
+    `tsc -b`, `npm run lint` (0 nouvel avertissement), `npm run check:ds`
+    (189 fichiers, 0 écart nouveau), `npm run build` — tous clean. **La
+    suite backend complète n'a PAS été relancée dans cette session** (169
+    tests avant ce lot, +9 logo = 178 attendus) — à faire au prochain « lance
+    tous les tests ».
+
+- **✅ Prototype validé le 03/09/2026 — un office créé en direct depuis la
+  console hyperadmin pourra être rejoint immédiatement, sans redémarrage ni
+  avertissement TLS** : suite à la discussion sur la création d'office
+  "au nom que l'on souhaite" pendant une démo (voir fil de conversation).
+  Constat de départ : `hyperadmin_offices_view` crée déjà un vrai `Office`
+  + provisionne sa base tenant + crée le premier admin (fait le 01/09/2026,
+  inchangé) — le blocage n'était jamais applicatif, seulement le certificat
+  HTTPS local (mkcert), qui ne couvrait que `officea`/`officeb`/`hyperadmin`
+  explicitement (le `*.localhost` wildcard qu'il contient déjà ne sert à
+  rien, rejeté par Chrome — restriction Public Suffix List déjà documentée
+  ci-dessus, 26/08/2026).
+  - **Piste retenue pour le prototype** : un wildcard cert un cran plus bas,
+    `*.office.localhost`, plutôt qu'un `*.localhost` direct — la restriction
+    PSL vise spécifiquement un wildcard *directement* sur un nom réservé à un
+    seul label (`localhost`), pas un wildcard un niveau plus bas. Un office
+    créé en direct vivrait donc sous `<nom-choisi>.office.localhost` (pas
+    encore câblé dans le code de création — voir "Reste à faire" plus bas) ;
+    `officea`/`officeb`/`hyperadmin` garderaient leur forme actuelle,
+    inchangée.
+  - **Certificat régénéré EN PLACE** (mêmes noms de fichiers
+    `localhost+5.pem`/`localhost+5-key.pem`, donc aucun changement à
+    `vite.config.ts`/`dev.ps1`) :
+    ```
+    mkcert -cert-file localhost+5.pem -key-file localhost+5-key.pem \
+      localhost "*.localhost" officea.localhost officeb.localhost \
+      hyperadmin.localhost "*.office.localhost" 127.0.0.1 ::1
+    ```
+    mkcert n'émet PAS son avertissement "many browsers don't support
+    second-level wildcards" pour `*.office.localhost` (seulement pour
+    `*.localhost`) — premier signe encourageant, confirmé ensuite en Chrome
+    réel. **⚠️ Correction — `.gitignore` contient bien `*.pem`, mais ça n'a
+    aucun effet ici** : une règle `.gitignore` ne s'applique jamais à un
+    fichier DÉJÀ suivi par git (elle empêche seulement l'AJOUT d'un nouveau
+    fichier qui matche, elle ne retire rien) — `localhost+5.pem`/
+    `localhost+5-key.pem` avaient été commités avant l'ajout de cette règle
+    (pratique déjà en place, antérieure à ce chantier) et continuent donc
+    d'apparaître modifiés dans `git status` après chaque régénération,
+    `.gitignore` ou pas. `git rm --cached` les sortirait du suivi pour de bon
+    si c'est le comportement voulu — pas fait ici, décision qui appartient à
+    l'utilisateur.
+  - **⚠️ Deuxième blocage trouvé, absent de la discussion initiale —
+    `CORS_ALLOWED_ORIGIN_REGEXES`** (`config/settings.py`) n'autorisait
+    qu'un seul label optionnel avant "localhost"
+    (`r"^https://[a-z0-9-]*\.?localhost:5173$"`) — un sous-domaine à deux
+    labels comme `notaires-durand.office.localhost` n'y passait pas. Le
+    symptôme en Chrome réel était trompeur : la page se chargeait bien (TLS
+    accepté, confirmant le wildcard), mais chaque appel API échouait en
+    « Backend injoignable — Failed to fetch » sans la moindre ligne dans la
+    console — diagnostiqué en comparant un `curl` direct (200/403 propres)
+    à une requête `OPTIONS` de préflight avec un `Origin` réaliste (`curl
+    -X OPTIONS ... -H "Origin: https://notaires-durand.office.localhost:5173"`) :
+    réponse 200 mais **sans aucun en-tête `Access-Control-Allow-*`** — le
+    middleware `corsheaders` n'avait simplement pas reconnu l'origine, donc
+    Django traitait la requête normalement mais le NAVIGATEUR bloquait la
+    lecture de la réponse en silence. Corrigé en élargissant le regex à N
+    labels : `r"^https://([a-z0-9-]+\.)*localhost:5173$"`. Reconfirmé par le
+    même test `curl -X OPTIONS` (tous les en-têtes CORS présents ensuite) et
+    re-vérifié qu'`officea`/`officeb`/`hyperadmin` (régression) ainsi qu'une
+    origine extérieure arbitraire (`https://evil.example.com`, toujours
+    refusée) se comportent comme avant.
+  - **Aucun changement nécessaire côté `ALLOWED_HOSTS`** (`['.localhost']` —
+    le préfixe par point de Django matche déjà n'importe quelle profondeur
+    de sous-domaine) **ni `TenantResolutionMiddleware`** (`host.split(".")[0]`
+    — ne prend que le PREMIER label quel que soit le nombre de labels
+    suivants, donc `notaires-durand.office.localhost` résout déjà vers
+    l'`Office` de subdomain `"notaires-durand"`, sans aucune modification :
+    le `.office.` supplémentaire dans l'URL n'a besoin d'exister nulle part
+    en base, uniquement dans le nom d'hôte demandé au navigateur).
+  - **Boucle complète vérifiée en Chrome réel**, pas seulement le TLS seul :
+    un office de test (`another-test`, admin `wildcard_test_admin`) créé via
+    le shell Django (reproduisant exactement ce que fait
+    `hyperadmin_offices_view` : `Office.objects.get_or_create` +
+    `ensure_tenant_registered`/`migrate` + `OfficeMembership`) — connexion
+    complète sur `https://another-test.office.localhost:5173` : écran de
+    connexion (sous-domaine affiché correctement), enrôlement MFA (QR code +
+    secret en BASE32 propre, confirmant au passage le correctif du
+    03/09/2026 matin), code calculé et validé, arrivée sur l'accueil de
+    l'office avec le bon nom affiché. Aucun avertissement TLS à aucune
+    étape. Données de test supprimées après coup (Office, membership,
+    utilisateur, dispositif TOTP, base tenant).
+- **✅ Câblé le 03/09/2026 (même journée, juste après le prototype) — la
+  console hyperadmin permet réellement de créer un office et de s'y
+  connecter dans la foulée** : suite explicite du prototype ci-dessus, à la
+  demande de l'utilisateur ("mets en place de manière concrète la création
+  d'un office"). `hyperadmin_offices_view`/`Office.subdomain` restent
+  INCHANGÉS côté backend — la valeur stockée reste le nom nu tapé par
+  l'hyperadmin (ex. `"notaires-guerin"`), exactement comme avant le
+  prototype : `TenantResolutionMiddleware` n'a jamais eu besoin d'en savoir
+  plus (voir plus haut), donc rien à migrer, rien à ajouter au modèle
+  `Office`. Tout le changement est côté FRONTEND, purement dans la façon de
+  CONSTRUIRE l'URL affichée/cliquable pour un office donné.
+  - **`frontend/src/hyperadmin/officeUrl.ts`** (nouveau) : une seule
+    fonction exportée, `officeLoginUrl(subdomain) =>
+    "https://${subdomain}.office.localhost:5173/"`. Volontairement calculée
+    côté client à partir de `subdomain` (déjà connu du front), pas renvoyée
+    par l'API — aucune donnée serveur nouvelle nécessaire, c'est une pure
+    construction de chaîne déterministe.
+  - **`components/pages/HyperadminOfficesScreen.tsx`** : la colonne
+    "Sous-domaine" du tableau n'affiche plus le sous-domaine en texte brut
+    — c'est désormais un vrai lien (`<a target="_blank">`, icône `link`)
+    vers `officeLoginUrl(office.subdomain)`, pour LES TROIS offices
+    existants (`officea`/`officeb`/le office de test) aussi bien qu'un
+    office fraîchement créé : le middleware ne regardant que le premier
+    label du Host, le lien `.office.localhost` fonctionne pour n'importe
+    quel `Office.subdomain` déjà enregistré, pas seulement les nouveaux —
+    pas de branchement conditionnel nécessaire pour distinguer les deux cas.
+  - **`components/organisms/NewOfficeModal.tsx`** : un aperçu en direct
+    sous le champ "Sous-domaine" (`Accessible sur
+    https://<saisie>.office.localhost:5173/`, recalculé à chaque frappe) —
+    montre immédiatement à l'hyperadmin, PENDANT la saisie, l'adresse que
+    prendra l'office avant même de valider le formulaire. Placeholder
+    changé de "officec" à "notaires-durand" (un nom d'étude réaliste plutôt
+    qu'un nom de test, plus parlant pour une démo).
+  - **Vérifié en Chrome réel, du clic "Nouvel office" jusqu'à l'accueil de
+    l'office** : création d'un office "Notaires Guérin"
+    (`notaires-guerin`) avec un nouvel admin (`guerin_admin`) depuis la
+    VRAIE modale (pas le shell Django cette fois) — aperçu en direct
+    confirmé pendant la frappe, ligne créée dans le tableau avec son lien
+    cliquable, clic → nouvel onglet sur
+    `https://notaires-guerin.office.localhost:5173/` sans aucun
+    avertissement TLS, connexion + enrôlement MFA + code validé → accueil
+    de l'office affiché avec le bon nom. Régression : les liens
+    `officea`/`officeb`/`officec` (test préexistant) toujours cliquables et
+    corrects dans le même tableau. Données de démonstration supprimées
+    après vérification (office, membership, admin, dispositif TOTP, base
+    tenant — même procédure de nettoyage que pour le prototype).
+  - **Vérifications automatisées** : `tsc -b` (0 erreur), `npm run lint` (0
+    nouvel avertissement), `npm run check:ds` (190 fichiers, 0 écart
+    nouveau), `npm run build` (sans erreur). Aucun test backend concerné
+    (aucune vue/modèle Python modifié dans ce lot — uniquement le
+    certificat et `CORS_ALLOWED_ORIGIN_REGEXES` faits dans le prototype
+    ci-dessus, déjà couverts par la vérification manuelle `curl`/Chrome, et
+    trois fichiers frontend nouveaux/modifiés ici).
+  - **Reste ouvert, non demandé pour l'instant** : pas de bouton de
+    suppression d'office dans la console (le nettoyage des offices de test
+    de cette session est passé par le shell Django, comme pour toute
+    dataroom de test ailleurs dans ce projet — cohérent avec l'absence
+    déjà documentée d'UI de suppression de dataroom).
+
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
 **⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**
@@ -2526,7 +2772,14 @@ couverture.
 - [x] **Vrai routage par sous-domaine** (`*.localhost`) avec identité partagée sans
       reconnexion — fait le 26/08/2026, via échange de ticket signé plutôt qu'un cookie
       de domaine partagé (rejeté par les navigateurs — voir "État réel du code")
-- [ ] Logo dynamique par office (la couleur est câblée, pas encore le logo)
+- [x] Logo dynamique par office (la couleur est câblée depuis le 28/08, le logo depuis
+      le 03/09/2026) — repris de `front/templates-hyperadmin-ui`, voir "État réel du
+      code" pour le détail (PATCH `/api/tenant-config/` + relais `/api/tenant-logo/`,
+      IdentityTab.tsx câblée). **Dépôt réel non vérifié en Chrome dans CETTE session**
+      (Docker/MinIO indisponibles dans cet environnement) — seul l'enregistrement du
+      nom (sans fichier, ne touche pas le stockage) l'a été de bout en bout ; la
+      logique de dépôt/relais/suppression est couverte par les 9 tests dédiés
+      (stockage `FileSystemStorage` de test, pas MinIO).
 - [x] Arborescence de dataroom minimale (créer / uploader / naviguer) — API backend
       faite le 26/08/2026, hiérarchie de dossiers ajoutée côté **API** le 27/08/2026
       (modèle `Folder`, voir "État réel du code" et "Modèle de données clé").
