@@ -9,6 +9,7 @@ import {
   DEMO_OFFICE_CONTENT,
   V1_ADMINS_PAR_DOSSIER,
   V1_ADMINS_TOTAL,
+  V1_ANNUAIRE_CLIENTS,
   V1_ANNUAIRE_ETUDE,
   V1_ANNUAIRE_TOTAL,
   V1_CONNECTES,
@@ -102,6 +103,7 @@ export function V1AppView() {
       espacesClientsTotal={V1_ESPACES_CLIENTS_TOTAL}
       annuaire={V1_ANNUAIRE_ETUDE}
       annuaireTotal={V1_ANNUAIRE_TOTAL}
+      annuaireClients={V1_ANNUAIRE_CLIENTS}
       adminsParDossier={V1_ADMINS_PAR_DOSSIER}
       adminsTotal={V1_ADMINS_TOTAL}
       connectes={V1_CONNECTES}

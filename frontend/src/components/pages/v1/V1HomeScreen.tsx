@@ -41,7 +41,10 @@ const OUTILS = [
   },
 ];
 
-const AIDE = [
+/* Ressources de la carte « Aide » de l'accueil (capture 113344), mot pour mot.
+   Exportées parce que l'écran Support les reprend : une seule liste, pas deux
+   copies qui divergeront. */
+export const V1_AIDE_RESSOURCES = [
   {
     name: "Manuel utilisateur — Étude",
     desc: "Le guide complet de l'Espace Notarial pour les collaborateurs et notaires.",
@@ -131,7 +134,7 @@ export function V1HomeScreen({
 
         <Card padded>
           <div className="eyebrow">Aide</div>
-          {AIDE.map(a => (
+          {V1_AIDE_RESSOURCES.map(a => (
             <div className="v1-tool-row" key={a.name}>
               <Icon id={a.icon} />
               <div style={{ flex: 1 }}>

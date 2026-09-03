@@ -12,6 +12,7 @@
 import type {
   OfficeContent,
   V1AdminDelegueRow,
+  V1ClientRow,
   V1ConnecteRow,
   V1DossierRow,
   V1EspaceClientRow,
@@ -23,6 +24,7 @@ import type {
 export type {
   OfficeContent,
   V1AdminDelegueRow,
+  V1ClientRow,
   V1ConnecteRow,
   V1DossierRow,
   V1EspaceClientRow,
@@ -94,6 +96,26 @@ export const V1_ANNUAIRE_ETUDE: V1MembreRow[] = [
   { id: 'm11', nom: 'LAMBERT Sophie', fonction: 'Secrétaire', email: 's.lambert@briand-hamon.fr' },
   { id: 'm12', nom: 'GIRAUD Karim', fonction: 'Technicien Support Applicatif', email: 'k.giraud@briand-hamon.fr' },
   { id: 'm13', nom: 'ANDRÉ Lucie', fonction: 'Assistant', email: 'l.andre@briand-hamon.fr' },
+];
+
+/* Annuaire des clients : contacts extérieurs à l'étude.
+
+   Les lignes de la capture 114216 sont de vraies personnes, avec leurs
+   adresses professionnelles : elles ne sont PAS recopiées ici. Ce jeu suit la
+   convention des autres jeux de ce fichier — des contacts fictifs cohérents
+   avec l'office de démonstration. La volumétrie de production n'est pas
+   reprise : le « sur 42 » de la capture compte l'annuaire de l'étude. */
+export const V1_ANNUAIRE_CLIENTS: V1ClientRow[] = [
+  { id: 'cl1', nom: 'AUBERT Camille', email: 'c.aubert@republique-immo.fr', fonction: 'Directrice juridique', derniereConnexion: '20/08/2026 11h12' },
+  { id: 'cl2', nom: 'BENOIT Rachid', email: 'r.benoit@arsenal-gestion.fr', fonction: 'Asset manager', derniereConnexion: '19/08/2026 16h40' },
+  { id: 'cl3', nom: 'CHEVALIER Inès', email: 'i.chevalier@arsenal-gestion.fr', fonction: 'Juriste', derniereConnexion: '12/08/2026 09h05' },
+  { id: 'cl4', nom: 'DELAUNAY Paul', email: 'p.delaunay@cassiopee-scpi.fr', fonction: 'Gérant', derniereConnexion: '—' },
+  { id: 'cl5', nom: 'FONTAINE Marie', email: 'm.fontaine@republique-immo.fr', fonction: 'Responsable transactions', derniereConnexion: '18/08/2026 14h27' },
+  { id: 'cl6', nom: 'HERVÉ Simon', email: 's.herve@chatelet-partners.fr', fonction: 'Avocat', derniereConnexion: '03/07/2026 10h51' },
+  { id: 'cl7', nom: 'MARCHAND Léa', email: 'l.marchand@chatelet-partners.fr', fonction: 'Collaboratrice', derniereConnexion: '—' },
+  { id: 'cl8', nom: 'NGUYEN Tho', email: 't.nguyen@banque-de-france-immo.fr', fonction: 'Chargé de financement', derniereConnexion: '21/08/2026 08h33' },
+  { id: 'cl9', nom: 'PERRIN Olivier', email: 'o.perrin@nice-etoile-copro.fr', fonction: 'Syndic', derniereConnexion: '15/05/2026 17h02' },
+  { id: 'cl10', nom: 'VASSEUR Agnès', email: 'a.vasseur@ebo-conseil.fr', fonction: 'Expert-comptable', derniereConnexion: '11/08/2026 13h18' },
 ];
 
 export const V1_ADMINS_TOTAL = 221;
