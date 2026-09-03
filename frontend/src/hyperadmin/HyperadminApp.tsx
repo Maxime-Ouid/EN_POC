@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import notantisLogo from '../assets/notantis-logo.png';
 import {
-  Button,
+  AppShell,
   Card,
   HyperadminOfficesScreen,
-  Icon,
   LoginScreen,
   MfaScreen,
   NewOfficeModal,
@@ -13,17 +11,25 @@ import {
 import type { HyperadminOfficeRow } from '../api/endpoints';
 import { useHyperadminOffices } from '../hooks/useHyperadminOffices';
 import { useSession } from '../hooks/useSession';
+import { HYPERADMIN_NAV } from './nav';
 
 /**
  * Racine séparée de l'app office (App.tsx) — même statut architectural que
  * V1AppView/PrototypeDemo (src/v1/, src/PrototypeDemo.tsx) : montée depuis
- * main.tsx quand window.location.hostname === 'hyperadmin.localhost', jamais
- * l'AppShell des offices (pas de sélecteur d'office, pas de thème, pas de
- * navigation par module — rien de tout ça n'a de sens pour un rôle transverse
- * à tous les offices). useSession() est réutilisé tel quel : mfaSetup/
- * mfaVerify/whoami/logout ne dépendent d'aucun office, et myOffices/
- * tenantConfig se dégradent déjà proprement (.catch(() => [] / null)) sur cet
- * hôte où aucun des deux n'a de sens.
+ * main.tsx quand window.location.hostname === 'hyperadmin.localhost'.
+ * useSession() est réutilisé tel quel : mfaSetup/mfaVerify/whoami/logout ne
+ * dépendent d'aucun office, et myOffices/tenantConfig se dégradent déjà
+ * proprement (.catch(() => [] / null)) sur cet hôte où aucun des deux n'a de
+ * sens.
+ *
+ * DEPUIS LE 03/09/2026 : la console monte l'AppShell de l'application, rail
+ * vertical compris (voir nav.ts). Elle portait jusque-là un en-tête à elle,
+ * écrit en styles inline — deux barres à maintenir, deux hauteurs, deux
+ * typographies, et aucune des personnalisations du design system ne
+ * l'atteignait. Ce qui reste propre à la console est dit en props et non en
+ * CSS : pas de recherche globale (elle exige une session d'office), pas de
+ * cloche (rien n'en émet pour un rôle transverse), pas de sélecteur d'office
+ * (`offices` absent : le composant redevient une étiquette).
  */
 export function HyperadminApp() {
   const session = useSession();
@@ -77,62 +83,51 @@ export function HyperadminApp() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '14px 24px',
-          borderBottom: '1px solid var(--border)',
+    <AppShell
+      // Deux mots courts : le rail réserve deux lignes à la marque, et
+      // « Interface hyperadmin » y passait à la ligne au milieu du mot.
+      brandName="Hyperadmin"
+      brandSub="Notantis"
+      // Le bandeau d'office est masqué (voir showTenantSwitcher) — la console
+      // n'administre aucune étude en particulier. Les deux props restent
+      // renseignées : elles alimentent les libellés d'accessibilité si le
+      // bandeau revient un jour.
+      officeName="Notantis"
+      officeRole="Toutes les études"
+      showTenantSwitcher={false}
+      navSections={HYPERADMIN_NAV}
+      activeScreen="offices"
+      onNavigate={() => {}}
+      userInitials={(username.slice(0, 2) || 'NA').toUpperCase()}
+      userName={username}
+      // Le rail dit déjà « Hyperadmin » en haut ; le pied dit ce que la marque
+      // ne dit pas — l'étendue du rôle de la personne connectée.
+      userRole="Rôle transverse"
+      onLogout={() => void session.logout()}
+      breadcrumbCurrent="Offices"
+      breadcrumbRoot="Notantis"
+      hideSectionLabels
+      showSearch={false}
+      showNotifications={false}
+    >
+      <HyperadminOfficesScreen
+        offices={offices.offices}
+        modules={offices.modules}
+        loading={offices.loading}
+        error={offices.error}
+        actionError={actionError}
+        onCreateOffice={() => {
+          setCreateError(null);
+          setCreateOpen(true);
         }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 28, height: 28 }}>
-            <img
-              src={notantisLogo}
-              alt="Notantis"
-              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-            />
-          </div>
-          <div>
-            <div style={{ fontWeight: 600, fontFamily: 'var(--font-display)' }}>
-              Interface hyperadmin
-            </div>
-            <div className="tiny dim">Gestion transverse des offices Notantis</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="tiny dim">{username}</span>
-          <Button size="sm" variant="ghost" onClick={() => void session.logout()}>
-            <Icon id="logout" />
-            Déconnexion
-          </Button>
-        </div>
-      </header>
-
-      <main style={{ flex: 1, padding: '0 24px 24px' }}>
-        <HyperadminOfficesScreen
-          offices={offices.offices}
-          modules={offices.modules}
-          loading={offices.loading}
-          error={offices.error}
-          onCreateOffice={() => {
-            setCreateError(null);
-            setCreateOpen(true);
-          }}
-          onToggleActive={office => {
-            setActionError(null);
-            offices.setActive(office.id, !office.is_active).catch((err: Error) => setActionError(err.message));
-          }}
-          onManageModules={office => setModulesOffice(office)}
-        />
-        {actionError && (
-          <div className="tiny" style={{ marginTop: 10, color: 'var(--critical)' }}>
-            {actionError}
-          </div>
-        )}
-      </main>
+        onToggleActive={office => {
+          setActionError(null);
+          offices
+            .setActive(office.id, !office.is_active)
+            .catch((err: Error) => setActionError(err.message));
+        }}
+        onManageModules={office => setModulesOffice(office)}
+      />
 
       <NewOfficeModal
         open={createOpen}
@@ -160,7 +155,7 @@ export function HyperadminApp() {
             .catch((err: Error) => setActionError(err.message));
         }}
       />
-    </div>
+    </AppShell>
   );
 }
 

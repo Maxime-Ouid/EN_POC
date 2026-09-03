@@ -1,3 +1,5 @@
+import { IconChip } from './IconChip';
+
 export interface RowIconProps {
   icon: string;
   bg: string;
@@ -7,20 +9,7 @@ export interface RowIconProps {
 }
 
 // Carré arrondi coloré associé à un type de ligne (dossier, fichier…) — §6.5.
+// Délègue à IconChip, qui bascule sur l'illustration 3D quand l'objet en a une.
 export function RowIcon({ icon, bg, color, size, muted }: RowIconProps) {
-  const style: React.CSSProperties = { background: bg, color };
-  if (size) {
-    style.width = size;
-    style.height = size;
-  }
-  if (muted) {
-    style.border = '1px solid var(--border)';
-  }
-  return (
-    <div className="row-icon" style={style}>
-      <svg className="icon" style={size ? { width: size * 0.47, height: size * 0.47 } : undefined}>
-        <use href={`#i-${icon}`} />
-      </svg>
-    </div>
-  );
+  return <IconChip icon={icon} bg={bg} color={color} chip="row-icon" size={size} muted={muted} />;
 }

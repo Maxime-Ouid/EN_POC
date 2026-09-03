@@ -2634,6 +2634,144 @@ faits et deux pastilles. **Non vérifié en navigateur réel** — parcours à r
 (superadmin) puis à `alice` (cliente sur officeb : elle doit voir moins, ou ne pas
 voir le dossier du tout).
 
+## Console hyperadmin alignée sur l'application (03/09/2026)
+
+**Demande** : « revois l'interface hyperadmin, il faut qu'elle s'aligne avec le
+dashboard et reprenne le design system ». La console portait un en-tête écrit à la
+main dans `HyperadminApp.tsx` (flex + `padding: '14px 24px'` + `borderBottom` en
+styles inline, logo posé à la main) : deux barres à maintenir dans le produit, deux
+hauteurs, deux typographies, et aucun réglage de Personnalisation ne l'atteignait.
+
+**Ce qui a été fait** : la console monte désormais **le même `AppShell` que
+l'application, rail vertical compris**.
+
+**Deux passes le même jour, la seconde tranche** : essayée d'abord en « barre
+d'onglets » (l'idée étant qu'un rail à une seule rubrique serait une colonne vide),
+la console y empilait **deux barres pleine largeur** — l'une pour la marque et
+l'unique onglet, l'autre pour l'identité, la déconnexion et les commandes de
+l'écran. Demande de Jean-Marie sur capture : « on peut regrouper tous ces éléments
+dans un side nav ». Le rail les regroupe, rend à l'écran sa pleine hauteur, et
+c'est en plus la disposition par défaut d'un office — donc celle qu'on reconnaît en
+passant de l'une à l'autre. La barre d'onglets reste accessible d'une ligne
+(`navPlacement: 'top'` dans `hyperadminThemeState`).
+
+- `hyperadmin/nav.ts` (nouveau) — `HYPERADMIN_NAV` (une rubrique, `offices`) et
+  `hyperadminThemeState()` / `applyHyperadminTheme()`. **La disposition passe par le
+  THÈME, pas par une prop d'`AppShell`** : c'est `applyTheme` qui écrit
+  `data-nav-placement` et `--nav-w` sur `<html>`, et c'est ce que le CSS lit pour
+  décaler le contenu — une prop pour le rendu et un attribut pour la géométrie
+  auraient fini par se contredire. `applyHyperadminTheme()` est appelée dans
+  `main.tsx` **avant le premier rendu** (pendant de `applyThemeEarly()`), sinon la
+  console démarre sur le CSS d'un office quitté avant de le remplacer sous les yeux.
+- `main.tsx` — `persist={!isHyperadminHost}` : la console n'est pas un espace
+  personnalisable, sa disposition ne doit ni être relue du cache du navigateur ni y
+  être écrite. `isHyperadminHost` est simplement remonté avant `initialTheme`.
+- `AppShell.tsx` — cinq props nouvelles, toutes avec le défaut du comportement
+  actuel (les six appelants existants ne bougent pas) : `brandName`/`brandSub` (la
+  marque était écrite en dur `"Espace Notarial"`/`"Next"` dans le composant),
+  `showSearch`, `showNotifications`, `showTenantSwitcher`. La console masque les
+  trois derniers : la palette interroge `/api/search/`, qui exige une session
+  ouverte **sur un office** ; rien n'émet de notification pour un rôle transverse ;
+  et le bandeau d'office répétait la marque du rail sans rien offrir à choisir (la
+  console n'administre aucune étude en particulier). Un champ qui ne peut rien
+  trouver, une cloche qui ne sonne jamais et un bandeau sans choix valent moins que
+  le vide.
+- `HyperadminApp.tsx` — plus une seule couleur ni une seule mesure en dur hors du
+  `<Centered>` de chargement. Le rail porte la marque (`brandName="Hyperadmin"`,
+  `brandSub="Notantis"` — deux mots courts : « Interface hyperadmin » passait à la
+  ligne au milieu du mot), l'unique rubrique, et au pied le compte connecté
+  (`userRole="Rôle transverse"`, qui dit ce que la marque ne dit pas). Aucune
+  mention « propulsé par Notantis » (`showPoweredBy: false`) : la marque grise est
+  une promesse faite aux ÉTUDES, dans la console de Notantis elle n'annonce rien.
+- `HyperadminOfficesScreen.tsx` — rangée de trois `StatCard` en tête (offices,
+  offices actifs, modules activés tous offices confondus), calculées depuis les
+  lignes déjà chargées, sans appel supplémentaire. Le décompte et « Nouvel office »
+  se projettent au début de la topbar par portail, exactement comme la liste des
+  dossiers d'une étude (01/09/2026) ; le filtre de la liste se projette en fin de
+  barre, là où la recherche globale aurait été. **Les deux replis sont conservés** :
+  hors `AppShell` (UiKit, démos isolées) les conteneurs valent `null`, les commandes
+  reviennent dans une `Toolbar` et le filtre dans la ligne de contrôles.
+  `actionError` descend dans l'écran, sous le tableau où l'action a été demandée,
+  plutôt que sous l'écran entier hors du champ de vision.
+- `ListControls.tsx` — `showSearch` (défaut `true`) : deux champs de recherche
+  visibles sur le même écran poseraient la question de savoir lequel filtre quoi.
+
+**Vérifications** : `npx tsc -b --force` propre ; `npm run check:ds` — 198 fichiers,
+aucun écart nouveau (53 hérités). Rendu contrôlé en clair ET en sombre sur un bundle
+esbuild du vrai code (AppShell + écran réels, portails compris, données figées) :
+le rail, la topbar à commandes, les trois cartes et le tableau tiennent la même
+grille que l'accueil d'une étude.
+
+**Défaut PRÉEXISTANT repéré au passage (pas une régression, à trancher séparément)** :
+`.foot-user svg` (`components.css`) colore l'icône de déconnexion du pied de rail en
+`var(--shell-text-dim)` — `#b6acdb`, un lavande pâle calibré pour l'ANCIEN rail
+foncé. Depuis que le rail est un blanc translucide en thème clair
+(`--nav-bg: rgba(255,255,255,.45)`), l'icône y est quasi invisible : seul le calque
+duotone (`--icon-accent` à .55) se voit, ce qui donne un carré mauve. En thème sombre
+elle est correcte. **L'app d'office est touchée exactement pareil** — même composant,
+même règle CSS. Correctif d'une ligne : `var(--brand-soft)` (`#4e3f96` clair /
+`#a89ed4` sombre), le token que `.foot-role` utilise déjà juste à côté sur cette même
+surface. Non appliqué : il change l'apparence d'un écran d'office déjà validé. **Non vérifié en navigateur réel** — parcours
+à refaire sur `hyperadmin.localhost` : connexion, filtre, création d'office, modules,
+activation/désactivation.
+
+
+## Icônes 3D dans les pastilles (03/09/2026)
+
+Sept types d'objets — dossier, calques, question, membres, document, archive ZIP,
+suppression — portent désormais une **illustration 3D** au lieu du glyphe Phosphor du
+sprite. Les images viennent de planches fournies par le client, détourées (fond crème et
+ombre au sol retirés) et rangées dans `frontend/src/assets/icons-3d/*.png` (PNG
+transparents 128 px, 15-20 Ko). Le même remplacement a été fait dans le prototype de
+référence `index_16.html`.
+
+**Décision de cadrage** : « partout sauf dans la nav ». Les pastilles (`stat-icon`,
+`row-icon`, `feed-icon`, `w-row-icon`) et les dossiers de l'arborescence basculent en 3D ;
+la sidebar, les barres d'onglets et les icônes inline dans les boutons gardent leur
+glyphe. Un rendu volumétrique de 14 px dans une entrée de menu ne se lit pas, et la
+navigation est la zone où l'icône doit rester un signe, pas une image.
+
+**Deux composants ajoutés** dans `atoms/` :
+
+- `Icon3d.tsx` — la table `ICON_3D` (identifiant du sprite → image importée) et
+  `has3d(icon)`. Les clés sont celles qu'attend `<Icon id>` : un appelant qui passait déjà
+  `folder` ou `file` bascule sans rien changer chez lui.
+- `IconChip.tsx` — la pastille. Elle rend le carré teinté + glyphe **ou** l'illustration
+  3D selon `has3d(icon)`. En 3D, le fond teinté, le cadre et le rayon disparaissent :
+  deux aplats de couleur derrière un rendu volumétrique se battent. `bg`/`color` sont
+  alors ignorés, mais restent dans l'API — l'icône peut redevenir un glyphe.
+
+`RowIcon` délègue maintenant à `IconChip` ; `StatCard`, `FeedItem`, `HomeScreen` (2
+pastilles écrites sur place), `PortfoliosScreen`, `dashboard/widgets.tsx` (`WidgetLead`)
+l'appellent directement ; `Explorer` utilise `Icon3d` pour le dossier de l'arborescence.
+CSS en fin de `components.css` (`.icon-3d`, `.icon-chip-3d` et les tailles par contexte).
+
+### Pièges
+
+- **`x` est à double emploi.** Le même identifiant sert de croix de fermeture (modale,
+  slideover) et de picto « suppression » dans un fil d'activité. Seule la *pastille*
+  bascule, parce que le remplacement est porté par `IconChip` et pas par `Icon`. Ne pas
+  « uniformiser » en branchant `Icon3d` dans `Icon` : on obtiendrait des corbeilles en
+  guise de boutons de fermeture.
+- **Spécificité CSS** : `.tpl-option .row-icon` teinte la pastille des lignes de modèle
+  (0,2,0) et l'emportait sur `.icon-chip-3d` (0,1,0) — d'où la règle explicite
+  `.tpl-option .row-icon.icon-chip-3d`. Toute nouvelle règle contextuelle sur une pastille
+  doit prévoir son pendant `.icon-chip-3d`.
+- **Ces icônes ne sont pas personnalisables par l'office.** Une image a ses propres
+  couleurs, elle n'hérite pas de `currentColor` et ne consomme pas `--icon-accent` : une
+  étude qui repeint son espace en vert gardera un dossier bleu. C'est un choix assumé
+  (illustration, pas token) — si la personnalisation redevient une exigence, il faudra
+  soit des variantes par palette, soit revenir aux glyphes sur ces sept types.
+- **Une pastille qui encodait un état par sa couleur perd la nuance** : `muted` (dossier
+  clôturé) n'a plus d'effet visuel en 3D, et les documents rouges (PDF) / bleus (DWG) de
+  la dataroom sont désormais le même document bleu. Le `muted` est conservé côté API et
+  reste appliqué aux glyphes.
+
+Vérifié : `npx tsc -b --force` propre, `check:ds` sans écart nouveau (200 fichiers,
+53 écarts hérités), et rendu réel en navigateur via le bundle esbuild (accueil complet +
+arborescence, thèmes clair et sombre, aucune erreur console). Non rejoué dans
+l'application servie par Django.
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)

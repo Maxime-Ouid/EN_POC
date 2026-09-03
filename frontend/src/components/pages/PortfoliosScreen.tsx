@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Button } from '../atoms/Button';
 import { Grid } from '../atoms/Grid';
+import { IconChip } from '../atoms/IconChip';
 import { Pill } from '../atoms/Pill';
 import { AvatarStack } from '../molecules/AvatarStack';
 import { ButtonRow } from '../molecules/ButtonRow';
@@ -73,20 +74,14 @@ export function PortfoliosScreen({ portfolios, onCreate, onFilter, onOpen }: Por
         {portfolios.map(p => (
           <div className="card card-pad" key={p.id}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div
-                className="row-icon"
-                style={{
-                  background: p.muted ? 'var(--surface-alt)' : p.iconBg,
-                  color: p.muted ? 'var(--ink-500)' : p.iconColor,
-                  width: 34,
-                  height: 34,
-                  border: p.muted ? '1px solid var(--border)' : undefined,
-                }}
-              >
-                <svg className="icon" style={{ width: 16, height: 16 }}>
-                  <use href={`#i-${p.icon}`} />
-                </svg>
-              </div>
+              <IconChip
+                icon={p.icon}
+                bg={p.muted ? 'var(--surface-alt)' : p.iconBg}
+                color={p.muted ? 'var(--ink-500)' : p.iconColor}
+                size={34}
+                iconSize={16}
+                muted={p.muted}
+              />
               <Pill kind={p.status.kind}>{p.status.label}</Pill>
             </div>
             <div className="section-title" style={{ marginTop: 12 }}>

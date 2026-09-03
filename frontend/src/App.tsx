@@ -23,6 +23,7 @@ import {
   assignableRoles,
   StatsScreen,
   SettingsScreen,
+  type SettingsTabKey,
   ModuleScreen,
   Card,
   Button,
@@ -33,7 +34,7 @@ import {
   NewTemplateModal,
   NewTemplateFolderModal,
 } from './components';
-import { DashboardScreen } from './dashboard';
+import { DashboardScreen, allowedActionKeys } from './dashboard';
 import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
@@ -305,6 +306,12 @@ export default function App() {
 
   const [screen, setScreen] = useState<ScreenKey>('dashboard');
   const [moduleSlug, setModuleSlug] = useState<string | null>(null);
+  /* Onglet d'atterrissage de Personnalisation. Un seul usage : l'action rapide
+     « Créer un modèle » doit ouvrir l'écran SUR l'onglet Modèles, sinon elle
+     déposerait l'utilisateur devant Identité avec une fenêtre de création
+     par-dessus. Renseigné par `navigate`, donc remis à zéro par toute autre
+     navigation — un clic dans le menu rouvre bien Identité. */
+  const [settingsTab, setSettingsTab] = useState<SettingsTabKey | undefined>(undefined);
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
@@ -707,7 +714,7 @@ export default function App() {
     window.location.href = `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
   }
 
-  function navigate(key: string) {
+  function navigate(key: string, settingsLanding?: SettingsTabKey) {
     const slug = moduleSlugOf(key);
     setModuleSlug(slug);
     // Un écran de module n'est pas un ScreenKey : `screen` reste sur sa dernière
@@ -716,6 +723,73 @@ export default function App() {
     if (!slug) setScreen(key as ScreenKey);
     setOpenDataroomId(null);
     setFocusFolder(null);
+    setSettingsTab(settingsLanding);
+  }
+
+  /* ===========================================================================
+     Actions rapides de l'accueil (catalogue : src/dashboard/actions.ts).
+
+     Elles vivent ICI parce qu'une action rapide n'est pas une navigation : elle
+     ouvre une fenêtre de création, dont l'état appartient à ce composant. Un
+     widget qui voudrait le faire lui-même devrait connaître `modalOpen`,
+     `userModal`, `templateModal`… c'est-à-dire tout App.tsx.
+
+     CE QUI REND LE GESTE POSSIBLE SANS PLOMBERIE NOUVELLE : ces fenêtres sont
+     montées DANS le bloc de leur écran, et leur état est déjà ici. Naviguer et
+     ouvrir dans le même geste suffit donc — le temps que React applique les
+     deux, l'écran d'arrivée est monté avec sa fenêtre ouverte. L'action part
+     toujours de l'accueil, donc l'écran d'arrivée n'est jamais déjà monté :
+     c'est ce qui rend `defaultTab` fiable pour « Créer un modèle ».
+     ======================================================================== */
+  function runQuickAction(key: string) {
+    switch (key) {
+      case 'dossier':
+        navigate('datarooms');
+        setModalOpen(true);
+        break;
+      case 'depot': {
+        // Le dépôt exige un dossier OUVERT : il n'y a pas de zone de dépôt sur
+        // l'accueil, et en inventer une voudrait dire demander « où ? » juste
+        // après. On ouvre donc le dossier le plus récent (la liste du serveur
+        // est triée par date de création décroissante), où la commande de dépôt
+        // est à portée ; sans aucun dossier, la liste et son bouton de création.
+        const latest = datarooms.items[0];
+        if (!latest) {
+          navigate('datarooms');
+          break;
+        }
+        navigate('dataroom');
+        setOpenDataroomId(latest.id);
+        break;
+      }
+      case 'invite':
+        navigate('users');
+        setUserModalError(null);
+        setUserModal('create');
+        break;
+      case 'modele':
+        navigate('settings', 'sub3-template');
+        setTemplateModalError(null);
+        setTemplateModal({ mode: 'create' });
+        break;
+      case 'portefeuilles':
+        navigate('portfolios');
+        break;
+      case 'annuaire':
+        navigate('users');
+        break;
+      case 'stats':
+        navigate('stats');
+        break;
+      case 'apparence':
+        navigate('settings');
+        break;
+      // 'recherche' n'arrive jamais ici : la palette appartient à la coquille,
+      // et l'accueil l'ouvre par le contexte de commandes (voir
+      // components/templates/shellCommands.ts).
+      default:
+        break;
+    }
   }
 
   if (session.status === 'loading') {
@@ -1131,6 +1205,8 @@ export default function App() {
             enabled: !!m.enabled,
           }))}
           navigate={navigate}
+          runAction={runQuickAction}
+          allowedActions={allowedActionKeys(canManageOffice)}
         />
       )}
 
@@ -1417,6 +1493,7 @@ export default function App() {
 
       {!openModuleEntry && screen === 'settings' && (
         <SettingsScreen
+          defaultTab={settingsTab}
           identity={{
             identity: {
               displayName: session.tenant?.name ?? '',

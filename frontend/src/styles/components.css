@@ -1729,3 +1729,20 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:22px 0;}
 button.v1-tile,button.v1-tool-row-name{font-family:inherit;cursor:pointer;}
 button.v1-tool-row-name{background:none;border:none;padding:0;text-align:left;color:var(--ink-900);font-size:13px;font-weight:600;}
 button.v1-tool-row-name:hover{color:var(--brass-700);}
+
+/* --- Icônes 3D ------------------------------------------------------------ */
+/* Les sept types d'objets qui ont une illustration 3D (src/assets/icons-3d)
+   la portent au lieu du glyphe du sprite. L'image a ses propres couleurs :
+   la pastille perd son fond teinté, son cadre et son rayon, sinon deux aplats
+   se battent derrière un rendu volumétrique. Ces icônes ne sont donc pas
+   personnalisables par l'office — voir atoms/Icon3d.tsx. */
+.icon-3d{
+  display:block;flex:none;width:100%;height:100%;
+  background-repeat:no-repeat;background-position:center;background-size:contain;
+}
+.icon-chip-3d{background:transparent;border:0;border-radius:0;}
+.stat-icon.icon-chip-3d{width:38px;height:38px;margin:-4px -3px -4px 0;}
+.row-icon.icon-chip-3d,.feed-icon.icon-chip-3d{width:31px;height:31px;}
+/* Emporte sur .tpl-option .row-icon, qui teinte la pastille des lignes de modèle. */
+.tpl-option .row-icon.icon-chip-3d{background:transparent;}
+.tree-row .icon-3d.fic{width:17px;height:17px;}

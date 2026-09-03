@@ -152,19 +152,33 @@
    défiler au lieu de déplacer, et on ne comprendrait pas pourquoi la carte
    « ne se prend pas » à cet endroit-là. */
 .widget-editing > .widget-body{overflow:hidden;}
+/* En édition, plus rien ne se déclenche DANS un widget : la carte entière est
+   la poignée de déplacement, et un clic destiné à saisir un bloc n'a pas à
+   créer un dossier ou à ouvrir un écran au passage. `pointer-events` plutôt que
+   `disabled` : un bouton désactivé n'émet aucun évènement de souris, la zone
+   cesserait donc aussi d'être saisissable. Les commandes du cadre (retrait,
+   configuration) vivent dans `.widget-handle`, hors de ce corps. */
+.widget-editing .widget-body button{pointer-events:none;}
 .widget-remove{cursor:pointer;}
 .widget-handle > .icon{width:13px;height:13px;flex:none;}
 .widget-handle-title{
   font-size:12.5px;font-weight:600;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.widget-remove{
-  margin-left:auto;flex:none;display:inline-flex;align-items:center;justify-content:center;
+/* Les commandes du cadre. Regroupées à droite plutôt que poussées une à une :
+   avec deux `margin-left:auto` côte à côte, l'espace se partagerait entre elles
+   et la première atterrirait au milieu de la barre. */
+.widget-handle-tools{margin-left:auto;flex:none;display:inline-flex;gap:6px;}
+.widget-remove,
+.widget-config{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
   width:22px;height:22px;border-radius:999px;cursor:pointer;
   border:1px solid var(--border);background:var(--surface);color:var(--ink-500);
 }
 .widget-remove:hover{color:var(--critical);border-color:var(--critical);}
-.widget-remove > .icon{width:11px;height:11px;}
+.widget-config:hover{color:var(--brass-700);border-color:var(--brass-400);}
+.widget-remove > .icon,
+.widget-config > .icon{width:11px;height:11px;}
 /* Une carte de chiffre en édition : elle n'a pas de cadre, il lui faut le sien. */
 .widget-bare.widget-editing{background:var(--card-bg);border:1px solid var(--brass-400);}
 
@@ -214,6 +228,75 @@
 }
 .w-shortcut:hover{background:var(--surface-alt);border-color:var(--border-soft);}
 .w-shortcut > .icon{width:14px;height:14px;color:var(--brass-600);flex:none;}
+
+/* --- Tuile d'action ------------------------------------------------------
+   La tuile EST la carte (`bare` dans le registre) : elle reprend donc le fond,
+   la bordure et le rayon de .stat-card, à côté de laquelle elle se pose sur la
+   bande de 3 lignes. Une tuile qui se distinguerait des chiffres-clés
+   suggérerait qu'elle appartient à un autre système. */
+.w-tile{
+  display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+  width:100%;height:100%;text-align:left;cursor:pointer;
+  padding:16px 18px;border-radius:var(--radius-lg);
+  background:var(--card-bg);border:1px solid var(--card-border);
+  box-shadow:var(--shadow-sm);font:inherit;
+}
+.w-tile:hover{border-color:var(--brass-400);box-shadow:var(--shadow-md);}
+/* Le libellé remonte contre la pastille, la description reste plaquée en bas :
+   sur trois lignes de grille la place varie, et c'est l'écart du milieu qui
+   doit absorber la différence — pas l'espacement du texte lui-même. */
+.w-tile-icon{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border-radius:8px;
+  background:var(--brass-100);color:var(--brass-700);
+}
+.w-tile-icon > .icon{width:16px;height:16px;}
+.w-tile-label{
+  margin-top:auto;
+  font-family:var(--font-display);font-size:14.5px;color:var(--ink-900);
+}
+.w-tile-desc{font-size:11.5px;line-height:1.35;color:var(--ink-500);}
+/* Action fermée à ce rôle : la tuile ne prétend plus être un bouton. */
+.w-tile-off{cursor:default;}
+.w-tile-off .w-tile-label{color:var(--ink-500);}
+
+/* --- Configuration de la carte d'actions --------------------------------- */
+.qa-group-title{
+  font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-400);margin:0 0 8px;
+}
+.qa-group-title + .qa-list,
+.qa-group-title + .qa-empty{margin-bottom:18px;}
+.qa-list{display:flex;flex-direction:column;gap:6px;}
+.qa-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 10px;border-radius:var(--radius-md);
+  border:1px solid var(--border-soft);background:var(--surface);
+}
+.qa-icon{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:var(--radius-sm);
+  background:var(--brass-100);color:var(--brass-700);
+}
+.qa-icon-off{background:var(--surface-alt);color:var(--ink-500);}
+.qa-icon > .icon{width:13px;height:13px;}
+.qa-text{flex:1;min-width:0;}
+.qa-name{font-size:12.5px;font-weight:600;color:var(--ink-900);}
+.qa-desc{font-size:11px;color:var(--ink-500);margin-top:2px;}
+.qa-ctl{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:var(--radius-sm);cursor:pointer;
+  border:1px solid var(--border);background:var(--surface);color:var(--ink-500);
+}
+.qa-ctl:hover:not(:disabled){color:var(--brass-700);border-color:var(--brass-400);}
+.qa-ctl:disabled{cursor:default;color:var(--ink-400);opacity:.5;}
+.qa-ctl-off:hover:not(:disabled){color:var(--critical);border-color:var(--critical);}
+.qa-ctl > .icon{width:12px;height:12px;}
+.qa-empty{
+  font-size:11.5px;color:var(--ink-500);
+  padding:10px 12px;border-radius:var(--radius-md);
+  border:1px dashed var(--border);background:var(--surface-alt);
+}
 
 /* ============ BIBLIOTHÈQUE DE WIDGETS ============ */
 .wlib-group{margin-bottom:18px;}

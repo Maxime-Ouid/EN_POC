@@ -12,9 +12,12 @@ import type { TemplateGalleryEntry } from '../components/organisms/TemplateGalle
 import { WidgetLibrary } from '../components/organisms/WidgetLibrary';
 import type { WidgetLibraryGroup } from '../components/organisms/WidgetLibrary';
 import { useTopbarSlots } from '../components/templates/topbarSlots';
+import { useShellCommands } from '../components/templates/shellCommands';
 import { useDashboardLayout } from '../hooks/useDashboardLayout';
+import { QUICK_ACTIONS_BY_KEY, readCardActions, writeCardActions } from './actions';
+import { QuickActionsModal } from './QuickActionsModal';
 import { swapWidgets } from './layout';
-import { WIDGETS, WIDGETS_BY_ID, WIDGET_CATEGORIES } from './registry';
+import { ACTIONS_CARD_ID, WIDGETS, WIDGETS_BY_ID, WIDGET_CATEGORIES } from './registry';
 import { DASHBOARD_TEMPLATES, TEMPLATES_BY_ID } from './templates';
 import {
   DASHBOARD_COLS,
@@ -100,6 +103,8 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
   const [pendingTemplate, setPendingTemplate] = useState<string | null>(null);
   const [resetAsked, setResetAsked] = useState(false);
   const [fullNotice, setFullNotice] = useState<string | null>(null);
+  const [configuring, setConfiguring] = useState<string | null>(null);
+  const shell = useShellCommands();
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const available = useAvailableHeight(canvasRef);
@@ -107,6 +112,34 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
 
   const widgets = layout.activePage?.widgets ?? [];
   const { dropWidget, addWidget, swap, activePageId } = layout;
+
+  /* --- Actions rapides -------------------------------------------------------
+     Les actions se déclenchent à deux endroits différents, et l'accueil est le
+     seul point où les deux se rejoignent : l'application ouvre les modales et
+     navigue (`ctx.runAction`), la coquille ouvre sa palette de recherche (voir
+     components/templates/shellCommands.ts). Un widget ne connaît donc qu'un
+     seul `runAction` — c'est ici qu'on aiguille, une fois.
+
+     Et une action que PERSONNE ne sait exécuter (la recherche, hors AppShell —
+     le UI kit, une démo) est retirée du catalogue plutôt que laissée à
+     l'affichage : un bouton sans effet est pire qu'un bouton absent.
+     ------------------------------------------------------------------------ */
+  const actionCtx = useMemo<WidgetContext>(() => {
+    const allowedActions = ctx.allowedActions.filter(key => {
+      const action = QUICK_ACTIONS_BY_KEY[key];
+      if (!action) return false;
+      return action.runner !== 'shell' || shell.openSearch !== null;
+    });
+    return {
+      ...ctx,
+      allowedActions,
+      runAction: (key: string) => {
+        const action = QUICK_ACTIONS_BY_KEY[key];
+        if (action?.runner === 'shell') shell.openSearch?.();
+        else ctx.runAction(key);
+      },
+    };
+  }, [ctx, shell]);
 
   // Changer d'onglet efface l'avertissement « écran plein » : il parlait de
   // l'écran précédent, le laisser affiché le ferait mentir.
@@ -119,9 +152,11 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
         // `resolveWidgets` a déjà écarté les inconnus ; ce garde-fou couvre le
         // rendu qui suivrait un retrait de widget entre deux rendus.
         if (!def) return [];
-        // Les cartes de chiffres portent déjà leur propre carte (StatCard) : le
-        // cadre se réduit alors à la couche d'édition — voir WidgetFrame.
-        const bare = def.category === 'chiffres';
+        // Les cartes de chiffres et les tuiles d'action portent déjà leur propre
+        // carte : le cadre se réduit alors à la couche d'édition — voir
+        // WidgetFrame. La famille reste la règle par défaut, pour les widgets
+        // écrits avant que `bare` existe.
+        const bare = def.bare ?? def.category === 'chiffres';
         const screen = def.screen;
         return [
           {
@@ -139,23 +174,34 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
                 editing={editing}
                 bare={bare}
                 linkLabel={screen ? 'Tout voir' : undefined}
-                onOpenScreen={screen ? () => ctx.navigate(screen) : undefined}
+                onOpenScreen={screen ? () => actionCtx.navigate(screen) : undefined}
                 onRemove={() => dropWidget(placement.id)}
+                onConfigure={
+                  placement.id === ACTIONS_CARD_ID
+                    ? () => setConfiguring(placement.id)
+                    : undefined
+                }
               >
-                {def.render(ctx)}
+                {def.render(actionCtx, { options: placement.options, editing: !!editing })}
               </WidgetFrame>
             ),
           },
         ];
       }),
-    [widgets, dropWidget, editing, ctx],
+    [widgets, dropWidget, editing, actionCtx],
   );
 
   const libraryGroups = useMemo<WidgetLibraryGroup[]>(() => {
     const present = new Set(widgets.map(w => w.id));
+    // Une tuile dont l'action est fermée à ce membre ne s'ajoute pas : elle
+    // n'afficherait qu'un refus. La carte multi-actions, elle, reste offerte —
+    // il lui reste toujours des actions à proposer.
+    const offered = WIDGETS.filter(
+      w => !w.action || actionCtx.allowedActions.includes(w.action),
+    );
     return WIDGET_CATEGORIES.map(category => ({
       label: category.label,
-      items: WIDGETS.filter(w => w.category === category.key).map(w => ({
+      items: offered.filter(w => w.category === category.key).map(w => ({
         id: w.id,
         name: w.name,
         desc: w.desc,
@@ -163,7 +209,7 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
         added: present.has(w.id),
       })),
     }));
-  }, [widgets]);
+  }, [widgets, actionCtx.allowedActions]);
 
   const galleryEntries = useMemo<TemplateGalleryEntry[]>(
     () =>
@@ -386,6 +432,19 @@ export function DashboardScreen({ role, ready, ...ctx }: DashboardScreenProps) {
         La disposition « {pending?.name} » remplacera TOUS vos onglets, y compris ceux que
         vous avez créés. Vos widgets et leurs positions seront perdus.
       </ConfirmModal>
+
+      <QuickActionsModal
+        open={configuring !== null}
+        onClose={() => setConfiguring(null)}
+        allowed={actionCtx.allowedActions}
+        selected={readCardActions(
+          widgets.find(w => w.id === configuring)?.options,
+          actionCtx.allowedActions,
+        )}
+        onChange={keys => {
+          if (configuring) layout.setWidgetOptions(configuring, writeCardActions(keys));
+        }}
+      />
 
       <ConfirmModal
         open={resetAsked}

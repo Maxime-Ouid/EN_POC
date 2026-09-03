@@ -9,6 +9,12 @@ export interface WidgetFrameProps {
   linkLabel?: string;
   onOpenScreen?: () => void;
   onRemove?: () => void;
+  /**
+   * Ouvre les réglages du widget. Absent = ce widget n'en a pas — le bouton
+   * n'apparaît alors pas du tout, plutôt que grisé : un engrenage inerte sur
+   * douze cartes sur treize apprendrait surtout à ne plus le regarder.
+   */
+  onConfigure?: () => void;
   /** Widget dont le contenu porte déjà sa propre carte (une StatCard, par exemple). */
   bare?: boolean;
   children?: ReactNode;
@@ -28,8 +34,8 @@ export interface WidgetFrameProps {
  * `draggableHandle` par DashboardGrid — toute la carte est saisissable. La
  * renommer ici casse le déplacement sans casser le rendu, donc silencieusement.
  * `.widget-handle`, elle, n'est plus qu'un repère visuel (« ce bloc se
- * déplace ») et porte le retrait ; `.widget-remove` est exclue de la saisie via
- * `draggableCancel`, sinon le bouton ne recevrait jamais son clic.
+ * déplace ») et porte le retrait ; `.widget-remove` et `.widget-config` sont exclues de la saisie
+ * via `draggableCancel`, sinon ces boutons ne recevraient jamais leur clic.
  */
 export function WidgetFrame({
   title,
@@ -38,6 +44,7 @@ export function WidgetFrame({
   linkLabel,
   onOpenScreen,
   onRemove,
+  onConfigure,
   bare,
   children,
 }: WidgetFrameProps) {
@@ -53,18 +60,32 @@ export function WidgetFrame({
             <use href="#i-dots" />
           </svg>
           <span className="widget-handle-title">{title}</span>
-          {onRemove && (
-            <button
-              type="button"
-              className="widget-remove"
-              onClick={onRemove}
-              aria-label={`Retirer le widget ${title}`}
-            >
-              <svg className="icon">
-                <use href="#i-x" />
-              </svg>
-            </button>
-          )}
+          <span className="widget-handle-tools">
+            {onConfigure && (
+              <button
+                type="button"
+                className="widget-config"
+                onClick={onConfigure}
+                aria-label={`Configurer le widget ${title}`}
+              >
+                <svg className="icon">
+                  <use href="#i-settings" />
+                </svg>
+              </button>
+            )}
+            {onRemove && (
+              <button
+                type="button"
+                className="widget-remove"
+                onClick={onRemove}
+                aria-label={`Retirer le widget ${title}`}
+              >
+                <svg className="icon">
+                  <use href="#i-x" />
+                </svg>
+              </button>
+            )}
+          </span>
         </div>
       )}
 

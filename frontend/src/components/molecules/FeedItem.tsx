@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { IconChip } from '../atoms/IconChip';
 
 export interface FeedItemProps {
   icon: string;
@@ -15,18 +16,14 @@ export interface FeedItemProps {
 export function FeedItem({ icon, iconBg, iconColor, text, time, compact }: FeedItemProps) {
   return (
     <div className="feed-item" style={compact ? { padding: '8px 0' } : undefined}>
-      <div
-        className="feed-icon"
-        style={
-          compact
-            ? { width: 24, height: 24, background: iconBg, color: iconColor }
-            : { background: iconBg, color: iconColor }
-        }
-      >
-        <svg className="icon" style={compact ? { width: 12, height: 12 } : undefined}>
-          <use href={`#i-${icon}`} />
-        </svg>
-      </div>
+      <IconChip
+        icon={icon}
+        bg={iconBg}
+        color={iconColor}
+        chip="feed-icon"
+        size={compact ? 24 : undefined}
+        iconSize={compact ? 12 : undefined}
+      />
       <div>
         <div className={compact ? 'feed-text tiny' : 'feed-text'}>{text}</div>
         <div className="feed-time">{time}</div>

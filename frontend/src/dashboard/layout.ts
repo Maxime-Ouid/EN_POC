@@ -183,14 +183,33 @@ export function swapWidgets(
  * son ordre à lui, qui change dès qu'on déplace un widget. Comparer index par
  * index ferait donc voir une modification là où rien n'a bougé — et le hook
  * enverrait un PUT au serveur à chaque redimensionnement de fenêtre.
+ *
+ * Les RÉGLAGES comptent autant que les positions : la carte d'actions se
+ * personnalise sans bouger d'un pixel, et un changement de contenu ne doit pas
+ * être pris pour un non-changement — il ne serait alors jamais enregistré.
  */
 export function sameLayout(a: readonly WidgetPlacement[], b: readonly WidgetPlacement[]): boolean {
   if (a.length !== b.length) return false;
   const byId = new Map(b.map(p => [p.id, p]));
   return a.every(p => {
     const q = byId.get(p.id);
-    return !!q && p.x === q.x && p.y === q.y && p.w === q.w && p.h === q.h;
+    return (
+      !!q &&
+      p.x === q.x &&
+      p.y === q.y &&
+      p.w === q.w &&
+      p.h === q.h &&
+      sameOptions(p.options, q.options)
+    );
   });
+}
+
+/** Réglages d'un widget : dictionnaire plat de scalaires, comparé clé à clé. */
+function sameOptions(a: WidgetPlacement['options'], b: WidgetPlacement['options']): boolean {
+  const ka = Object.keys(a ?? {});
+  const kb = Object.keys(b ?? {});
+  if (ka.length !== kb.length) return false;
+  return ka.every(k => a?.[k] === b?.[k]);
 }
 
 /* --- Onglets --------------------------------------------------------------- */

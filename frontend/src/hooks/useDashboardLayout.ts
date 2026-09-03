@@ -209,9 +209,33 @@ export function useDashboardLayout(role: string | undefined, enabled: boolean) {
     [commitPages],
   );
 
+  /**
+   * Nouvelle disposition venue de la grille. Celle-ci ne connaît QUE des
+   * positions : elle ne transporte pas les réglages d'un widget (le contenu
+   * choisi de la carte d'actions, par exemple). Les recopier ici depuis l'état
+   * courant est ce qui évite qu'un simple déplacement efface une
+   * configuration — panne silencieuse, puisque la carte repartirait sur son
+   * contenu par défaut, qui ressemble à un contenu.
+   */
   const setWidgets = useCallback(
     (next: WidgetPlacement[]) => {
-      editActivePage(() => next);
+      editActivePage(widgets => {
+        const byId = new Map(widgets.map(w => [w.id, w]));
+        return next.map(placement => {
+          const options = byId.get(placement.id)?.options;
+          return options ? { ...placement, options } : placement;
+        });
+      });
+    },
+    [editActivePage],
+  );
+
+  /** Change les réglages d'un widget de l'onglet actif, sans le déplacer. */
+  const setWidgetOptions = useCallback(
+    (id: string, options: WidgetPlacement['options']) => {
+      editActivePage(widgets =>
+        widgets.map(widget => (widget.id === id ? { ...widget, options } : widget)),
+      );
     },
     [editActivePage],
   );
@@ -336,6 +360,7 @@ export function useDashboardLayout(role: string | undefined, enabled: boolean) {
     ...state,
     activePage,
     setWidgets,
+    setWidgetOptions,
     addWidget,
     dropWidget,
     swap,

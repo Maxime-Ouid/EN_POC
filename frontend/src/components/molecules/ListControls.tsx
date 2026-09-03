@@ -9,6 +9,13 @@ export interface ListControlsProps {
   search: string;
   onSearchChange?: (value: string) => void;
   perPageOptions?: number[];
+  /**
+   * `false` retire le champ de recherche et ne laisse que « afficher N » —
+   * pour les écrans dont le filtre est remonté dans la topbar (console
+   * hyperadmin). Deux champs de recherche visibles à la fois sur le même écran
+   * poseraient la question de savoir lequel filtre quoi.
+   */
+  showSearch?: boolean;
 }
 
 const DEFAULT_OPTIONS = [10, 25, 50, 100];
@@ -23,6 +30,7 @@ export function ListControls({
   search,
   onSearchChange,
   perPageOptions = DEFAULT_OPTIONS,
+  showSearch = true,
 }: ListControlsProps) {
   return (
     <div className="v1-list-controls">
@@ -44,14 +52,16 @@ export function ListControls({
         </Select>
         <span className="tiny dim">{unit}</span>
       </div>
-      <div className="field" style={{ minWidth: 240 }}>
-        <TextInput
-          value={search}
-          placeholder="Rechercher..."
-          aria-label={`Rechercher parmi les ${unit}`}
-          onChange={e => onSearchChange?.(e.target.value)}
-        />
-      </div>
+      {showSearch && (
+        <div className="field" style={{ minWidth: 240 }}>
+          <TextInput
+            value={search}
+            placeholder="Rechercher..."
+            aria-label={`Rechercher parmi les ${unit}`}
+            onChange={e => onSearchChange?.(e.target.value)}
+          />
+        </div>
+      )}
     </div>
   );
 }

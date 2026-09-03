@@ -16,9 +16,11 @@
 import type { ReactNode } from 'react';
 import { Pill } from '../components/atoms/Pill';
 import { Avatar } from '../components/atoms/Avatar';
+import { IconChip } from '../components/atoms/IconChip';
 import { StatCard } from '../components/molecules/StatCard';
 import { FeedItem } from '../components/molecules/FeedItem';
-import type { WidgetContext } from './types';
+import type { WidgetContext, WidgetRenderProps } from './types';
+import { QUICK_ACTIONS_BY_KEY, readCardActions } from './actions';
 
 /** Nombre de lignes affichées par défaut dans les widgets de liste. */
 const DEFAULT_TAKE = 4;
@@ -59,13 +61,7 @@ function WidgetRow({ name, meta, lead, side, onClick }: WidgetRowProps) {
 
 /** Pastille d'icône colorée en tête de ligne — même code couleur que les écrans. */
 function WidgetLead({ icon, bg, color }: { icon: string; bg: string; color: string }) {
-  return (
-    <div className="w-row-icon" style={{ background: bg, color }}>
-      <svg className="icon">
-        <use href={`#i-${icon}`} />
-      </svg>
-    </div>
-  );
+  return <IconChip icon={icon} bg={bg} color={color} chip="w-row-icon" />;
 }
 
 /** Message affiché quand la liste est vide — un widget vide ne doit pas être muet. */
@@ -306,34 +302,94 @@ export function ModulesWidget({ modules }: WidgetContext) {
   );
 }
 
+/* --- Actions -------------------------------------------------------------
+   Les seuls widgets qui n'abrègent aucun écran : ils en DÉCLENCHENT le geste.
+   Ils ne savent pas le faire eux-mêmes — ils nomment une action du catalogue
+   (actions.ts) et laissent l'application l'exécuter, ce qui est la même règle
+   que pour les données : un widget ne va rien chercher, ne fait rien tout seul.
+   ---------------------------------------------------------------------- */
+
 /**
- * Raccourcis — le seul widget qui n'abrège aucun écran : il en ouvre plusieurs.
- * Les destinations sont les clés de navigation d'App.tsx, pas des libellés :
- * renommer un écran ne casse donc rien ici.
+ * Carte « Actions rapides » — la suite du widget « Raccourcis », qui n'ouvrait
+ * que des écrans et dont le contenu était figé dans le code.
+ *
+ * Son contenu se choisit (bouton de configuration du cadre, en mode édition)
+ * et se range dans les réglages du placement. Sans réglage, elle affiche la
+ * sélection par défaut : utile dès l'ajout, personne n'a à la configurer pour
+ * qu'elle serve.
  */
-export function RaccourcisWidget({ navigate }: WidgetContext) {
-  const shortcuts: { key: string; icon: string; label: string }[] = [
-    { key: 'datarooms', icon: 'folder', label: 'Ouvrir un dossier' },
-    { key: 'portfolios', icon: 'layers', label: 'Portefeuilles' },
-    { key: 'users', icon: 'users', label: "Annuaire de l'étude" },
-    { key: 'stats', icon: 'clock', label: 'Statistiques' },
-    { key: 'settings', icon: 'settings', label: 'Personnalisation' },
-  ];
+export function ActionsRapidesWidget({
+  options,
+  ...ctx
+}: WidgetContext & Pick<WidgetRenderProps, 'options'>) {
+  const keys = readCardActions(options, ctx.allowedActions);
+  if (keys.length === 0) {
+    return <WidgetEmpty>Aucune action à afficher — choisissez-en dans la configuration.</WidgetEmpty>;
+  }
   return (
     <div className="w-shortcuts">
-      {shortcuts.map(s => (
-        <button
-          type="button"
-          key={s.key}
-          className="w-shortcut"
-          onClick={() => navigate(s.key)}
-        >
-          <svg className="icon">
-            <use href={`#i-${s.icon}`} />
-          </svg>
-          <span>{s.label}</span>
-        </button>
-      ))}
+      {keys.map(key => {
+        const action = QUICK_ACTIONS_BY_KEY[key];
+        return (
+          <button
+            type="button"
+            key={key}
+            className="w-shortcut"
+            onClick={() => ctx.runAction(key)}
+          >
+            <svg className="icon">
+              <use href={`#i-${action.icon}`} />
+            </svg>
+            <span>{action.label}</span>
+          </button>
+        );
+      })}
     </div>
+  );
+}
+
+/**
+ * Tuile d'une seule action, au gabarit d'un chiffre-clé.
+ *
+ * La carte ENTIÈRE est le bouton (d'où `bare` dans le registre) : une tuile de
+ * 3 × 3 qui contiendrait un cadre, un titre et un bouton ferait trois surfaces
+ * cliquables apparentes pour un seul geste.
+ *
+ * Une action retirée du catalogue ou refusée à ce membre ne laisse pas un
+ * bouton mort : la tuile dit ce qui manque. Ce cas est rare — la bibliothèque
+ * n'offre pas ces widgets à qui n'a pas le droit — mais il survient pour un
+ * accueil rangé avant un changement de rôle.
+ */
+export function ActionTileWidget({
+  actionKey,
+  ...ctx
+}: WidgetContext & { actionKey: string }) {
+  const action = QUICK_ACTIONS_BY_KEY[actionKey];
+  if (!action || !ctx.allowedActions.includes(actionKey)) {
+    return (
+      <div className="w-tile w-tile-off">
+        <span className="w-tile-label">Action indisponible</span>
+        <span className="w-tile-desc">
+          Elle n’est pas ouverte à votre rôle dans l’étude. Retirez cette tuile en mode
+          Personnaliser.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <button type="button" className="w-tile" onClick={() => ctx.runAction(actionKey)}>
+      {/* Glyphe du sprite et non <IconChip> : les illustrations 3D de
+          l'application désignent des TYPES D'OBJET (un dossier, un message).
+          Une action est un verbe — « déposer », « inviter » — et la moitié du
+          catalogue n'a de toute façon pas d'illustration, ce qui donnerait une
+          rangée de tuiles à deux registres. */}
+      <span className="w-tile-icon">
+        <svg className="icon">
+          <use href={`#i-${action.icon}`} />
+        </svg>
+      </span>
+      <span className="w-tile-label">{action.label}</span>
+      <span className="w-tile-desc">{action.desc}</span>
+    </button>
   );
 }
