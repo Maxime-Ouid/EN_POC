@@ -157,12 +157,28 @@ export function useDataroomTree(dataroomId: number | null) {
   );
 
   useEffect(() => {
+    // `dataroomId` passe de null à un id (ou d'un id à un autre) sur un
+    // re-rendu de l'appelant, pas un remontage du hook : sans ce reset,
+    // `loading` restait à sa valeur précédente (souvent déjà `false`) tout le
+    // temps de la marche récursive — une dataroom à arborescence large (créée
+    // depuis un Template riche, chaque niveau étant un aller-retour réseau
+    // séparé) pouvait alors se montrer trompeusement vide le temps du
+    // chargement, avant de se corriger seule une fois la marche terminée.
+    // Même correctif que useTemplateTree.ts (bug jumeau, repéré là-bas en
+    // vérifiant en Chrome réel une dataroom créée depuis un modèle à 14
+    // rubriques — voir CLAUDE.md).
+    if (dataroomId === null) {
+      setState({ loading: false, error: null, tree: [], rootDocuments: [], documentsByFolderId: {} });
+      return;
+    }
+    setState(prev => ({ ...prev, loading: true, error: null }));
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [dataroomId, load]);
 
   const refresh = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true, error: null }));
     await load();
   }, [load]);
 

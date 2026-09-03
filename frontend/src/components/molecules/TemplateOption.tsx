@@ -38,10 +38,3 @@ export function TemplateOption({ icon = 'folder', name, desc, onClick, onMenu, s
     </div>
   );
 }
-
-export interface DataroomTemplate {
-  id: string;
-  name: string;
-  desc: string;
-  icon?: string;
-}

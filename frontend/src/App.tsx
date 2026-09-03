@@ -10,7 +10,10 @@ import {
   type DataroomDocument,
   NewDataroomModal,
   NewFolderModal,
-  AccessRestrictionModal,
+  RenameFolderModal,
+  AccessRightsTable,
+  type AccessRightsRow,
+  UserRestrictionsModal,
   ConfirmModal,
   DocumentPreview,
   OfficeUsersScreen,
@@ -22,6 +25,7 @@ import {
   SettingsScreen,
   ModuleScreen,
   Card,
+  Button,
   type TreeNodeData,
   TemplatesListScreen,
   type TemplateRowData,
@@ -34,20 +38,22 @@ import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
 import { useTags } from './hooks/useTags';
-import { useAccessRestriction, type AccessTargetKind } from './hooks/useAccessRestrictions';
+import { useAccessRestrictionsList } from './hooks/useAccessRestrictions';
+import { useAccessRightsDraft, type AccessRightsEntry } from './hooks/useAccessRightsDraft';
 import { useOfficeUsers } from './hooks/useOfficeUsers';
 import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
 import { useTemplates } from './hooks/useTemplates';
 import { useTemplateTree, type TemplateFolderTreeNode } from './hooks/useTemplateTree';
-import { api, type DocumentSummary, type TagColor, type TagSummary } from './api/endpoints';
+import {
+  api, type AccessRestrictionSummary, type DocumentSummary, type TagColor, type TagSummary,
+} from './api/endpoints';
 import { matchesWordStart } from './search/match';
 import type { LocalEntry } from './search/localEntries';
 import {
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
   CONNECTED_USERS,
-  DATAROOM_TEMPLATES,
   DEMO_HOME_STATS,
   HISTORY,
   INVOICES,
@@ -90,8 +96,6 @@ type ScreenKey =
   | 'dataroom'
   | 'stats'
   | 'users'
-  | 'templates'
-  | 'template'
   | 'settings';
 
 /**
@@ -111,8 +115,6 @@ const CRUMB_LABELS: Record<ScreenKey, string> = {
   dataroom: 'Dossiers',
   stats: 'Statistiques & facturation',
   users: "Annuaire de l'étude",
-  templates: 'Modèles de dossier',
-  template: 'Modèles de dossier',
   settings: 'Personnalisation',
 };
 
@@ -132,29 +134,11 @@ function toParentId(nodeId: string | undefined): number | undefined {
   return Number(nodeId);
 }
 
-/** Cible d'une restriction d'accès, telle que la modale l'affiche. */
-interface AccessTarget {
-  kind: AccessTargetKind;
-  /** Id de dossier (arbre) ou de document ; absent au niveau dataroom. */
-  id?: string;
-  label: string;
-}
-
-/**
- * Ramène la cible envoyée par l'écran à celle que comprend l'API : le nœud
- * racine de l'explorateur est synthétique (ROOT_NODE_ID), il n'existe pas comme
- * Folder côté serveur — restreindre « la racine » est donc restreindre la
- * dataroom elle-même.
- */
-function toAccessTarget(
-  target: { kind: 'dataroom' | 'folder' | 'document'; id?: string; label: string },
-  dataroomName: string,
-): AccessTarget {
-  if (target.kind === 'folder' && (!target.id || target.id === ROOT_NODE_ID)) {
-    return { kind: 'dataroom', label: dataroomName };
-  }
-  return target;
-}
+/** Cible d'un renommage de dossier — les deux mondes (vraie dataroom, Template)
+    partagent le même popup (RenameFolderModal), mais pas le même endpoint. */
+type RenameTarget =
+  | { kind: 'dataroom-folder'; dataroomId: number; folderId: number; currentName: string }
+  | { kind: 'template-folder'; templateId: number; folderId: number; currentName: string };
 
 function toDataroomDocument(doc: DocumentSummary, username: string): DataroomDocument {
   return {
@@ -205,17 +189,78 @@ function toTemplateTreeNodes(nodes: TemplateFolderTreeNode[]): TreeNodeData[] {
   }));
 }
 
-/** Rôles visibles par défaut de chaque TemplateFolder, indexés par id d'arbre (string). */
-function templateRolesByFolderId(nodes: TemplateFolderTreeNode[]): Record<string, string[]> {
-  const acc: Record<string, string[]> = {};
+/** Rangée plate (une entrée par TemplateFolder) pour le tableau de droits — id
+    de ligne "folder:<id>", même convention qu'une vraie dataroom (voir
+    flattenDataroomAccessRows). Un Template n'a que des dossiers, pas de
+    document ni de ligne "dataroom" (rien n'y correspond). */
+function flattenTemplateAccessRows(
+  nodes: TemplateFolderTreeNode[],
+  depth = 0,
+): { id: string; label: string; depth: number; kind: 'folder' }[] {
+  const rows: { id: string; label: string; depth: number; kind: 'folder' }[] = [];
+  for (const node of nodes) {
+    rows.push({ id: `folder:${node.id}`, label: node.name, depth, kind: 'folder' });
+    rows.push(...flattenTemplateAccessRows(node.children, depth + 1));
+  }
+  return rows;
+}
+
+/** État enregistré (allowed_roles/user_ids) de chaque TemplateFolder, indexé
+    par id de ligne — sert d'`original` à useAccessRightsDraft. */
+function buildTemplateAccessOriginal(nodes: TemplateFolderTreeNode[]): Record<string, AccessRightsEntry> {
+  const map: Record<string, AccessRightsEntry> = {};
   function walk(list: TemplateFolderTreeNode[]) {
     for (const node of list) {
-      acc[String(node.id)] = node.visible_to_roles;
+      map[`folder:${node.id}`] = { allowedRoles: node.allowed_roles, userIds: node.user_ids };
       walk(node.children);
     }
   }
   walk(nodes);
-  return acc;
+  return map;
+}
+
+/** Rangée plate d'une vraie dataroom : la dataroom elle-même, puis chaque
+    dossier et document de son arborescence — même convention d'id que le
+    Template ("dataroom", "folder:<id>", "document:<id>"). */
+function flattenDataroomAccessRows(
+  dataroomName: string,
+  tree: FolderTreeNode[],
+  rootDocuments: DocumentSummary[],
+  documentsByFolderId: Record<number, DocumentSummary[]>,
+): { id: string; label: string; depth: number; kind: 'dataroom' | 'folder' | 'document' }[] {
+  const rows: { id: string; label: string; depth: number; kind: 'dataroom' | 'folder' | 'document' }[] = [
+    { id: 'dataroom', label: dataroomName, depth: 0, kind: 'dataroom' },
+  ];
+  for (const doc of rootDocuments) {
+    rows.push({ id: `document:${doc.id}`, label: doc.name, depth: 1, kind: 'document' });
+  }
+  function walk(nodes: FolderTreeNode[], depth: number) {
+    for (const node of nodes) {
+      rows.push({ id: `folder:${node.id}`, label: node.name, depth, kind: 'folder' });
+      for (const doc of documentsByFolderId[node.id] ?? []) {
+        rows.push({ id: `document:${doc.id}`, label: doc.name, depth: depth + 1, kind: 'document' });
+      }
+      walk(node.children, depth + 1);
+    }
+  }
+  walk(tree, 1);
+  return rows;
+}
+
+/** État enregistré de chaque restriction de CETTE dataroom, indexé par id de
+    ligne — filtre `items` (toutes les restrictions de l'office) au
+    `dataroomId` courant. */
+function buildDataroomAccessOriginal(
+  items: AccessRestrictionSummary[],
+  dataroomId: number,
+): Record<string, AccessRightsEntry> {
+  const map: Record<string, AccessRightsEntry> = {};
+  for (const item of items) {
+    if (item.dataroom_id !== dataroomId) continue;
+    const rowId = item.kind === 'dataroom' ? 'dataroom' : `${item.kind}:${item.target_id}`;
+    map[rowId] = { allowedRoles: item.allowed_roles, userIds: item.user_ids };
+  }
+  return map;
 }
 
 function findFolderLabel(nodes: TreeNodeData[], id: string): string | undefined {
@@ -277,8 +322,13 @@ export default function App() {
   const [userModalError, setUserModalError] = useState<string | null>(null);
   const [userToRemove, setUserToRemove] = useState<OfficeUserRowData | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
-  const [accessTarget, setAccessTarget] = useState<AccessTarget | null>(null);
-  const [accessError, setAccessError] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [restrictionsUser, setRestrictionsUser] = useState<OfficeUserRowData | null>(null);
+  const [savingDataroomAccess, setSavingDataroomAccess] = useState(false);
+  const [dataroomAccessSaveError, setDataroomAccessSaveError] = useState<string | null>(null);
+  const [savingTemplateAccess, setSavingTemplateAccess] = useState(false);
+  const [templateAccessSaveError, setTemplateAccessSaveError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
@@ -300,24 +350,31 @@ export default function App() {
   const dataroomTree = useDataroomTree(screen === 'dataroom' ? openDataroomId : null);
   const openModule = useModule(moduleSlug);
 
-  // L'annuaire alimente deux écrans : la page Annuaire et la liste à cocher de la
-  // modale d'accès. Il n'est chargé que quand l'un des deux est à l'écran — un
-  // membre simple n'y a de toute façon pas droit (403).
-  const officeUsers = useOfficeUsers(authenticated && (screen === 'users' || accessTarget !== null));
-
-  // Le catalogue de modèles alimente deux endroits : l'écran de gestion des
-  // modèles ET le sélecteur de la modale « Nouveau dossier » (modalOpen) — un
-  // membre simple n'a de toute façon pas droit d'y accéder (403).
-  const templates = useTemplates(authenticated && (screen === 'templates' || screen === 'template' || modalOpen));
-  const templateTree = useTemplateTree(screen === 'template' ? openTemplateId : null);
-
-  // Restriction de la cible ouverte. Sans cible, `dataroomId` vaut null : le hook
-  // ne déclenche aucune requête (voir sa clé interne).
-  const access = useAccessRestriction(
-    accessTarget ? openDataroomId : null,
-    accessTarget?.kind ?? 'dataroom',
-    accessTarget && accessTarget.kind !== 'dataroom' ? Number(accessTarget.id) : null,
+  // L'annuaire alimente trois écrans : la page Annuaire, le tableau de droits
+  // d'une dataroom et celui d'un Template (sélecteur d'utilisateurs nommés).
+  // Un membre simple n'y a de toute façon pas droit (403).
+  const officeUsers = useOfficeUsers(
+    authenticated && (screen === 'users' || screen === 'dataroom' || screen === 'settings'),
   );
+
+  // Toutes les restrictions actives de l'office — alimente le tableau de
+  // droits d'une vraie dataroom (préremplissage) ET la modale "Restrictions"
+  // de la page Utilisateurs. Un Template, lui, porte déjà allowed_roles/
+  // user_ids directement sur ses TemplateFolder (voir templateTree) : pas
+  // besoin de cette liste pour son propre tableau de droits.
+  const accessRestrictionsList = useAccessRestrictionsList(
+    authenticated && (screen === 'dataroom' || screen === 'users'),
+  );
+
+  // Le catalogue de modèles alimente deux endroits : l'onglet « Template » de
+  // Personnalisation ET le sélecteur de la modale « Nouveau dossier »
+  // (modalOpen) — un membre simple n'a de toute façon pas droit d'y accéder
+  // (403). Câblé sur screen === 'settings' au sens large (pas un sous-onglet
+  // précis, que ce composant ne connaît pas — même granularité que modules/
+  // identity, déjà toujours calculés pour tout l'écran Personnalisation quel
+  // que soit l'onglet affiché).
+  const templates = useTemplates(authenticated && (screen === 'settings' || modalOpen));
+  const templateTree = useTemplateTree(screen === 'settings' && openTemplateId !== null ? openTemplateId : null);
 
   // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
   // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
@@ -330,7 +387,87 @@ export default function App() {
   const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
   const openTemplate = templates.items.find(t => t.id === openTemplateId) ?? null;
   const templateTreeNodes = toTemplateTreeNodes(templateTree.tree);
-  const templateRoles = templateRolesByFolderId(templateTree.tree);
+
+  // Tableau de droits d'une vraie dataroom : rangée plate (dataroom + chaque
+  // dossier/document de son arbre) + état enregistré filtré à cette dataroom,
+  // via useAccessRightsDraft pour l'édition locale groupée (voir CLAUDE.md,
+  // 02/09/2026). `useMemo` : ces objets ne doivent changer que si les données
+  // SOURCE changent, pas à chaque rendu — sinon le brouillon en cours
+  // d'édition serait écrasé en permanence (voir useAccessRightsDraft).
+  const dataroomAccessRows = useMemo(
+    () =>
+      openDataroom
+        ? flattenDataroomAccessRows(
+            openDataroom.name, dataroomTree.tree, dataroomTree.rootDocuments, dataroomTree.documentsByFolderId,
+          )
+        : [],
+    [openDataroom, dataroomTree.tree, dataroomTree.rootDocuments, dataroomTree.documentsByFolderId],
+  );
+  const dataroomAccessOriginal = useMemo(
+    () => (openDataroom ? buildDataroomAccessOriginal(accessRestrictionsList.items, openDataroom.id) : {}),
+    [accessRestrictionsList.items, openDataroom],
+  );
+  const dataroomAccessDraft = useAccessRightsDraft(dataroomAccessOriginal);
+  const dataroomAccessTableRows: AccessRightsRow[] = dataroomAccessRows.map(row => ({
+    ...row,
+    allowedRoles: dataroomAccessDraft.draft[row.id]?.allowedRoles ?? [],
+    userIds: dataroomAccessDraft.draft[row.id]?.userIds ?? [],
+  }));
+
+  // Même patron pour un Template — mais l'état enregistré vit directement sur
+  // chaque TemplateFolder (allowed_roles/user_ids), pas dans une liste séparée
+  // à filtrer : pas besoin de accessRestrictionsList ici.
+  const templateAccessRows = useMemo(() => flattenTemplateAccessRows(templateTree.tree), [templateTree.tree]);
+  const templateAccessOriginal = useMemo(
+    () => buildTemplateAccessOriginal(templateTree.tree),
+    [templateTree.tree],
+  );
+  const templateAccessDraft = useAccessRightsDraft(templateAccessOriginal);
+  const templateAccessTableRows: AccessRightsRow[] = templateAccessRows.map(row => ({
+    ...row,
+    allowedRoles: templateAccessDraft.draft[row.id]?.allowedRoles ?? [],
+    userIds: templateAccessDraft.draft[row.id]?.userIds ?? [],
+  }));
+  // Pour les pastilles de visibilité en direct de l'explorateur du Template
+  // (renderNodeExtra) — indexé par id de NŒUD DE L'ARBRE (numérique en
+  // chaîne), pas par id de ligne du tableau ("folder:<id>").
+  const templateAllowedRolesByFolderId: Record<string, string[]> = {};
+  for (const row of templateAccessRows) {
+    templateAllowedRolesByFolderId[row.id.slice('folder:'.length)] =
+      templateAccessDraft.draft[row.id]?.allowedRoles ?? [];
+  }
+
+  const officeUsersForAccess = officeUsers.items.map(u => ({ userId: u.user_id, username: u.username, role: u.role }));
+
+  async function saveDataroomAccess() {
+    if (!openDataroom) return;
+    await Promise.all(
+      dataroomAccessDraft.dirtyRowIds.map(rowId => {
+        const entry = dataroomAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [] };
+        const state = { userIds: entry.userIds, allowedRoles: entry.allowedRoles };
+        if (rowId === 'dataroom') return api.setDataroomAccess(openDataroom.id, state);
+        if (rowId.startsWith('folder:')) {
+          return api.setFolderAccess(openDataroom.id, Number(rowId.slice('folder:'.length)), state);
+        }
+        return api.setDocumentAccess(openDataroom.id, Number(rowId.slice('document:'.length)), state);
+      }),
+    );
+    await accessRestrictionsList.refresh();
+  }
+
+  async function saveTemplateAccess() {
+    if (openTemplateId === null) return;
+    await Promise.all(
+      templateAccessDraft.dirtyRowIds.map(rowId => {
+        const entry = templateAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [] };
+        const folderId = Number(rowId.slice('folder:'.length));
+        return api.updateTemplateFolder(openTemplateId, folderId, {
+          allowed_roles: entry.allowedRoles, user_ids: entry.userIds,
+        });
+      }),
+    );
+    await templateTree.refresh();
+  }
 
   // Les modules réellement activés viennent de /api/tenant-config/ ; le
   // catalogue (libellés, icônes, « à venir ») reste côté front faute de
@@ -443,10 +580,6 @@ export default function App() {
     for (const u of CONNECTED_USERS) {
       entries.push(demo(`cx-${u.id}`, 'i-users', u.name,
         `Statistiques & facturation / ${u.name}`, 'Connecté', () => navigate('stats')));
-    }
-    for (const t of DATAROOM_TEMPLATES) {
-      entries.push(demo(`tpl-${t.id}`, 'i-seal', t.name, `Modèles / ${t.name}`,
-        'Modèle', () => setModalOpen(true)));
     }
     for (const q of QA_ENTRIES) {
       entries.push(demo(`qa-${q.id}`, 'i-msg', q.object, `Questions / Réponses`,
@@ -612,6 +745,188 @@ export default function App() {
   const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
   const canManageTemplates = assignableRoles(currentOffice?.role).length > 0;
 
+  // Contenu de l'onglet « Template » de Personnalisation (02/09/2026 — déplacé
+  // depuis l'ancienne entrée de navigation top-level « Modèles de dossier »,
+  // voir CLAUDE.md). Calculé ici plutôt que gaté par `screen`, exactement
+  // comme `modules`/`identity` plus bas : SettingsScreen décide seul, via son
+  // propre état d'onglet interne, quand l'afficher — openTemplateId reste,
+  // lui, la seule source de vérité pour savoir si c'est la liste ou le détail
+  // d'un modèle qui doit s'afficher à l'intérieur de cet onglet.
+  const templatesTabContent =
+    openTemplateId === null ? (
+      <>
+        <TemplatesListScreen
+          rows={templates.items}
+          loading={templates.loading}
+          error={templates.error}
+          canManage={canManageTemplates}
+          onOpen={id => setOpenTemplateId(id)}
+          onCreate={() => {
+            setTemplateModalError(null);
+            setTemplateModal({ mode: 'create' });
+          }}
+          onEdit={template => {
+            setTemplateModalError(null);
+            setTemplateModal({ mode: 'edit', target: template });
+          }}
+          onDelete={template => {
+            setDeleteTemplateError(null);
+            setTemplateToDelete(template);
+          }}
+        />
+        <NewTemplateModal
+          // Remonter le mode ET la cible dans la clé remet les champs à zéro
+          // en passant d'un modèle à l'autre — même convention que
+          // OfficeUserModal (create/attach) plus haut.
+          key={templateModal ? `${templateModal.mode}-${templateModal.target?.id ?? 'new'}` : 'closed'}
+          open={templateModal !== null}
+          mode={templateModal?.mode ?? 'create'}
+          initial={
+            templateModal?.target
+              ? { name: templateModal.target.name, description: templateModal.target.description }
+              : undefined
+          }
+          error={templateModalError}
+          onClose={() => {
+            setTemplateModal(null);
+            setTemplateModalError(null);
+          }}
+          onSubmit={({ name, description }) => {
+            setTemplateModalError(null);
+            const done =
+              templateModal?.mode === 'edit' && templateModal.target
+                ? templates.update(templateModal.target.id, { name, description })
+                : templates.create(name, description);
+            done.then(() => setTemplateModal(null)).catch((err: Error) => setTemplateModalError(err.message));
+          }}
+        />
+        <ConfirmModal
+          open={templateToDelete !== null}
+          title="Supprimer le modèle"
+          confirmLabel="Supprimer"
+          destructive
+          error={deleteTemplateError}
+          onCancel={() => {
+            setTemplateToDelete(null);
+            setDeleteTemplateError(null);
+          }}
+          onConfirm={() => {
+            if (!templateToDelete) return;
+            setDeleteTemplateError(null);
+            templates
+              .remove(templateToDelete.id)
+              .then(() => setTemplateToDelete(null))
+              .catch((err: Error) => setDeleteTemplateError(err.message));
+          }}
+        >
+          {templateToDelete && (
+            <>
+              <strong>{templateToDelete.name}</strong> et son arborescence de dossiers seront
+              supprimés.
+              <div style={{ marginTop: 8 }}>
+                Les datarooms déjà créées à partir de ce modèle ne sont pas affectées : la
+                copie qu'elles portent leur est propre, sans lien vivant vers ce modèle.
+              </div>
+            </>
+          )}
+        </ConfirmModal>
+      </>
+    ) : (
+      openTemplate && (
+        <>
+          <TemplateDetailScreen
+            // Même remontage que DataroomDetailScreen : le nœud sélectionné
+            // dans l'explorateur n'a aucun sens d'un modèle à l'autre.
+            key={openTemplate.id}
+            templateName={openTemplate.name}
+            templateDescription={openTemplate.description}
+            tree={templateTreeNodes}
+            allowedRolesByFolderId={templateAllowedRolesByFolderId}
+            loading={templateTree.loading}
+            error={templateTree.error}
+            canManage={canManageTemplates}
+            onBackToList={() => setOpenTemplateId(null)}
+            onCreateFolder={parentId => setNewTemplateFolderModal({ parentId })}
+            onRenameFolder={folderId => {
+              setRenameError(null);
+              setRenameTarget({
+                kind: 'template-folder',
+                templateId: openTemplate.id,
+                folderId: Number(folderId),
+                currentName: findFolderLabel(templateTreeNodes, folderId) ?? '',
+              });
+            }}
+            onDeleteFolder={folderId => {
+              setDeleteFolderError(null);
+              setFolderToDelete({ id: folderId, name: findFolderLabel(templateTreeNodes, folderId) ?? '' });
+            }}
+            accessRightsTab={
+              <div>
+                <AccessRightsPanel
+                  dirtyCount={templateAccessDraft.dirtyRowIds.length}
+                  saving={savingTemplateAccess}
+                  onReset={templateAccessDraft.reset}
+                  onSave={() => {
+                    setTemplateAccessSaveError(null);
+                    setSavingTemplateAccess(true);
+                    saveTemplateAccess()
+                      .catch((err: Error) => setTemplateAccessSaveError(err.message))
+                      .finally(() => setSavingTemplateAccess(false));
+                  }}
+                />
+                <AccessRightsTable
+                  rows={templateAccessTableRows}
+                  officeUsers={officeUsersForAccess}
+                  onChangeRow={(rowId, next) => templateAccessDraft.setRow(rowId, next)}
+                  loading={templateTree.loading || officeUsers.loading}
+                  error={templateAccessSaveError ?? officeUsers.error}
+                />
+              </div>
+            }
+          />
+          <NewTemplateFolderModal
+            open={newTemplateFolderModal !== null}
+            onClose={() => setNewTemplateFolderModal(null)}
+            parentLabel={
+              newTemplateFolderModal?.parentId
+                ? findFolderLabel(templateTreeNodes, newTemplateFolderModal.parentId)
+                : 'Racine du modèle'
+            }
+            onCreate={name => {
+              const parentId = newTemplateFolderModal?.parentId ? Number(newTemplateFolderModal.parentId) : undefined;
+              void templateTree.createFolder(name, parentId).then(() => setNewTemplateFolderModal(null));
+            }}
+          />
+          <ConfirmModal
+            open={folderToDelete !== null}
+            title="Supprimer ce dossier"
+            confirmLabel="Supprimer"
+            destructive
+            error={deleteFolderError}
+            onCancel={() => {
+              setFolderToDelete(null);
+              setDeleteFolderError(null);
+            }}
+            onConfirm={() => {
+              if (!folderToDelete) return;
+              setDeleteFolderError(null);
+              templateTree
+                .removeFolder(Number(folderToDelete.id))
+                .then(() => setFolderToDelete(null))
+                .catch((err: Error) => setDeleteFolderError(err.message));
+            }}
+          >
+            {folderToDelete && (
+              <>
+                <strong>{folderToDelete.name}</strong> et tous ses sous-dossiers seront
+                supprimés du modèle.
+              </>
+            )}
+          </ConfirmModal>
+        </>
+      )
+    );
+
   return (
     <AppShell
       officeName={session.tenant?.name ?? 'Office'}
@@ -674,16 +989,46 @@ export default function App() {
           void session.logout();
         }}
       >
-        Vous quittez <strong>{session.tenant?.name ?? 'cet office'}</strong> en tant que{' '}
-        <strong>{username}</strong>. Il faudra saisir à nouveau votre mot de passe et un
-        code d'authentification pour revenir.
-        {session.offices.length > 1 && (
-          <div style={{ marginTop: 8 }}>
-            Vos autres études restent ouvertes : chaque office a sa propre session, celle-ci
-            ne ferme que {window.location.host}.
-          </div>
-        )}
+        Vous quittez <strong>{username}</strong>. Il faudra saisir à nouveau votre mot de
+        passe et un code d'authentification pour revenir.
+        <div style={{ marginTop: 8 }}>
+          <strong>Cette déconnexion ferme TOUTES vos études ouvertes</strong>, pas
+          seulement {session.tenant?.name ?? 'celle-ci'}
+          {session.offices.length > 1 && (
+            <>
+              {' '}— un onglet resté ouvert sur un autre office vous renverra à l'écran de
+              connexion dès son prochain appel au serveur
+            </>
+          )}
+          .
+        </div>
       </ConfirmModal>
+
+      {/* Le renommage se déclenche depuis le menu "⋮" de l'arbre, aussi bien
+          dans une vraie dataroom que dans un Template — un seul popup, monté
+          hors des écrans plutôt que dupliqué dans les deux blocs. */}
+      <RenameFolderModal
+        open={renameTarget !== null}
+        currentName={renameTarget?.currentName ?? ''}
+        error={renameError}
+        onClose={() => {
+          setRenameTarget(null);
+          setRenameError(null);
+        }}
+        onSubmit={name => {
+          if (!renameTarget) return;
+          setRenameError(null);
+          const done =
+            renameTarget.kind === 'dataroom-folder'
+              ? api
+                  .renameFolder(renameTarget.dataroomId, renameTarget.folderId, name)
+                  .then(() => dataroomTree.refresh())
+              : api
+                  .updateTemplateFolder(renameTarget.templateId, renameTarget.folderId, { name })
+                  .then(() => templateTree.refresh());
+          done.then(() => setRenameTarget(null)).catch((err: Error) => setRenameError(err.message));
+        }}
+      />
 
       {openModuleEntry && (
         <ModuleScreen
@@ -859,10 +1204,41 @@ export default function App() {
               }
             }}
             onCreateFolder={activeFolderId => setNewFolderModal({ parentId: activeFolderId })}
-            onManageAccess={target => {
-              setAccessError(null);
-              setAccessTarget(toAccessTarget(target, openDataroom.name));
+            onRenameFolder={folderId => {
+              // Le nœud racine synthétique (ROOT_NODE_ID) n'est pas un vrai
+              // Folder côté serveur — rien à renommer là.
+              if (folderId === ROOT_NODE_ID) return;
+              setRenameError(null);
+              setRenameTarget({
+                kind: 'dataroom-folder',
+                dataroomId: openDataroom.id,
+                folderId: Number(folderId),
+                currentName: findFolderLabel(tree, folderId) ?? '',
+              });
             }}
+            accessRightsTab={
+              <div>
+                <AccessRightsPanel
+                  dirtyCount={dataroomAccessDraft.dirtyRowIds.length}
+                  saving={savingDataroomAccess}
+                  onReset={dataroomAccessDraft.reset}
+                  onSave={() => {
+                    setDataroomAccessSaveError(null);
+                    setSavingDataroomAccess(true);
+                    saveDataroomAccess()
+                      .catch((err: Error) => setDataroomAccessSaveError(err.message))
+                      .finally(() => setSavingDataroomAccess(false));
+                  }}
+                />
+                <AccessRightsTable
+                  rows={dataroomAccessTableRows}
+                  officeUsers={officeUsersForAccess}
+                  onChangeRow={(rowId, next) => dataroomAccessDraft.setRow(rowId, next)}
+                  loading={accessRestrictionsList.loading || officeUsers.loading}
+                  error={dataroomAccessSaveError ?? accessRestrictionsList.error ?? officeUsers.error}
+                />
+              </div>
+            }
             onDownloadDocument={documentId => {
               void downloadDocument(openDataroom.id, Number(documentId), documentName(documentsByFolder, documentId));
             }}
@@ -892,32 +1268,6 @@ export default function App() {
             onCreate={name => {
               const parentId = toParentId(newFolderModal?.parentId);
               void dataroomTree.createFolder(name, parentId).then(() => setNewFolderModal(null));
-            }}
-          />
-          <AccessRestrictionModal
-            open={accessTarget !== null}
-            kind={accessTarget?.kind ?? 'dataroom'}
-            targetLabel={accessTarget?.label ?? ''}
-            targetKey={`${accessTarget?.kind ?? 'dataroom'}:${accessTarget?.id ?? openDataroomId}`}
-            users={officeUsers.items.map(u => ({
-              userId: u.user_id,
-              username: u.username,
-              role: u.role,
-            }))}
-            usersError={officeUsers.error}
-            selectedUserIds={access.userIds}
-            loading={access.loading || officeUsers.loading}
-            error={accessError ?? access.error}
-            onClose={() => {
-              setAccessTarget(null);
-              setAccessError(null);
-            }}
-            onSave={userIds => {
-              setAccessError(null);
-              access
-                .save(userIds)
-                .then(() => setAccessTarget(null))
-                .catch((err: Error) => setAccessError(err.message));
             }}
           />
         </>
@@ -950,7 +1300,32 @@ export default function App() {
               setRemoveError(null);
               setUserToRemove(user);
             }}
+            onShowRestrictions={user => setRestrictionsUser(user)}
             currentUsername={username}
+          />
+          <UserRestrictionsModal
+            open={restrictionsUser !== null}
+            username={restrictionsUser?.username ?? ''}
+            userId={restrictionsUser?.userId ?? 0}
+            userRole={restrictionsUser?.role ?? ''}
+            items={accessRestrictionsList.items}
+            loading={accessRestrictionsList.loading}
+            error={accessRestrictionsList.error}
+            onClose={() => setRestrictionsUser(null)}
+            onToggle={(item, checked) => {
+              if (!restrictionsUser) return;
+              const nextUserIds = checked
+                ? [...item.user_ids, restrictionsUser.userId]
+                : item.user_ids.filter(id => id !== restrictionsUser.userId);
+              const state = { userIds: nextUserIds, allowedRoles: item.allowed_roles };
+              const save =
+                item.kind === 'dataroom'
+                  ? api.setDataroomAccess(item.dataroom_id, state)
+                  : item.kind === 'folder'
+                    ? api.setFolderAccess(item.dataroom_id, item.target_id, state)
+                    : api.setDocumentAccess(item.dataroom_id, item.target_id, state);
+              void save.then(() => accessRestrictionsList.refresh());
+            }}
           />
           <OfficeUserModal
             // Remonter le mode dans la clé remet les champs à zéro d'un mode à
@@ -1011,153 +1386,6 @@ export default function App() {
         </>
       )}
 
-      {!openModuleEntry && screen === 'templates' && (
-        <>
-          <TemplatesListScreen
-            rows={templates.items}
-            loading={templates.loading}
-            error={templates.error}
-            canManage={canManageTemplates}
-            onOpen={id => {
-              setOpenTemplateId(id);
-              setScreen('template');
-            }}
-            onCreate={() => {
-              setTemplateModalError(null);
-              setTemplateModal({ mode: 'create' });
-            }}
-            onEdit={template => {
-              setTemplateModalError(null);
-              setTemplateModal({ mode: 'edit', target: template });
-            }}
-            onDelete={template => {
-              setDeleteTemplateError(null);
-              setTemplateToDelete(template);
-            }}
-          />
-          <NewTemplateModal
-            // Remonter le mode ET la cible dans la clé remet les champs à zéro
-            // en passant d'un modèle à l'autre — même convention que
-            // OfficeUserModal (create/attach) plus haut.
-            key={templateModal ? `${templateModal.mode}-${templateModal.target?.id ?? 'new'}` : 'closed'}
-            open={templateModal !== null}
-            mode={templateModal?.mode ?? 'create'}
-            initial={
-              templateModal?.target
-                ? { name: templateModal.target.name, description: templateModal.target.description }
-                : undefined
-            }
-            error={templateModalError}
-            onClose={() => {
-              setTemplateModal(null);
-              setTemplateModalError(null);
-            }}
-            onSubmit={({ name, description }) => {
-              setTemplateModalError(null);
-              const done =
-                templateModal?.mode === 'edit' && templateModal.target
-                  ? templates.update(templateModal.target.id, { name, description })
-                  : templates.create(name, description);
-              done.then(() => setTemplateModal(null)).catch((err: Error) => setTemplateModalError(err.message));
-            }}
-          />
-          <ConfirmModal
-            open={templateToDelete !== null}
-            title="Supprimer le modèle"
-            confirmLabel="Supprimer"
-            destructive
-            error={deleteTemplateError}
-            onCancel={() => {
-              setTemplateToDelete(null);
-              setDeleteTemplateError(null);
-            }}
-            onConfirm={() => {
-              if (!templateToDelete) return;
-              setDeleteTemplateError(null);
-              templates
-                .remove(templateToDelete.id)
-                .then(() => setTemplateToDelete(null))
-                .catch((err: Error) => setDeleteTemplateError(err.message));
-            }}
-          >
-            {templateToDelete && (
-              <>
-                <strong>{templateToDelete.name}</strong> et son arborescence de dossiers seront
-                supprimés.
-                <div style={{ marginTop: 8 }}>
-                  Les datarooms déjà créées à partir de ce modèle ne sont pas affectées : la
-                  copie qu'elles portent leur est propre, sans lien vivant vers ce modèle.
-                </div>
-              </>
-            )}
-          </ConfirmModal>
-        </>
-      )}
-
-      {!openModuleEntry && screen === 'template' && openTemplate && (
-        <>
-          <TemplateDetailScreen
-            // Même remontage que DataroomDetailScreen : le nœud sélectionné
-            // dans l'explorateur n'a aucun sens d'un modèle à l'autre.
-            key={openTemplate.id}
-            templateName={openTemplate.name}
-            templateDescription={openTemplate.description}
-            tree={templateTreeNodes}
-            rolesByFolderId={templateRoles}
-            loading={templateTree.loading}
-            error={templateTree.error}
-            canManage={canManageTemplates}
-            onBackToList={() => navigate('templates')}
-            onCreateFolder={parentId => setNewTemplateFolderModal({ parentId })}
-            onRenameFolder={(folderId, name) => void templateTree.renameFolder(Number(folderId), name)}
-            onDeleteFolder={folderId => {
-              setDeleteFolderError(null);
-              setFolderToDelete({ id: folderId, name: findFolderLabel(templateTreeNodes, folderId) ?? '' });
-            }}
-            onSetFolderRoles={(folderId, roles) => void templateTree.setFolderRoles(Number(folderId), roles)}
-          />
-          <NewTemplateFolderModal
-            open={newTemplateFolderModal !== null}
-            onClose={() => setNewTemplateFolderModal(null)}
-            parentLabel={
-              newTemplateFolderModal?.parentId
-                ? findFolderLabel(templateTreeNodes, newTemplateFolderModal.parentId)
-                : 'Racine du modèle'
-            }
-            onCreate={name => {
-              const parentId = newTemplateFolderModal?.parentId ? Number(newTemplateFolderModal.parentId) : undefined;
-              void templateTree.createFolder(name, parentId).then(() => setNewTemplateFolderModal(null));
-            }}
-          />
-          <ConfirmModal
-            open={folderToDelete !== null}
-            title="Supprimer ce dossier"
-            confirmLabel="Supprimer"
-            destructive
-            error={deleteFolderError}
-            onCancel={() => {
-              setFolderToDelete(null);
-              setDeleteFolderError(null);
-            }}
-            onConfirm={() => {
-              if (!folderToDelete) return;
-              setDeleteFolderError(null);
-              templateTree
-                .removeFolder(Number(folderToDelete.id))
-                .then(() => setFolderToDelete(null))
-                .catch((err: Error) => setDeleteFolderError(err.message));
-            }}
-          >
-            {folderToDelete && (
-              <>
-                <strong>{folderToDelete.name}</strong> et tous ses sous-dossiers seront
-                supprimés du modèle.
-              </>
-            )}
-          </ConfirmModal>
-        </>
-      )}
-
       {!openModuleEntry && screen === 'stats' && (
         <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
       )}
@@ -1176,7 +1404,6 @@ export default function App() {
           }}
           modules={{
             modules: modulesWithServerState,
-            templates: DATAROOM_TEMPLATES,
             // Aucun endpoint d'activation : les interrupteurs montrent l'état
             // réel de l'office et ne prétendent pas agir. Un interrupteur qui
             // bascule sans rien changer côté serveur est pire que pas
@@ -1185,9 +1412,51 @@ export default function App() {
             readOnlyNote:
               "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
           }}
+          templatesTab={templatesTabContent}
         />
       )}
     </AppShell>
+  );
+}
+
+/**
+ * Barre au-dessus d'un `AccessRightsTable` — décompte des lignes modifiées,
+ * Annuler/Enregistrer. Les modifications restent locales jusqu'à ce bouton
+ * (voir CLAUDE.md, "État réel du code", 02/09/2026) : aucune requête n'est
+ * déclenchée par une case cochée dans le tableau lui-même.
+ */
+function AccessRightsPanel({
+  dirtyCount,
+  saving,
+  onReset,
+  onSave,
+}: {
+  dirtyCount: number;
+  saving: boolean;
+  onReset: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        flexWrap: 'wrap', gap: 12, marginBottom: 12,
+      }}
+    >
+      <div className="tiny dim" style={{ maxWidth: 520 }}>
+        Superadmin garde toujours accès, quelle que soit la configuration ci-dessous. Sur une
+        ligne sans case cochée ni utilisateur nommé, l'accès reste ouvert à tous les rôles sauf
+        Client.
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button size="sm" onClick={onReset} disabled={!dirtyCount || saving}>
+          Annuler
+        </Button>
+        <Button size="sm" variant="primary" onClick={onSave} disabled={!dirtyCount || saving}>
+          {dirtyCount ? `Enregistrer (${dirtyCount})` : 'Enregistrer'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

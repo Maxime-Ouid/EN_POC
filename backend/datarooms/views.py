@@ -4,10 +4,12 @@ from urllib.parse import quote
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.http import FileResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import render
+from django.utils import timezone
 
 from django_otp.plugins.otp_totp.models import TOTPDevice
 from rest_framework.decorators import api_view, permission_classes
@@ -125,15 +127,35 @@ def mfa_verify(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def logout_view(request):
-    """Ferme la session de l'office courant.
+    """Ferme TOUTES les sessions de l'utilisateur, sur TOUS les offices —
+    pas seulement request.session (02/09/2026, changement de comportement :
+    fermait auparavant uniquement la session de l'office courant, voir
+    CLAUDE.md, "État réel du code").
 
     AllowAny et non IsAuthenticated : se déconnecter d'une session déjà expirée
     doit réussir, pas répondre 403. `logout()` vide aussi `mfa_user_id`, donc une
     connexion abandonnée entre le mot de passe et le code TOTP est annulée.
 
-    La session est scopée à l'hôte de l'office (SESSION_COOKIE_DOMAIN non
-    défini) : les autres sous-domaines gardent la leur.
+    Chaque office garde son propre cookie de session (SESSION_COOKIE_DOMAIN
+    non défini, voir "Architecture multi-tenant"), mais django.contrib.sessions
+    est un modèle PARTAGÉ (base default, tenancy/router.py::SHARED_APPS) :
+    toutes les sessions Django d'un même utilisateur, quel que soit l'office
+    depuis lequel elles ont été ouvertes, y vivent déjà côte à côte. Session ne
+    stocke pas _auth_user_id en clair (donnée sérialisée/signée) : il faut
+    décoder chaque ligne pour savoir à qui elle appartient, il n'y a pas de
+    requête ORM directe possible. Les sessions déjà expirées sont ignorées
+    (inutilisables de toute façon, pas la peine de les décoder).
+
+    Les autres onglets ouverts sur un autre office ne le sauront qu'à leur
+    prochain appel API (401, voir hooks/useSession.ts côté front pour la
+    redirection vers l'écran de connexion qui en découle) — il n'existe aucun
+    mécanisme pour les prévenir en direct (pas de WebSocket, pas de polling).
     """
+    user_id = request.user.id if request.user.is_authenticated else None
+    if user_id is not None:
+        for session in Session.objects.filter(expire_date__gte=timezone.now()):
+            if str(session.get_decoded().get('_auth_user_id')) == str(user_id):
+                session.delete()
     logout(request)
     return Response({"status": "ok"})
 
@@ -299,6 +321,22 @@ def _manager_role(user, office):
     if membership is None or membership.role not in ("admin", "superadmin"):
         return None
     return membership.role
+
+def _can_create_dataroom(user, office):
+    """Créer une dataroom (POST /api/datarooms/ UNIQUEMENT — pas la création de
+    dossier, l'upload, ni la gestion des Templates/utilisateurs/restrictions
+    d'accès, qui restent gatées par _manager_role, admin/superadmin) est
+    ouvert à partir du rôle "membre" inclus, client exclu.
+
+    Seuil exprimé via OfficeMembership.ROLE_RANK plutôt qu'une liste de rôles
+    en dur, pour réutiliser la même logique de rang que _roles_at_or_below/
+    _validate_role_for_caller plutôt que d'en dupliquer une — pas un nouveau
+    gate séparé. Périmètre volontairement susceptible d'évoluer encore selon
+    les retours (voir CLAUDE.md, "État réel du code") : pas un choix figé."""
+    membership = user.memberships.filter(office=office).first()
+    if membership is None:
+        return False
+    return OfficeMembership.ROLE_RANK[membership.role] >= OfficeMembership.ROLE_RANK["membre"]
 
 def _roles_at_or_below(rank):
     """Rôles dont le rang est <= rank — ce qu'un gestionnaire de ce rang peut voir/gérer.
@@ -709,11 +747,13 @@ def datarooms_view(request):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     if request.method == 'POST':
-        # Réservé admin/superadmin de l'office (même gate que la gestion des
-        # Templates et des utilisateurs) — créer une dataroom n'est pas ouvert à
-        # tout membre, contrairement à la lecture ci-dessous (_level_visible).
-        if _manager_role(request.user, office) is None:
-            return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+        # Élargi le 02/09/2026 : ouvert à partir du rôle "membre" (client
+        # exclu) — voir _can_create_dataroom. Change UNIQUEMENT ce gate ;
+        # créer un dossier/déposer un document dans une dataroom existante,
+        # et gérer les Templates/utilisateurs/restrictions d'accès, restent
+        # réservés admin/superadmin (_manager_role), sans changement.
+        if not _can_create_dataroom(request.user, office):
+            return Response({"error": "réservé aux membres de cet office"}, status=403)
         name = (request.data.get('name') or '').strip()
         if not name:
             return Response({"error": "nom requis"}, status=400)
@@ -751,13 +791,18 @@ def datarooms_view(request):
 
 def _apply_template(dataroom, template, office):
     """Reproduit récursivement l'arborescence de TemplateFolder de `template` en
-    VRAIS Folder pour `dataroom`, et pour chaque TemplateFolder ayant un
-    visible_to_roles non vide, résout les rôles en utilisateurs réels de `office`
-    (via OfficeMembership — c'est ICI et seulement ici que les rôles deviennent
-    des ids concrets) et crée l'AccessRestriction correspondante sur le Folder
-    nouvellement créé. Un TemplateFolder sans visible_to_roles ne crée aucune
-    restriction : le Folder obtenu reste au comportement d'accès par défaut selon
-    le rôle (_user_can_access, changement du 01/09/2026).
+    VRAIS Folder pour `dataroom`. Pour chaque TemplateFolder ayant
+    `allowed_roles` et/ou `user_ids` non vides, crée l'AccessRestriction
+    correspondante sur le Folder nouvellement créé :
+    - `allowed_roles` est copié TEL QUEL — AccessRestriction comprend les
+      rôles nativement depuis le 02/09/2026, plus de résolution à faire ici.
+    - `user_ids` est re-vérifié contre les OfficeMembership RÉELS de `office`
+      au moment de l'application (un utilisateur nommé sur le template a pu
+      quitter l'office entre-temps) — seule "résolution" encore nécessaire,
+      même défense en profondeur que _set_restriction.
+    Un TemplateFolder sans les deux ne crée aucune restriction : le Folder
+    obtenu reste au comportement d'accès par défaut selon le rôle
+    (_user_can_access, changement du 01/09/2026).
 
     Copie ponctuelle, jamais un lien vivant : aucune référence vers `template`/
     ses TemplateFolder n'est conservée sur les Folder/AccessRestriction créés ici
@@ -765,18 +810,18 @@ def _apply_template(dataroom, template, office):
     def walk(template_parent, real_parent):
         for tf in TemplateFolder.objects.filter(template=template, parent=template_parent):
             folder = Folder.objects.create(dataroom=dataroom, parent=real_parent, name=tf.name)
-            if tf.visible_to_roles:
-                user_ids = list(
-                    OfficeMembership.objects.filter(
-                        office=office, role__in=tf.visible_to_roles
-                    ).values_list('user_id', flat=True)
+            user_ids = list(
+                OfficeMembership.objects.filter(
+                    office=office, user_id__in=tf.user_ids
+                ).values_list('user_id', flat=True)
+            ) if tf.user_ids else []
+            # Les deux vides après résolution => pas de restriction créée,
+            # même invariant que _set_restriction : une AccessRestriction
+            # "restreint à personne et à aucun rôle" n'existe jamais.
+            if tf.allowed_roles or user_ids:
+                AccessRestriction.objects.create(
+                    folder=folder, allowed_roles=tf.allowed_roles, user_ids=user_ids
                 )
-                # Liste vide après résolution (aucun membre de l'office n'a un de
-                # ces rôles) => pas de restriction créée, même invariant que
-                # _set_restriction : une AccessRestriction "restreint à personne"
-                # n'existe jamais.
-                if user_ids:
-                    AccessRestriction.objects.create(folder=folder, user_ids=user_ids)
             walk(tf, folder)
     walk(None, None)
 
@@ -825,22 +870,38 @@ def _nearest_restriction(dataroom, folder=None, document=None):
 
 def _user_can_access(user, office, dataroom, folder=None, document=None):
     """Accès direct à CE niveau précis (pas la visibilité de chemin, voir
-    _level_visible). Si une restriction existe quelque part sur la chaîne
-    (_nearest_restriction, inchangée), seule l'appartenance à `user_ids` compte —
-    le rôle n'entre pas en jeu, une restriction explicite prime toujours.
+    _level_visible).
+
+    Un superadmin a TOUJOURS accès (changement du 02/09/2026) — avant même de
+    résoudre une éventuelle restriction, pas une case parmi d'autres dans
+    `allowed_roles` : un superadmin qu'une restriction exclurait explicitement
+    de `user_ids`/`allowed_roles` garde quand même l'accès. C'est ce
+    court-circuit, et lui seul, qui porte cette garantie — voir
+    AccessRestriction, "superadmin" n'apparaît d'ailleurs jamais dans
+    `allowed_roles` (filtré par _clean_access_roles).
+
+    Pour tout autre rôle : si une restriction existe quelque part sur la
+    chaîne (_nearest_restriction, inchangée), l'accès est accordé si l'id de
+    `user` est dans `user_ids` OU si son rôle pour cet office est dans
+    `allowed_roles` (les deux critères sont indépendants, l'un OU l'autre
+    suffit — changement du 02/09/2026, voir CLAUDE.md).
 
     Si AUCUNE restriction n'existe sur toute la chaîne, le comportement dépend
-    désormais du rôle de `user` pour CET office précis (changement du 01/09/2026,
-    voir CLAUDE.md) : membre/admin/superadmin gardent l'accès ouvert par défaut
-    (comportement historique, inchangé) ; un client, lui, n'a PAS accès par défaut
-    — un client ne voit et n'accède qu'à ce qu'une restriction l'inclut
-    explicitement. Un utilisateur sans membership pour cet office (ne devrait pas
-    arriver : tous les appelants vérifient déjà l'appartenance en amont) est traité
-    comme un client, par défaut fermé plutôt qu'ouvert."""
+    du rôle de `user` pour CET office précis (changement du 01/09/2026) :
+    membre/admin gardent l'accès ouvert par défaut (comportement historique,
+    inchangé) ; un client, lui, n'a PAS accès par défaut — un client ne voit
+    et n'accède qu'à ce qu'une restriction l'inclut explicitement (par id ou
+    par rôle). Un utilisateur sans membership pour cet office (ne devrait pas
+    arriver : tous les appelants vérifient déjà l'appartenance en amont) est
+    traité comme un client, par défaut fermé plutôt qu'ouvert."""
+    membership = user.memberships.filter(office=office).first()
+    if membership is not None and membership.role == "superadmin":
+        return True
     restriction = _nearest_restriction(dataroom, folder=folder, document=document)
     if restriction is not None:
-        return user.id in restriction.user_ids
-    membership = user.memberships.filter(office=office).first()
+        return user.id in restriction.user_ids or (
+            membership is not None and membership.role in restriction.allowed_roles
+        )
     return membership is not None and membership.role != "client"
 
 def _subtree_has_accessible_content(user, office, dataroom, folder=None):
@@ -884,37 +945,64 @@ def _level_visible(user, office, dataroom, folder=None):
         user, office, dataroom, folder=folder
     )
 
+# Rôles listables dans une restriction d'accès — JAMAIS "superadmin" (bypass
+# systématique dans _user_can_access, pas un rôle qu'on coche : le lister ici
+# n'aurait aucun effet, laisser croire le contraire serait trompeur). Même
+# ensemble utilisé pour AccessRestriction.allowed_roles ET TemplateFolder.
+# allowed_roles (voir _clean_access_roles).
+ACCESS_ROLES = {"admin", "membre", "client"}
+
+def _clean_access_roles(raw_roles):
+    """Filtre `raw_roles` à ACCESS_ROLES, silencieusement (même défense en
+    profondeur que le filtrage de user_ids ci-dessous) — un rôle inconnu ou
+    "superadmin" n'empêche pas l'enregistrement, il est juste ignoré plutôt
+    que de faire échouer toute la requête."""
+    if not isinstance(raw_roles, list):
+        return []
+    seen = []
+    for role in raw_roles:
+        if role in ACCESS_ROLES and role not in seen:
+            seen.append(role)
+    return seen
+
 def _get_restriction_row(**target):
     return AccessRestriction.objects.filter(**target).first()
 
-def _current_user_ids(**target):
+def _current_restriction_state(**target):
     row = _get_restriction_row(**target)
-    return row.user_ids if row else []
+    if row is None:
+        return {"user_ids": [], "allowed_roles": []}
+    return {"user_ids": row.user_ids, "allowed_roles": row.allowed_roles}
 
-def _set_restriction(office, user_ids, **target):
-    """Remplace la liste d'utilisateurs autorisés pour `target` (dataroom=/folder=/
-    document=, exactement un). Ne conserve que des ids correspondant à de vrais
-    OfficeMembership de cet office (défense en profondeur contre un id arbitraire côté
-    client — silencieusement ignoré plutôt que rejeté, l'UI ne propose de toute façon
-    que des membres réels). Liste vide après filtrage => supprime la ligne plutôt que
-    de la laisser vide : repasser par "aucune restriction" (accès ouvert) est plus
-    explicite qu'une ligne "restreint à personne"."""
+def _set_restriction(office, user_ids, allowed_roles, **target):
+    """Remplace utilisateurs nommés ET rôles autorisés pour `target`
+    (dataroom=/folder=/document=, exactement un) — accès si l'un OU l'autre
+    critère est vrai (voir _user_can_access). Ne conserve que des ids
+    correspondant à de vrais OfficeMembership de cet office (défense en
+    profondeur contre un id arbitraire côté client — silencieusement ignoré
+    plutôt que rejeté, l'UI ne propose de toute façon que des membres réels) ;
+    `allowed_roles` passe par _clean_access_roles, même principe. Les DEUX
+    vides après filtrage => supprime la ligne plutôt que de la laisser dans
+    cet état : repasser par "aucune restriction" (accès ouvert) est plus
+    explicite qu'une ligne "restreint à personne et à aucun rôle"."""
     candidate_ids = {int(uid) for uid in user_ids if str(uid).lstrip('-').isdigit()}
     valid_ids = sorted(
         OfficeMembership.objects.filter(office=office, user_id__in=candidate_ids)
         .values_list('user_id', flat=True)
     )
+    valid_roles = _clean_access_roles(allowed_roles)
     row = _get_restriction_row(**target)
-    if not valid_ids:
+    if not valid_ids and not valid_roles:
         if row is not None:
             row.delete()
-        return []
+        return {"user_ids": [], "allowed_roles": []}
     if row is None:
-        AccessRestriction.objects.create(user_ids=valid_ids, **target)
+        AccessRestriction.objects.create(user_ids=valid_ids, allowed_roles=valid_roles, **target)
     else:
         row.user_ids = valid_ids
+        row.allowed_roles = valid_roles
         row.save()
-    return valid_ids
+    return {"user_ids": valid_ids, "allowed_roles": valid_roles}
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -935,9 +1023,12 @@ def dataroom_access_view(request, dataroom_id):
         return error
 
     if request.method == 'POST':
-        user_ids = _set_restriction(office, request.data.get('user_ids') or [], dataroom=dataroom)
-        return Response({"user_ids": user_ids})
-    return Response({"user_ids": _current_user_ids(dataroom=dataroom)})
+        state = _set_restriction(
+            office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
+            dataroom=dataroom,
+        )
+        return Response(state)
+    return Response(_current_restriction_state(dataroom=dataroom))
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -957,9 +1048,12 @@ def folder_access_view(request, dataroom_id, folder_id):
         return Response({"error": "dossier introuvable"}, status=404)
 
     if request.method == 'POST':
-        user_ids = _set_restriction(office, request.data.get('user_ids') or [], folder=folder)
-        return Response({"user_ids": user_ids})
-    return Response({"user_ids": _current_user_ids(folder=folder)})
+        state = _set_restriction(
+            office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
+            folder=folder,
+        )
+        return Response(state)
+    return Response(_current_restriction_state(folder=folder))
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -979,9 +1073,12 @@ def document_access_view(request, dataroom_id, document_id):
         return Response({"error": "document introuvable"}, status=404)
 
     if request.method == 'POST':
-        user_ids = _set_restriction(office, request.data.get('user_ids') or [], document=document)
-        return Response({"user_ids": user_ids})
-    return Response({"user_ids": _current_user_ids(document=document)})
+        state = _set_restriction(
+            office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
+            document=document,
+        )
+        return Response(state)
+    return Response(_current_restriction_state(document=document))
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1018,6 +1115,7 @@ def access_restrictions_view(request):
             "target_id": target_id,
             "label": label,
             "user_ids": r.user_ids,
+            "allowed_roles": r.allowed_roles,
         })
     return Response(results)
 
@@ -1138,6 +1236,36 @@ def folders_view(request, dataroom_id):
             if _user_can_access(request.user, office, dataroom, folder=parent, document=d)
         ],
     })
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def folder_detail_view(request, dataroom_id, folder_id):
+    """Renommage d'un vrai dossier — même gate _manager_role que folder_access_view
+    (les droits d'accès et le nom sont tous deux des réglages de gestion d'office,
+    pas un usage courant), même scoping 404 que _resolve_folder (un folder_id valide
+    mais d'une AUTRE dataroom n'est pas accepté). Pas de DELETE : aucune suppression
+    de dossier n'existe ailleurs dans cette API, non demandé ici non plus."""
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    dataroom, error = _dataroom_or_404(dataroom_id)
+    if error:
+        return error
+    try:
+        folder = Folder.objects.get(pk=folder_id, dataroom=dataroom)
+    except Folder.DoesNotExist:
+        return Response({"error": "dossier introuvable"}, status=404)
+
+    if 'name' in request.data:
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            return Response({"error": "nom requis"}, status=400)
+        folder.name = name
+        folder.save()
+    return Response({"id": folder.id, "name": folder.name, "parent": folder.parent_id})
 
 # Recherche globale. Le seuil est à 1 : on cherche dès la première lettre (demandé le
 # 31/08/2026 — attendre le deuxième caractère donnait l'impression d'un champ mort).
@@ -1465,7 +1593,8 @@ def _serialize_template(t):
 
 def _serialize_template_folder(f):
     return {
-        "id": f.id, "name": f.name, "parent": f.parent_id, "visible_to_roles": f.visible_to_roles,
+        "id": f.id, "name": f.name, "parent": f.parent_id,
+        "allowed_roles": f.allowed_roles, "user_ids": f.user_ids,
     }
 
 def _template_or_404(template_id):
@@ -1485,18 +1614,19 @@ def _resolve_template_folder(template, raw_folder_id):
     except TemplateFolder.DoesNotExist:
         raise _FolderNotFound
 
-def _clean_roles(raw_roles):
-    """Filtre `raw_roles` aux seules clés valides de OfficeMembership.ROLE_RANK,
-    silencieusement (même défense en profondeur que _set_restriction pour
-    user_ids) — un rôle inconnu envoyé par erreur n'empêche pas la création, il
-    est juste ignoré plutôt que de faire échouer toute la requête."""
-    if not isinstance(raw_roles, list):
+def _clean_template_user_ids(office, raw_ids):
+    """Même filtrage que _set_restriction pour user_ids, appliqué à
+    TemplateFolder.user_ids : seuls des ids correspondant à de vrais
+    OfficeMembership de CET office sont retenus — le tenant est déjà celui de
+    l'office au moment de la saisie, pas besoin d'une résolution différée
+    comme pour les rôles à l'application du template."""
+    if not isinstance(raw_ids, list):
         return []
-    seen = []
-    for role in raw_roles:
-        if role in OfficeMembership.ROLE_RANK and role not in seen:
-            seen.append(role)
-    return seen
+    candidate_ids = {int(uid) for uid in raw_ids if str(uid).lstrip('-').isdigit()}
+    return sorted(
+        OfficeMembership.objects.filter(office=office, user_id__in=candidate_ids)
+        .values_list('user_id', flat=True)
+    )
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -1573,9 +1703,11 @@ def template_folders_view(request, template_id):
             parent = _resolve_template_folder(template, request.data.get('parent'))
         except _FolderNotFound:
             return Response({"error": "dossier parent introuvable"}, status=400)
-        visible_to_roles = _clean_roles(request.data.get('visible_to_roles') or [])
+        allowed_roles = _clean_access_roles(request.data.get('allowed_roles') or [])
+        user_ids = _clean_template_user_ids(office, request.data.get('user_ids') or [])
         folder = TemplateFolder.objects.create(
-            template=template, parent=parent, name=name, visible_to_roles=visible_to_roles
+            template=template, parent=parent, name=name,
+            allowed_roles=allowed_roles, user_ids=user_ids,
         )
         return Response(_serialize_template_folder(folder), status=201)
 
@@ -1612,8 +1744,10 @@ def template_folder_detail_view(request, template_id, folder_id):
         if not name:
             return Response({"error": "nom requis"}, status=400)
         folder.name = name
-    if 'visible_to_roles' in request.data:
-        folder.visible_to_roles = _clean_roles(request.data.get('visible_to_roles') or [])
+    if 'allowed_roles' in request.data:
+        folder.allowed_roles = _clean_access_roles(request.data.get('allowed_roles') or [])
+    if 'user_ids' in request.data:
+        folder.user_ids = _clean_template_user_ids(office, request.data.get('user_ids') or [])
     folder.save()
     return Response(_serialize_template_folder(folder))
 

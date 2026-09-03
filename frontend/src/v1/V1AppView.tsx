@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, LoginScreen } from '../components';
-import { DATAROOM_TEMPLATES, MODULE_CATALOG } from '../data/demo';
+import { MODULE_CATALOG } from '../data/demo';
 import { useDatarooms } from '../hooks/useDatarooms';
 import { useSession } from '../hooks/useSession';
 import { useTenantTheme } from '../theme/useTenantTheme';
@@ -123,7 +123,6 @@ export function V1AppView() {
       contentNote="Ces réglages n'ont pas encore d'endpoint côté serveur : la saisie reste locale à cette session. Seul l'onglet Apparence est réellement enregistré (/api/tenant-theme/)."
       modules={{
         modules: modulesWithServerState,
-        templates: DATAROOM_TEMPLATES,
         readOnly: true,
         readOnlyNote:
           "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",

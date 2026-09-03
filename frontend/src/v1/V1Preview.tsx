@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DATAROOM_TEMPLATES, DEMO_OFFICE, MODULE_CATALOG } from '../data/demo';
+import { DEMO_OFFICE, MODULE_CATALOG } from '../data/demo';
 import { EspaceNotarialV1 } from './EspaceNotarialV1';
 import {
   DEMO_OFFICE_CONTENT,
@@ -64,7 +64,6 @@ export function V1Preview({ initialScreen }: V1PreviewProps = {}) {
       contentNote="Maquette — les modifications restent dans cette page et ne sont pas envoyées au serveur."
       modules={{
         modules,
-        templates: DATAROOM_TEMPLATES,
         onToggleModule: (slug, next) =>
           setModules(prev => prev.map(m => (m.slug === slug ? { ...m, enabled: next } : m))),
       }}

@@ -1,36 +1,50 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Card } from '../atoms/Card';
 import { Screen } from '../atoms/Screen';
 import { SubscreenPanel } from '../atoms/SubscreenPanel';
 import { TabStrip } from '../molecules/TabStrip';
 import { AppearanceTab } from '../organisms/AppearanceTab';
 import { IdentityTab } from '../organisms/IdentityTab';
 import { ModulesTab } from '../organisms/ModulesTab';
+import type { ReactNode } from 'react';
 import type { TabDef } from '../molecules/TabStrip';
 import type { IdentityTabProps } from '../organisms/IdentityTab';
 import type { ModulesTabProps } from '../organisms/ModulesTab';
 import { useTopbarSlots } from '../templates/topbarSlots';
 
-export type SettingsTabKey = 'sub3-identite' | 'sub3-apparence' | 'sub3-modules';
+export type SettingsTabKey = 'sub3-identite' | 'sub3-apparence' | 'sub3-modules' | 'sub3-template';
 
 const TABS: TabDef[] = [
   { key: 'sub3-identite', icon: 'building', label: 'Identité' },
   { key: 'sub3-apparence', icon: 'layers', label: 'Apparence' },
-  { key: 'sub3-modules', icon: 'grid', label: 'Modules & modèles' },
+  { key: 'sub3-modules', icon: 'grid', label: 'Modules' },
+  { key: 'sub3-template', icon: 'clip', label: 'Template' },
 ];
 
 export interface SettingsScreenProps {
   identity: IdentityTabProps;
   modules: ModulesTabProps;
+  /**
+   * Gestion des modèles de dataroom (TemplatesListScreen ou TemplateDetailScreen
+   * selon ce que l'appelant a choisi d'afficher — App.tsx tranche seul via
+   * openTemplateId, cet écran ne fait qu'accueillir le résultat). Déplacé le
+   * 02/09/2026 depuis l'ancienne entrée de navigation top-level « Modèles de
+   * dossier » — voir CLAUDE.md. Absent dans les maquettes hors backend
+   * (UiKit, PrototypeDemo, V1) : ces vues n'ont pas de vrais Template à
+   * montrer, l'onglet affiche alors un simple message plutôt qu'un écran vide.
+   */
+  templatesTab?: ReactNode;
   defaultTab?: SettingsTabKey;
 }
 
-// Écran Personnalisation — index_16.html #screen-settings. Trois onglets :
+// Écran Personnalisation — index_16.html #screen-settings. Quatre onglets :
 // Identité (nom, sous-domaine, logo), Apparence (éditeur de design tokens
-// branché sur le ThemeProvider) et Modules & modèles.
+// branché sur le ThemeProvider), Modules et Template (gestion des modèles de
+// dataroom).
 // L'onglet Apparence ne prend pas de props : il lit et écrit directement le
 // moteur de thème, qui s'applique à toute l'application, pas à cet écran.
-export function SettingsScreen({ identity, modules, defaultTab = 'sub3-identite' }: SettingsScreenProps) {
+export function SettingsScreen({ identity, modules, templatesTab, defaultTab = 'sub3-identite' }: SettingsScreenProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(defaultTab);
   const slots = useTopbarSlots();
 
@@ -63,6 +77,17 @@ export function SettingsScreen({ identity, modules, defaultTab = 'sub3-identite'
 
       <SubscreenPanel level={3} active={activeTab === 'sub3-modules'}>
         <ModulesTab {...modules} />
+      </SubscreenPanel>
+
+      <SubscreenPanel level={3} active={activeTab === 'sub3-template'}>
+        {templatesTab ?? (
+          <Card padded style={{ maxWidth: 640 }}>
+            <div className="tiny dim">
+              La gestion des modèles de dataroom a besoin du backend — pas disponible dans
+              cette maquette.
+            </div>
+          </Card>
+        )}
       </SubscreenPanel>
     </Screen>
   );

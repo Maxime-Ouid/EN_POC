@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '../atoms/Button';
 import { Icon } from '../atoms/Icon';
-import { Screen } from '../atoms/Screen';
-import { TextInput } from '../atoms/TextInput';
-import { Toggle } from '../atoms/Toggle';
+import { Pill } from '../atoms/Pill';
 import { DocPanel } from '../molecules/DocPanel';
-import { Field } from '../molecules/Field';
 import { Explorer } from '../organisms/Explorer';
-import { OFFICE_ROLES, roleLabel } from '../organisms/officeRoles';
+import { visibleRolesFor, type VisibilityNode } from '../../access/templateVisibility';
 import type { TreeNodeData } from '../organisms/Explorer';
+import type { ReactNode } from 'react';
 
 export interface TemplateDetailScreenProps {
   templateName: string;
@@ -17,33 +15,52 @@ export interface TemplateDetailScreenProps {
       Template n'a pas de documents à la racine, contrairement à une dataroom
       réelle, voir useTemplateTree). */
   tree: TreeNodeData[];
-  /** Rôles voyant CE dossier par défaut une fois le modèle appliqué (visible_to_roles), par id. */
-  rolesByFolderId: Record<string, string[]>;
+  /**
+   * Rôles autorisés (`allowed_roles`) du DRAFT courant du tableau de droits,
+   * par id — pas nécessairement enregistré côté serveur : c'est ce qui permet
+   * aux pastilles de visibilité de refléter en direct un changement pas encore
+   * sauvegardé (voir CLAUDE.md, "État réel du code", 02/09/2026).
+   */
+  allowedRolesByFolderId: Record<string, string[]>;
   loading?: boolean;
   error?: string | null;
   canManage: boolean;
   onBackToList: () => void;
   /** `parentId` absent = dossier créé à la racine du modèle. */
   onCreateFolder: (parentId: string | undefined) => void;
-  onRenameFolder: (folderId: string, name: string) => void;
+  /** Ouvre le popup de renommage (menu "⋮" de l'arbre) — les droits restent dans `accessRightsTab`. */
+  onRenameFolder: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
-  onSetFolderRoles: (folderId: string, roles: string[]) => void;
+  /** Contenu du mode "Droits d'accès" (même `AccessRightsTable` que DataroomDetailScreen). */
+  accessRightsTab: ReactNode;
 }
+
+/** Adapte l'arbre de l'Explorer (TreeNodeData) au format attendu par
+    templateVisibility.ts, en piochant allowed_roles dans le draft courant. */
+function toVisibilityNodes(nodes: TreeNodeData[], allowedRolesByFolderId: Record<string, string[]>): VisibilityNode[] {
+  return nodes.map(node => ({
+    id: node.id,
+    allowedRoles: allowedRolesByFolderId[node.id] ?? [],
+    children: node.children ? toVisibilityNodes(node.children, allowedRolesByFolderId) : undefined,
+  }));
+}
+
+const ROLE_BADGE_LABEL: Record<string, string> = { admin: 'A', membre: 'M', client: 'C' };
 
 /**
  * Arborescence d'un modèle de dataroom (Template) — même organisme Explorer
- * que DataroomDetailScreen, mais un panneau latéral bien plus simple : pas de
- * documents, pas d'onglets Q&R/Membres/Historique (aucun de ces concepts
- * n'existe pour un Template). Sélectionner un dossier permet de le renommer,
- * de le supprimer, et de régler les rôles qui le verront par défaut une fois
- * le modèle appliqué — la résolution en utilisateurs réels ne se fait qu'à
- * ce moment-là (_apply_template, côté serveur), jamais ici.
+ * que DataroomDetailScreen. Deux modes plutôt que des onglets (pas de tabs
+ * existants sur cet écran) : "Arborescence" (navigation + pastilles de
+ * visibilité par rôle, calculées en direct depuis le draft du tableau) et
+ * "Droits d'accès" (le même `AccessRightsTable` que pour une vraie dataroom).
+ * Renommer un dossier passe par le menu "⋮" (RenameFolderModal, câblé par
+ * l'appelant), jamais par ce panneau — voir CLAUDE.md, 02/09/2026.
  */
 export function TemplateDetailScreen({
   templateName,
   templateDescription,
   tree,
-  rolesByFolderId,
+  allowedRolesByFolderId,
   loading,
   error,
   canManage,
@@ -51,44 +68,21 @@ export function TemplateDetailScreen({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
-  onSetFolderRoles,
+  accessRightsTab,
 }: TemplateDetailScreenProps) {
   const [activeId, setActiveId] = useState<string | undefined>(undefined);
-  const [draftName, setDraftName] = useState('');
+  const [mode, setMode] = useState<'tree' | 'access'>('tree');
 
   const activeNode = activeId ? findNode(tree, activeId) : undefined;
+  const visibilityNodes = toVisibilityNodes(tree, allowedRolesByFolderId);
 
-  // Un dossier supprimé (ou renommé sous un id différent, ce qui n'arrive
-  // jamais ici) disparaît de l'arbre au prochain rafraîchissement : la
-  // sélection retombe alors sur « rien », plutôt que de garder un id fantôme
-  // qui ferait pointer "Nouveau sous-dossier" vers un parent qui n'existe plus.
-  useEffect(() => {
-    if (activeId && !activeNode) setActiveId(undefined);
-  }, [activeId, activeNode]);
-
-  // Repart du nom serveur à chaque changement de sélection — pas de fuite d'un
-  // brouillon non enregistré d'un dossier à l'autre.
-  useEffect(() => {
-    setDraftName(activeNode?.label ?? '');
-  }, [activeNode?.id, activeNode?.label]);
-
-  const activeRoles = activeId ? (rolesByFolderId[activeId] ?? []) : [];
-
-  function saveName() {
-    if (!activeId) return;
-    const trimmed = draftName.trim();
-    if (!trimmed || trimmed === activeNode?.label) return;
-    onRenameFolder(activeId, trimmed);
-  }
-
-  function toggleRole(role: string, checked: boolean) {
-    if (!activeId) return;
-    const next = checked ? [...activeRoles, role] : activeRoles.filter(r => r !== role);
-    onSetFolderRoles(activeId, next);
+  function visibleRolesBadge(nodeId: string): string[] {
+    const node = findVisibilityNode(visibilityNodes, nodeId);
+    return node ? visibleRolesFor(node) : [];
   }
 
   return (
-    <Screen>
+    <>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <Button size="sm" variant="ghost" onClick={onBackToList}>
@@ -100,6 +94,14 @@ export function TemplateDetailScreen({
           </div>
           {templateDescription && <div className="tiny dim">{templateDescription}</div>}
         </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button size="sm" variant={mode === 'tree' ? 'primary' : 'default'} onClick={() => setMode('tree')}>
+            Arborescence
+          </Button>
+          <Button size="sm" variant={mode === 'access' ? 'primary' : 'default'} onClick={() => setMode('access')}>
+            Droits d'accès
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -108,94 +110,69 @@ export function TemplateDetailScreen({
         </div>
       )}
 
-      <div style={{ marginTop: 16 }}>
-        <Explorer tree={tree} activeId={activeId} onSelect={setActiveId} defaultOpenIds={tree.map(n => n.id)}>
-          <DocPanel
-            title={activeNode ? activeNode.label : 'Racine du modèle'}
-            actions={
-              canManage ? (
-                <>
-                  <Button size="sm" onClick={() => onCreateFolder(activeId)}>
-                    <Icon id="plus" />
-                    Nouveau sous-dossier
-                  </Button>
-                  {activeNode && (
-                    <Button size="sm" variant="ghost" onClick={() => onDeleteFolder(activeNode.id)}>
-                      Supprimer ce dossier
-                    </Button>
-                  )}
-                </>
-              ) : undefined
-            }
+      {mode === 'access' ? (
+        <div style={{ marginTop: 16 }}>{accessRightsTab}</div>
+      ) : (
+        <div style={{ marginTop: 16 }}>
+          <Explorer
+            tree={tree}
+            activeId={activeId}
+            onSelect={setActiveId}
+            defaultOpenIds={tree.map(n => n.id)}
+            onNodeMenu={canManage ? onRenameFolder : undefined}
+            renderNodeExtra={node => {
+              const roles = visibleRolesBadge(node.id);
+              if (!roles.length) return null;
+              return (
+                <span style={{ display: 'flex', gap: 3, marginLeft: 8 }}>
+                  {roles.map(role => (
+                    <Pill key={role} kind="neutral" icon={null}>
+                      {ROLE_BADGE_LABEL[role] ?? role}
+                    </Pill>
+                  ))}
+                </span>
+              );
+            }}
           >
-            {loading && <div className="tiny dim">Chargement de l'arborescence…</div>}
-
-            {!loading && !tree.length && (
-              <div className="tiny dim">
-                Ce modèle n'a encore aucun dossier. {canManage && 'Créez-en un à la racine.'}
-              </div>
-            )}
-
-            {!loading && !activeNode && tree.length > 0 && (
-              <div className="tiny dim">
-                Sélectionnez un dossier pour le renommer, régler ses rôles visibles, ou le
-                supprimer.
-              </div>
-            )}
-
-            {!loading && activeNode && (
-              <>
-                <Field label="Nom du dossier">
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <TextInput
-                      value={draftName}
-                      onChange={e => setDraftName(e.target.value)}
-                      disabled={!canManage}
-                    />
-                    {canManage && (
-                      <Button size="sm" onClick={saveName}>
-                        Enregistrer
+            <DocPanel
+              title={activeNode ? activeNode.label : 'Racine du modèle'}
+              actions={
+                canManage ? (
+                  <>
+                    <Button size="sm" onClick={() => onCreateFolder(activeId)}>
+                      <Icon id="plus" />
+                      Nouveau sous-dossier
+                    </Button>
+                    {activeNode && (
+                      <Button size="sm" variant="ghost" onClick={() => onDeleteFolder(activeNode.id)}>
+                        Supprimer ce dossier
                       </Button>
                     )}
-                  </div>
-                </Field>
+                  </>
+                ) : undefined
+              }
+            >
+              {loading && <div className="tiny dim">Chargement de l'arborescence…</div>}
 
-                <div style={{ marginTop: 16, fontWeight: 600 }}>Rôles visibles par défaut</div>
-                <div className="tiny dim" style={{ marginTop: 4 }}>
-                  Aucun rôle coché : ce dossier suit l'accès par défaut de l'office une fois le
-                  modèle appliqué (ouvert à tous sauf aux clients). Cocher un ou plusieurs
-                  rôles restreint ce dossier, à l'application du modèle, aux membres de
-                  l'office ayant l'un de ces rôles — la résolution en comptes réels se fait à
-                  ce moment-là, pas ici.
+              {!loading && !tree.length && (
+                <div className="tiny dim">
+                  Ce modèle n'a encore aucun dossier. {canManage && 'Créez-en un à la racine.'}
                 </div>
-                <div style={{ marginTop: 10, display: 'grid', gap: 2 }}>
-                  {OFFICE_ROLES.map(role => (
-                    <div
-                      key={role}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                        padding: '8px 0',
-                        borderBottom: '1px solid var(--border)',
-                      }}
-                    >
-                      <span>{roleLabel(role)}</span>
-                      <Toggle
-                        checked={activeRoles.includes(role)}
-                        disabled={!canManage}
-                        onChange={next => toggleRole(role, next)}
-                      />
-                    </div>
-                  ))}
+              )}
+
+              {!loading && tree.length > 0 && (
+                <div className="tiny dim">
+                  Les pastilles indiquent, pour chaque dossier, les rôles qui le verront une
+                  fois le modèle appliqué (calculé en direct depuis l'onglet "Droits
+                  d'accès", y compris les changements pas encore enregistrés). Le menu "⋮"
+                  renomme un dossier ; les droits se règlent dans l'onglet "Droits d'accès".
                 </div>
-              </>
-            )}
-          </DocPanel>
-        </Explorer>
-      </div>
-    </Screen>
+              )}
+            </DocPanel>
+          </Explorer>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -204,6 +181,17 @@ function findNode(nodes: TreeNodeData[], id: string): TreeNodeData | undefined {
     if (node.id === id) return node;
     if (node.children) {
       const found = findNode(node.children, id);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function findVisibilityNode(nodes: VisibilityNode[], id: string): VisibilityNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node.children) {
+      const found = findVisibilityNode(node.children, id);
       if (found) return found;
     }
   }

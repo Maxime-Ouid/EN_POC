@@ -16,7 +16,6 @@ import {
   CLIENT_USAGE,
   CONNECTED_USERS,
   DATAROOM_ROWS,
-  DATAROOM_TEMPLATES,
   DEMO_DATAROOM_DETAIL,
   DEMO_HOME_STATS,
   DEMO_OFFICE,
@@ -173,7 +172,6 @@ export function PrototypeDemo() {
           }}
           modules={{
             modules,
-            templates: DATAROOM_TEMPLATES,
             onToggleModule: (slug, next) =>
               setModules(prev => prev.map(m => (m.slug === slug ? { ...m, enabled: next } : m))),
           }}

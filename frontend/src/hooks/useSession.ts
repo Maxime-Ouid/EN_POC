@@ -5,7 +5,7 @@
 /* oxlint-disable react/set-state-in-effect */
 import { useCallback, useEffect, useState } from 'react';
 import { api, type OfficeMembership, type TenantConfig, type WhoAmI } from '../api/endpoints';
-import { ApiError } from '../api/client';
+import { ApiError, AUTH_EXPIRED_EVENT } from '../api/client';
 
 export interface SessionState {
   status: 'loading' | 'anonymous' | 'mfa-enroll' | 'mfa-verify' | 'authenticated' | 'error';
@@ -79,6 +79,21 @@ export function useSession() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // Depuis que la déconnexion ferme TOUTES les sessions de l'utilisateur
+  // (02/09/2026, voir CLAUDE.md), un onglet resté ouvert sur un autre office
+  // ne l'apprend qu'à son prochain appel API — AUTH_EXPIRED_EVENT (api/
+  // client.ts) est émis par apiFetch/apiFetchBlob sur un 401, quel que soit
+  // le hook qui a fait l'appel. On repasse alors directement en `anonymous`
+  // (pas besoin de rappeler whoami : le 401 le confirme déjà) plutôt que de
+  // laisser l'onglet bloqué sur l'erreur locale du seul appel qui a échoué.
+  useEffect(() => {
+    function handleAuthExpired() {
+      setState(prev => (prev.status === 'anonymous' ? prev : { ...INITIAL, status: 'anonymous' }));
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+  }, []);
 
   /** Rechargement déclenché par une action (connexion, changement d'office). */
   const refresh = useCallback(async () => {

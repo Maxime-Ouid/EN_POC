@@ -89,17 +89,16 @@ export interface DataroomDetailScreenProps {
   onAddDocuments?: (activeFolderId: string | undefined, files?: FileList) => void;
   /** Crée un dossier DANS le dossier actuellement affiché (racine si aucun n'est sélectionné). */
   onCreateFolder?: (activeFolderId: string | undefined) => void;
+  /** Ouvre le popup de renommage d'un dossier réel (menu "⋮" de l'arbre) —
+      les droits d'accès sont gérés séparément, voir `accessRightsTab`. */
+  onRenameFolder?: (folderId: string) => void;
   /**
-   * Ouvre la gestion des accès d'un objet. `id` est l'identifiant de l'arbre
-   * (dossier) ou du document ; il est absent pour la dataroom entière. L'écran
-   * ne sait pas quel id d'arbre représente la racine : c'est à l'appelant de le
-   * ramener au niveau dataroom s'il y a lieu — voir App.tsx / ROOT_NODE_ID.
+   * Contenu de l'onglet "Droits d'accès" (tableau `AccessRightsTable`, monté
+   * par l'appelant qui seul connaît les données réelles). Absent = l'onglet
+   * garde son ancien contenu de démonstration (`members`) — c'est le cas des
+   * aperçus du kit d'interface, qui n'ont pas d'office derrière eux.
    */
-  onManageAccess?: (target: {
-    kind: 'dataroom' | 'folder' | 'document';
-    id?: string;
-    label: string;
-  }) => void;
+  accessRightsTab?: React.ReactNode;
   onReply?: (qaId: string, text: string) => void;
   onDownloadDocument?: (documentId: string) => void;
   /**
@@ -154,7 +153,8 @@ export function DataroomDetailScreen({
   onBackToList,
   onAddDocuments,
   onCreateFolder,
-  onManageAccess,
+  onRenameFolder,
+  accessRightsTab,
   onReply,
   onDownloadDocument,
   renderDocumentPreview,
@@ -204,7 +204,7 @@ export function DataroomDetailScreen({
   const tabs: TabDef[] = [
     { key: 'sub-docs', icon: 'folder', label: 'Documents' },
     { key: 'sub-qa', icon: 'msg', label: 'Questions / Réponses', count: qaEntries.length },
-    { key: 'sub-members', icon: 'users', label: 'Membres & droits' },
+    { key: 'sub-members', icon: 'lock', label: 'Droits d\'accès' },
     { key: 'sub-history', icon: 'clock', label: 'Historique' },
   ];
 
@@ -273,17 +273,6 @@ export function DataroomDetailScreen({
             </svg>
             Export ZIP
           </Button>
-          {onManageAccess && (
-            <Button
-              size="sm"
-              onClick={() => onManageAccess({ kind: 'dataroom', label: dataroomName })}
-            >
-              <svg className="icon">
-                <use href="#i-lock" />
-              </svg>
-              Accès du dossier
-            </Button>
-          )}
           <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
             <svg className="icon">
               <use href="#i-plus" />
@@ -298,7 +287,13 @@ export function DataroomDetailScreen({
       <TabStrip tabs={tabs} active={activeTab} onChange={selectTab} />
 
       <Subscreen active={activeTab === 'sub-docs'}>
-        <Explorer tree={tree} activeId={activeFolderId} onSelect={selectFolder} defaultOpenIds={tree.map(n => n.id)}>
+        <Explorer
+          tree={tree}
+          activeId={activeFolderId}
+          onSelect={selectFolder}
+          defaultOpenIds={tree.map(n => n.id)}
+          onNodeMenu={onRenameFolder}
+        >
           <DocPanel
             title={activeFolderLabel}
             actions={
@@ -317,23 +312,6 @@ export function DataroomDetailScreen({
                   </svg>
                   Nouveau sous-dossier
                 </Button>
-                {onManageAccess && (
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      onManageAccess({
-                        kind: 'folder',
-                        id: activeFolderId,
-                        label: activeFolderLabel,
-                      })
-                    }
-                  >
-                    <svg className="icon">
-                      <use href="#i-lock" />
-                    </svg>
-                    Accès du sous-dossier
-                  </Button>
-                )}
                 <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
                   <svg className="icon">
                     <use href="#i-plus" />
@@ -393,32 +371,9 @@ export function DataroomDetailScreen({
                       <td className="mono dim">{doc.size}</td>
                       {doc.muted ? <td /> : (
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {onManageAccess && (
-                              // stopPropagation : la ligne entière ouvre le volet
-                              // document, ce bouton ne doit pas l'entraîner.
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                aria-label={`Accès de ${doc.name}`}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  onManageAccess({
-                                    kind: 'document',
-                                    id: doc.id,
-                                    label: doc.name,
-                                  });
-                                }}
-                              >
-                                <svg className="icon">
-                                  <use href="#i-lock" />
-                                </svg>
-                              </Button>
-                            )}
-                            <svg className="icon" style={{ color: 'var(--ink-400)' }}>
-                              <use href="#i-eye" />
-                            </svg>
-                          </div>
+                          <svg className="icon" style={{ color: 'var(--ink-400)' }}>
+                            <use href="#i-eye" />
+                          </svg>
                         </td>
                       )}
                     </tr>
@@ -456,39 +411,41 @@ export function DataroomDetailScreen({
       </Subscreen>
 
       <Subscreen active={activeTab === 'sub-members'}>
-        <div className="card">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Membre</th>
-                  <th>Groupe</th>
-                  <th>Droits</th>
-                  <th>Dernière connexion</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map(m => (
-                  <tr key={m.id}>
-                    <td className="row-name">
-                      <div className={m.gray ? 'avatar sm gray' : 'avatar sm'}>{m.initials}</div>
-                      {m.name}
-                    </td>
-                    <td>
-                      <Tag plain>{m.group}</Tag>
-                    </td>
-                    <td>
-                      <Pill kind={m.access.kind}>{m.access.label}</Pill>
-                    </td>
-                    <td className="dim">{m.lastLogin}</td>
-                    <RowMenu />
+        {accessRightsTab ?? (
+          <div className="card">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Membre</th>
+                    <th>Groupe</th>
+                    <th>Droits</th>
+                    <th>Dernière connexion</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {members.map(m => (
+                    <tr key={m.id}>
+                      <td className="row-name">
+                        <div className={m.gray ? 'avatar sm gray' : 'avatar sm'}>{m.initials}</div>
+                        {m.name}
+                      </td>
+                      <td>
+                        <Tag plain>{m.group}</Tag>
+                      </td>
+                      <td>
+                        <Pill kind={m.access.kind}>{m.access.label}</Pill>
+                      </td>
+                      <td className="dim">{m.lastLogin}</td>
+                      <RowMenu />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
       </Subscreen>
 
       <Subscreen active={activeTab === 'sub-history'}>

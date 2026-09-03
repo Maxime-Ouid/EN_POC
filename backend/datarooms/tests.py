@@ -5,6 +5,7 @@ from binascii import unhexlify
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.sessions.models import Session
 from django.core.management import call_command
 from django.db import connections
 from django.test import Client, RequestFactory, TestCase
@@ -847,6 +848,75 @@ class MfaLoginFlowTests(TestCase):
         self.assertEqual(whoami.status_code, 200)
         self.assertEqual(whoami.json(), {"username": "enrollee"})
 
+    def test_logout_invalidates_sessions_on_all_offices(self):
+        # Changement de comportement du 02/09/2026 (voir CLAUDE.md, "État réel
+        # du code") : la déconnexion ferme désormais TOUTES les sessions
+        # Django de l'utilisateur, pas seulement celle de l'office courant.
+        # Deux Client() INDÉPENDANTS simulent deux onglets sur deux offices
+        # réels (chaque office garde son propre cookie de session, voir
+        # "Architecture multi-tenant" — un seul Client ne pourrait pas porter
+        # les deux à la fois). ensure_tenant_registered (Host réel) mute
+        # connections.databases pour le second office — même piège déjà
+        # documenté ailleurs, nettoyé pareil.
+        second_host = "mfaoffice2.localhost:8000"
+        self.addCleanup(connections.databases.pop, tenant_alias("mfaoffice2"), None)
+        second_office = Office.objects.create(subdomain="mfaoffice2", name="MFA Office 2")
+        OfficeMembership.objects.create(user=self.user, office=second_office, role="membre")
+
+        device = TOTPDevice.objects.create(user=self.user, name="d", key=TEST_TOTP_KEY, confirmed=True)
+        code = valid_code_for(TEST_TOTP_KEY)
+
+        def _open_session(client, host):
+            client.post(
+                "/api/login/", {"username": "enrollee", "password": "pw123456"},
+                content_type="application/json", HTTP_HOST=host,
+            )
+            verify = client.post(
+                "/api/mfa/verify/", {"token": code}, content_type="application/json", HTTP_HOST=host,
+            )
+            self.assertEqual(verify.status_code, 200)
+            whoami = client.get("/api/whoami/", HTTP_HOST=host)
+            self.assertEqual(whoami.status_code, 200)
+            return client.session.session_key
+
+        tab_a = Client()
+        tab_b = Client()
+        session_key_a = _open_session(tab_a, self.HOST)
+        # django-otp refuse de revérifier le MÊME code une seconde fois pour un
+        # même dispositif (anti-rejeu : verify_token exige un compteur strictement
+        # supérieur à device.last_t, déjà avancé par la vérification de l'onglet
+        # A) — sans ce reset, l'onglet B échouerait sa MFA avec ce même `code`
+        # généré une seule fois pour tout le test.
+        device.last_t = -1
+        device.save()
+        session_key_b = _open_session(tab_b, second_host)
+
+        # Deux sessions bien distinctes, toutes les deux réellement présentes
+        # dans django.contrib.sessions.models.Session (base default, partagée
+        # — voir tenancy/router.py::SHARED_APPS) AVANT toute déconnexion.
+        self.assertNotEqual(session_key_a, session_key_b)
+        self.assertTrue(Session.objects.filter(pk=session_key_a).exists())
+        self.assertTrue(Session.objects.filter(pk=session_key_b).exists())
+
+        # Déconnexion depuis l'onglet A (office 1) UNIQUEMENT.
+        res = tab_a.post("/api/logout/", HTTP_HOST=self.HOST)
+        self.assertEqual(res.status_code, 200)
+
+        # La ligne Session de l'onglet B — jamais touché directement, "un
+        # autre office" au sens de la demande — a disparu elle aussi.
+        self.assertFalse(Session.objects.filter(pk=session_key_a).exists())
+        self.assertFalse(Session.objects.filter(pk=session_key_b).exists())
+
+        # Confirmé aussi côté observable, pas seulement en base : le prochain
+        # appel de l'onglet B échoue en 403 "Authentication credentials were
+        # not provided" (DRF, faute de session — c'est précisément ce que
+        # AUTH_EXPIRED_EVENT détecte côté front, voir api/client.ts) plutôt
+        # que de rester silencieusement authentifié.
+        res = tab_b.get("/api/whoami/", HTTP_HOST=second_host)
+        self.assertEqual(res.status_code, 403)
+        self.assertNotIn("error", res.json())
+        self.assertIn("detail", res.json())
+
 
 class OfficeUsersApiTests(TestCase):
     # Office/OfficeMembership/User vivent tous dans la base default (registre
@@ -1492,6 +1562,88 @@ class RoleBasedDefaultAccessTests(unittest.TestCase):
         self.assertEqual([d["id"] for d in data["documents"]], [self.doc_in_f1.id])
 
 
+class SuperadminAndRoleAccessTests(unittest.TestCase):
+    """Teste le changement du 02/09/2026 (voir CLAUDE.md, "État réel du code") :
+    _user_can_access gagne un bypass superadmin inconditionnel (avant toute
+    résolution de restriction) et AccessRestriction gagne allowed_roles, un
+    second critère d'accès indépendant de user_ids (rôle OU utilisateur nommé).
+    _nearest_restriction n'est pas touchée — ces tests portent uniquement sur
+    ce que _user_can_access décide UNE FOIS une restriction trouvée.
+
+    Même patron que RoleBasedDefaultAccessTests ci-dessus (unittest.TestCase
+    nu, tenant sqlite dédié migré/nettoyé par test)."""
+
+    SUBDOMAIN = "superadminaccess"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Superadmin Access Office")
+        self.addCleanup(self.office.delete)
+
+        self.superadmin_user = User.objects.create_user(username="supacc_superadmin", password="pw123456")
+        self.addCleanup(self.superadmin_user.delete)
+        OfficeMembership.objects.create(user=self.superadmin_user, office=self.office, role="superadmin")
+
+        self.admin_user = User.objects.create_user(username="supacc_admin", password="pw123456")
+        self.addCleanup(self.admin_user.delete)
+        OfficeMembership.objects.create(user=self.admin_user, office=self.office, role="admin")
+
+        self.membre_user = User.objects.create_user(username="supacc_membre", password="pw123456")
+        self.addCleanup(self.membre_user.delete)
+        OfficeMembership.objects.create(user=self.membre_user, office=self.office, role="membre")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="D")
+            self.doc = Document.objects.create(
+                dataroom=self.dataroom, folder=None, name="secret.pdf", file="fake/secret.pdf"
+            )
+            # Restriction n'incluant explicitement ni le superadmin (id absent de
+            # user_ids, "superadmin" absent — et interdit — de allowed_roles) ni le
+            # membre (rôle absent de allowed_roles) : seul admin y a accès.
+            AccessRestriction.objects.create(
+                document=self.doc, user_ids=[], allowed_roles=["admin"],
+            )
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def test_superadmin_bypasses_restriction_entirely(self):
+        # Le superadmin n'est ni dans user_ids ni représentable dans allowed_roles
+        # (ACCESS_ROLES l'exclut) — il garde pourtant l'accès, avant même que la
+        # restriction ne soit consultée.
+        self.client.force_login(self.superadmin_user)
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=self._host())
+        data = res.json()
+        self.assertEqual([d["id"] for d in data["documents"]], [self.doc.id])
+
+    def test_allowed_role_grants_access_without_user_ids(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=self._host())
+        data = res.json()
+        self.assertEqual([d["id"] for d in data["documents"]], [self.doc.id])
+
+    def test_role_not_in_allowed_roles_is_denied(self):
+        self.client.force_login(self.membre_user)
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=self._host())
+        data = res.json()
+        self.assertEqual(data["documents"], [])
+
+
 class DataroomTemplateTests(unittest.TestCase):
     """Teste le système de templates de dataroom (01/09/2026, voir CLAUDE.md,
     "État réel du code") : CRUD `Template`/`TemplateFolder` (`/api/templates/...`,
@@ -1566,7 +1718,7 @@ class DataroomTemplateTests(unittest.TestCase):
 
         res = self.client.post(
             f"/api/templates/{template_id}/folders/",
-            {"name": "Confidentiel client", "parent": root_tf_id, "visible_to_roles": ["admin", "membre"]},
+            {"name": "Confidentiel client", "parent": root_tf_id, "allowed_roles": ["admin", "membre"]},
             content_type="application/json", HTTP_HOST=host,
         )
         self.assertEqual(res.status_code, 201)
@@ -1586,11 +1738,14 @@ class DataroomTemplateTests(unittest.TestCase):
         self.assertEqual(data["folders"][0]["name"], "Pièces d'identité")
         real_root_id = data["folders"][0]["id"]
 
-        # Aucune restriction sur ce dossier (visible_to_roles vide au template).
+        # Aucune restriction sur ce dossier (allowed_roles vide au template).
         res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/{real_root_id}/access/", HTTP_HOST=host)
         self.assertEqual(res.json()["user_ids"], [])
+        self.assertEqual(res.json()["allowed_roles"], [])
 
-        # Sous-dossier : reproduit, ET restriction résolue exactement à admin+membre.
+        # Sous-dossier : reproduit, ET allowed_roles copié tel quel (admin+membre) —
+        # plus de résolution en user_ids réels depuis le changement de modèle du
+        # 02/09/2026 (AccessRestriction.allowed_roles natif).
         res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/?parent={real_root_id}", HTTP_HOST=host)
         data = res.json()
         self.assertEqual(len(data["folders"]), 1)
@@ -1598,9 +1753,8 @@ class DataroomTemplateTests(unittest.TestCase):
         real_sub_id = data["folders"][0]["id"]
 
         res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/{real_sub_id}/access/", HTTP_HOST=host)
-        self.assertEqual(
-            sorted(res.json()["user_ids"]), sorted([self.admin_user.id, self.membre_user.id])
-        )
+        self.assertEqual(res.json()["user_ids"], [])
+        self.assertEqual(sorted(res.json()["allowed_roles"]), ["admin", "membre"])
 
     def test_editing_template_after_creation_does_not_affect_existing_dataroom(self):
         self.client.force_login(self.admin_user)
@@ -1685,28 +1839,242 @@ class DataroomTemplateTests(unittest.TestCase):
         after = {d["id"] for d in res.json()}
         self.assertEqual(before, after)
 
-    def test_non_manager_cannot_create_dataroom(self):
-        # Régression explicite : créer une dataroom (avec ou sans template) est
-        # réservé admin/superadmin, pas ouvert à tout membre de l'office.
+    def test_client_cannot_create_dataroom_membre_can(self):
+        # Élargi le 02/09/2026 (voir CLAUDE.md, "État réel du code") : créer une
+        # dataroom (avec ou sans template) est ouvert à partir du rôle "membre"
+        # inclus — seul le rôle "client" reste refusé. _can_create_dataroom, pas
+        # _manager_role (qui reste, lui, le gate de tout le reste : Templates,
+        # utilisateurs, restrictions d'accès — voir test_manager_role_endpoints_
+        # unaffected_by_dataroom_creation_change ci-dessous).
         host = self._host()
 
-        self.client.force_login(self.membre_user)
+        self.client.force_login(self.client_user)
         res = self.client.post(
             "/api/datarooms/", {"name": "Refusé"}, content_type="application/json", HTTP_HOST=host
         )
         self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.json(), {"error": "réservé aux membres de cet office"})
 
-        self.client.force_login(self.client_user)
+        self.client.force_login(self.membre_user)
         res = self.client.post(
-            "/api/datarooms/", {"name": "Refusé aussi"}, content_type="application/json", HTTP_HOST=host
+            "/api/datarooms/", {"name": "Autorisé (membre)"}, content_type="application/json", HTTP_HOST=host
         )
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 201)
 
         self.client.force_login(self.admin_user)
         res = self.client.post(
-            "/api/datarooms/", {"name": "Autorisé"}, content_type="application/json", HTTP_HOST=host
+            "/api/datarooms/", {"name": "Autorisé (admin)"}, content_type="application/json", HTTP_HOST=host
         )
         self.assertEqual(res.status_code, 201)
+
+    def test_manager_role_endpoints_unaffected_by_dataroom_creation_change(self):
+        # Le seul gate assoupli est celui de POST /api/datarooms/ — la création
+        # de dossier/l'upload restent gatés par l'accès (_user_can_access, pas
+        # _manager_role, inchangé), et la gestion des Templates reste réservée
+        # admin/superadmin : un membre (qui peut désormais créer une dataroom)
+        # reste refusé ici, sans changement de comportement.
+        host = self._host()
+        self.client.force_login(self.membre_user)
+
+        res = self.client.post(
+            "/api/templates/", {"name": "Refusé"}, content_type="application/json", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_template_folder_allowed_roles_and_user_ids_round_trip(self):
+        # 02/09/2026 (voir CLAUDE.md) : TemplateFolder porte désormais allowed_roles
+        # ET user_ids, en miroir d'AccessRestriction — "superadmin" reste rejeté par
+        # _clean_access_roles même envoyé explicitement (jamais un rôle listable).
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.post(
+            "/api/templates/", {"name": "Miroir"}, content_type="application/json", HTTP_HOST=host
+        )
+        template_id = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/",
+            {
+                "name": "Dossier",
+                "allowed_roles": ["admin", "superadmin"],
+                "user_ids": [self.membre_user.id],
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        folder_id = res.json()["id"]
+        self.assertEqual(res.json()["allowed_roles"], ["admin"])
+        self.assertEqual(res.json()["user_ids"], [self.membre_user.id])
+
+        res = self.client.get(f"/api/templates/{template_id}/folders/", HTTP_HOST=host)
+        row = res.json()["folders"][0]
+        self.assertEqual(row["allowed_roles"], ["admin"])
+        self.assertEqual(row["user_ids"], [self.membre_user.id])
+
+        res = self.client.patch(
+            f"/api/templates/{template_id}/folders/{folder_id}/",
+            {"allowed_roles": [], "user_ids": []},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["allowed_roles"], [])
+        self.assertEqual(res.json()["user_ids"], [])
+
+    def test_apply_template_revalidates_user_ids_against_current_membership(self):
+        # Un id nommé au template, valide au moment de la saisie, ne doit plus être
+        # repris si l'utilisateur a quitté l'office entre-temps — _apply_template
+        # revalide contre les OfficeMembership RÉELS au moment de l'application,
+        # même défense en profondeur que _set_restriction (voir CLAUDE.md).
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        leaving_user = User.objects.create_user(username="templatetest_leaving", password="pw123456")
+        self.addCleanup(leaving_user.delete)
+        leaving_membership = OfficeMembership.objects.create(
+            user=leaving_user, office=self.office, role="membre"
+        )
+
+        res = self.client.post(
+            "/api/templates/", {"name": "Départ"}, content_type="application/json", HTTP_HOST=host
+        )
+        template_id = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/templates/{template_id}/folders/",
+            {"name": "Dossier", "user_ids": [leaving_user.id, self.membre_user.id]},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(sorted(res.json()["user_ids"]), sorted([leaving_user.id, self.membre_user.id]))
+
+        leaving_membership.delete()
+
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Après départ", "template_id": template_id},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        dataroom_id = res.json()["id"]
+
+        # Listé directement en base plutôt que via /folders/ : le dossier obtenu
+        # n'est visible qu'à membre_user (seul id restant dans user_ids après
+        # revalidation) — pas à admin_user, ni superadmin ici, ni dans
+        # allowed_roles — même limite déjà documentée pour l'isolation tenant
+        # (inspection directe plutôt que dépendre de la visibilité de chemin).
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            real_folder_id = Folder.objects.get(dataroom_id=dataroom_id).id
+        finally:
+            reset_current_tenant(token)
+
+        res = self.client.get(f"/api/datarooms/{dataroom_id}/folders/{real_folder_id}/access/", HTTP_HOST=host)
+        self.assertEqual(res.json()["user_ids"], [self.membre_user.id])
+
+
+class FolderRenameTests(unittest.TestCase):
+    """Teste folder_detail_view (02/09/2026, voir CLAUDE.md) : nouvel endpoint
+    PATCH pour renommer un vrai Folder — même gate _manager_role que
+    folder_access_view, même scoping 404 que _resolve_folder. Même patron que
+    RoleBasedDefaultAccessTests (unittest.TestCase nu, tenant sqlite dédié)."""
+
+    SUBDOMAIN = "folderrename"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Folder Rename Office")
+        self.addCleanup(self.office.delete)
+
+        self.admin_user = User.objects.create_user(username="folderrename_admin", password="pw123456")
+        self.addCleanup(self.admin_user.delete)
+        OfficeMembership.objects.create(user=self.admin_user, office=self.office, role="admin")
+
+        self.membre_user = User.objects.create_user(username="folderrename_membre", password="pw123456")
+        self.addCleanup(self.membre_user.delete)
+        OfficeMembership.objects.create(user=self.membre_user, office=self.office, role="membre")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="D")
+            self.folder = Folder.objects.create(dataroom=self.dataroom, parent=None, name="Avant")
+            self.other_dataroom = Dataroom.objects.create(name="Autre dataroom")
+            self.other_folder = Folder.objects.create(
+                dataroom=self.other_dataroom, parent=None, name="Ailleurs"
+            )
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def test_non_manager_gets_403(self):
+        self.client.force_login(self.membre_user)
+        res = self.client.patch(
+            f"/api/datarooms/{self.dataroom.id}/folders/{self.folder.id}/",
+            {"name": "Après"}, content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_folder_from_another_dataroom_is_404(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.patch(
+            f"/api/datarooms/{self.dataroom.id}/folders/{self.other_folder.id}/",
+            {"name": "Après"}, content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_manager_renames_folder(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.patch(
+            f"/api/datarooms/{self.dataroom.id}/folders/{self.folder.id}/",
+            {"name": "Après"}, content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["name"], "Après")
+
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=self._host())
+        self.assertEqual(res.json()["folders"][0]["name"], "Après")
+
+    def test_delete_not_exposed(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.delete(
+            f"/api/datarooms/{self.dataroom.id}/folders/{self.folder.id}/", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 405)
+
+    def test_dataroom_access_view_round_trips_allowed_roles(self):
+        # 02/09/2026 (voir CLAUDE.md) : dataroom_access_view/folder_access_view/
+        # document_access_view acceptent et renvoient désormais allowed_roles en
+        # plus de user_ids — round-trip vérifié ici, "superadmin" filtré.
+        self.client.force_login(self.admin_user)
+        host = self._host()
+
+        res = self.client.post(
+            f"/api/datarooms/{self.dataroom.id}/access/",
+            {"user_ids": [self.membre_user.id], "allowed_roles": ["admin", "superadmin"]},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["user_ids"], [self.membre_user.id])
+        self.assertEqual(res.json()["allowed_roles"], ["admin"])
+
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/access/", HTTP_HOST=host)
+        self.assertEqual(res.json()["user_ids"], [self.membre_user.id])
+        self.assertEqual(res.json()["allowed_roles"], ["admin"])
+
+        res = self.client.get("/api/access-restrictions/", HTTP_HOST=host)
+        row = next(r for r in res.json() if r["kind"] == "dataroom" and r["target_id"] == self.dataroom.id)
+        self.assertEqual(row["allowed_roles"], ["admin"])
 
 
 class HyperadminTests(unittest.TestCase):

@@ -132,14 +132,14 @@ function ScreenSpecimens() {
           { label: 'Personnalisation — Identité', node: (
             <ScreenPreview>
               <SettingsScreen identity={{ identity: { displayName: demo.DEMO_OFFICE.fullName, subdomain: demo.DEMO_OFFICE.subdomain } }}
-                modules={{ modules: demo.MODULE_CATALOG, templates: demo.DATAROOM_TEMPLATES }} />
+                modules={{ modules: demo.MODULE_CATALOG }} />
             </ScreenPreview>
           )},
           { label: 'Personnalisation — Apparence', node: (
             <ScreenPreview>
               <SettingsScreen defaultTab="sub3-apparence"
                 identity={{ identity: { displayName: demo.DEMO_OFFICE.fullName, subdomain: demo.DEMO_OFFICE.subdomain } }}
-                modules={{ modules: demo.MODULE_CATALOG, templates: demo.DATAROOM_TEMPLATES }} />
+                modules={{ modules: demo.MODULE_CATALOG }} />
             </ScreenPreview>
           )},
         ]}

@@ -42,6 +42,8 @@ export interface OfficeUsersScreenProps {
   onChangeRole?: (membershipId: number, role: string) => void;
   /** Retire l'appartenance à cet office. L'appelant confirme avant d'agir. */
   onRemoveUser?: (user: OfficeUserRowData) => void;
+  /** Ouvre la modale "Restrictions" (quelles restrictions nomment cet utilisateur). */
+  onShowRestrictions?: (user: OfficeUserRowData) => void;
   /**
    * Utilisateur connecté : sa propre ligne n'offre pas le retrait (le serveur le
    * refuse aussi — un gestionnaire seul se mettrait dehors sans recours).
@@ -72,6 +74,7 @@ export function OfficeUsersScreen({
   onAttachUser,
   onChangeRole,
   onRemoveUser,
+  onShowRestrictions,
   currentUsername,
 }: OfficeUsersScreenProps) {
   const match = useCallback(
@@ -150,13 +153,20 @@ export function OfficeUsersScreen({
               )}
             </td>
             <td>
-              {/* Pas de bouton sur sa propre ligne : le serveur refuse ce retrait,
-                  autant ne pas le proposer. */}
-              {canManage && onRemoveUser && row.username !== currentUsername && (
-                <Button size="sm" variant="ghost" onClick={() => onRemoveUser(row)}>
-                  Retirer
-                </Button>
-              )}
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                {canManage && onShowRestrictions && (
+                  <Button size="sm" variant="ghost" onClick={() => onShowRestrictions(row)}>
+                    Restrictions
+                  </Button>
+                )}
+                {/* Pas de bouton sur sa propre ligne : le serveur refuse ce retrait,
+                    autant ne pas le proposer. */}
+                {canManage && onRemoveUser && row.username !== currentUsername && (
+                  <Button size="sm" variant="ghost" onClick={() => onRemoveUser(row)}>
+                    Retirer
+                  </Button>
+                )}
+              </div>
             </td>
           </tr>
         ))}

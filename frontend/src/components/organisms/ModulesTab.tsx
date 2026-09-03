@@ -1,9 +1,5 @@
-import { Button } from '../atoms/Button';
 import { Card } from '../atoms/Card';
-import { Icon } from '../atoms/Icon';
 import { ModuleRow } from '../molecules/ModuleRow';
-import { TemplateOption } from '../molecules/TemplateOption';
-import type { DataroomTemplate } from '../molecules/TemplateOption';
 
 export interface ModuleEntry {
   /** Identifiant côté backend (Module.slug) — « coffre-fort », « confiance-rib »… */
@@ -21,28 +17,19 @@ export interface ModuleEntry {
 
 export interface ModulesTabProps {
   modules: ModuleEntry[];
-  templates: DataroomTemplate[];
   onToggleModule?: (slug: string, next: boolean) => void;
   /** Interrupteurs consultables mais inactifs (aucun endpoint d'activation). */
   readOnly?: boolean;
   /** Pourquoi ils sont inactifs — affiché sous le titre, obligatoire en pratique. */
   readOnlyNote?: string;
-  onCreateTemplate?: () => void;
-  onOpenTemplateMenu?: (id: string) => void;
 }
 
-// Personnalisation → Modules & modèles (index_16.html #sub3-modules). Les
-// modules activables correspondent au M2M Office.enabled_modules côté backend ;
-// les modèles de dataroom n'ont pas encore de modèle Django (voir CLAUDE.md).
-export function ModulesTab({
-  modules,
-  templates,
-  onToggleModule,
-  readOnly,
-  readOnlyNote,
-  onCreateTemplate,
-  onOpenTemplateMenu,
-}: ModulesTabProps) {
+// Personnalisation → Modules (index_16.html #sub3-modules). Les modules
+// activables correspondent au M2M Office.enabled_modules côté backend. Les
+// modèles de dataroom (Template/TemplateFolder) ont leur propre onglet
+// « Template » depuis le 02/09/2026 — voir CLAUDE.md ; cet onglet-ci ne
+// montre plus qu'eux, ce composant ne connaît donc plus la notion de modèle.
+export function ModulesTab({ modules, onToggleModule, readOnly, readOnlyNote }: ModulesTabProps) {
   return (
     <Card padded style={{ maxWidth: 640 }}>
       <div className="section-title" style={{ marginBottom: readOnlyNote ? 6 : 14 }}>
@@ -69,23 +56,6 @@ export function ModulesTab({
           last={i === modules.length - 1}
         />
       ))}
-
-      <div className="section-title" style={{ margin: '22px 0 12px' }}>
-        Modèles de dataroom
-      </div>
-      {templates.map(t => (
-        <TemplateOption
-          key={t.id}
-          icon={t.icon}
-          name={t.name}
-          desc={t.desc}
-          onMenu={() => onOpenTemplateMenu?.(t.id)}
-        />
-      ))}
-      <Button size="sm" style={{ marginTop: 4 }} onClick={onCreateTemplate}>
-        <Icon id="plus" />
-        Créer un modèle
-      </Button>
     </Card>
   );
 }

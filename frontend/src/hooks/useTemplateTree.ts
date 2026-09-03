@@ -9,7 +9,8 @@ import { api } from '../api/endpoints';
 export interface TemplateFolderTreeNode {
   id: number;
   name: string;
-  visible_to_roles: string[];
+  allowed_roles: string[];
+  user_ids: number[];
   children: TemplateFolderTreeNode[];
 }
 
@@ -46,7 +47,8 @@ export function useTemplateTree(templateId: number | null) {
           level.folders.map(async folder => ({
             id: folder.id,
             name: folder.name,
-            visible_to_roles: folder.visible_to_roles,
+            allowed_roles: folder.allowed_roles,
+            user_ids: folder.user_ids,
             children: await walk(folder.id),
           })),
         );
@@ -69,12 +71,27 @@ export function useTemplateTree(templateId: number | null) {
   );
 
   useEffect(() => {
+    // `templateId` passe de null à un id (ou d'un id à un autre) sur un
+    // re-rendu de l'appelant, pas un remontage du hook : sans ce reset,
+    // `loading` restait à sa valeur précédente (souvent déjà `false`) tout le
+    // temps de la marche récursive — un modèle à plusieurs dizaines de
+    // dossiers (chaque niveau étant un aller-retour réseau séparé) affichait
+    // alors « aucun dossier » de façon trompeuse le temps du chargement,
+    // avant de se corriger seul une fois la marche terminée. Repéré en
+    // vérifiant en Chrome réel le modèle « Vente immobilière — standard »
+    // (14 rubriques, 64 requêtes), invisible sur un petit modèle de test.
+    if (templateId === null) {
+      setState({ loading: false, error: null, tree: [] });
+      return;
+    }
+    setState(prev => ({ ...prev, loading: true, error: null }));
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [templateId, load]);
 
   const refresh = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true, error: null }));
     await load();
   }, [load]);
 
@@ -97,11 +114,15 @@ export function useTemplateTree(templateId: number | null) {
     [templateId, refresh],
   );
 
-  /** Remplace l'ensemble des rôles visibles (PATCH idempotent, pas d'ajout unitaire). */
-  const setFolderRoles = useCallback(
-    async (folderId: number, roles: string[]) => {
+  /** Remplace l'ensemble des droits (rôles ET utilisateurs nommés) d'un dossier
+      — PATCH idempotent, pas d'ajout unitaire. Utilisé par AccessRightsTable
+      (via App.tsx), un aller-retour par ligne modifiée à l'enregistrement. */
+  const setFolderAccess = useCallback(
+    async (folderId: number, allowedRoles: string[], userIds: number[]) => {
       if (templateId === null) return;
-      await api.updateTemplateFolder(templateId, folderId, { visible_to_roles: roles });
+      await api.updateTemplateFolder(templateId, folderId, {
+        allowed_roles: allowedRoles, user_ids: userIds,
+      });
       await refresh();
     },
     [templateId, refresh],
@@ -117,5 +138,5 @@ export function useTemplateTree(templateId: number | null) {
     [templateId, refresh],
   );
 
-  return { ...state, refresh, createFolder, renameFolder, setFolderRoles, removeFolder };
+  return { ...state, refresh, createFolder, renameFolder, setFolderAccess, removeFolder };
 }

@@ -201,12 +201,26 @@ class Document(models.Model):
         return self.name
 
 class AccessRestriction(models.Model):
-    """Restreint l'accès à un Dataroom/Folder/Document précis à une liste d'utilisateurs
-    — même patron que Dataroom/Folder/Document : vit dans la base tenant, absent de
-    SHARED_MODELS par conception (voir tenancy/router.py). Référence les utilisateurs par
-    id simple (JSONField, liste d'entiers), pas de ForeignKey vers User : User vit dans
-    la base default, une vraie FK cross-DB n'est pas possible avec ce mécanisme — même
-    contrainte déjà rencontrée pour Dataroom → Office.
+    """Restreint l'accès à un Dataroom/Folder/Document précis — même patron que
+    Dataroom/Folder/Document : vit dans la base tenant, absent de SHARED_MODELS
+    par conception (voir tenancy/router.py).
+
+    Deux critères d'accès, indépendants l'un de l'autre (accès si l'un OU
+    l'autre est vrai — voir views._user_can_access, changement du 02/09/2026) :
+    - `user_ids` (JSONField, liste d'entiers) — des utilisateurs nommés
+      individuellement. Pas de ForeignKey vers User : User vit dans la base
+      default, une vraie FK cross-DB n'est pas possible avec ce mécanisme —
+      même contrainte déjà rencontrée pour Dataroom → Office.
+    - `allowed_roles` (JSONField, liste parmi "admin"/"membre"/"client" —
+      JAMAIS "superadmin", voir plus bas) — n'importe quel membre de l'office
+      ayant l'un de ces rôles pour CET office, sans avoir à être nommé
+      individuellement.
+    Un superadmin a TOUJOURS accès, avant même de regarder cette ligne — pas
+    une case parmi d'autres dans `allowed_roles`, un court-circuit dans
+    views._user_can_access. C'est pour ça qu'"superadmin" n'apparaît jamais
+    dans `allowed_roles` (filtré par views._clean_access_roles même s'il est
+    envoyé explicitement) : le lister n'aurait aucun effet, laisser croire le
+    contraire serait trompeur.
 
     Exactement un des trois FK (dataroom/folder/document) est renseigné par ligne —
     invariant appliqué au niveau applicatif (views._set_restriction), pas par contrainte
@@ -216,10 +230,10 @@ class AccessRestriction(models.Model):
     PROCHE dans la hiérarchie qui s'applique (pas de fusion/union de plusieurs
     restrictions le long de la chaîne) — voir views._nearest_restriction. Absence de
     restriction sur toute la chaîne = accès ouvert à tout membre de l'office
-    (comportement par défaut, inchangé). Une liste `user_ids` vide n'existe pas en
-    pratique : voir views._set_restriction, qui supprime la ligne plutôt que de la
-    laisser vide (repasser par la case "aucune restriction" est plus explicite qu'une
-    ligne "restreint à personne")."""
+    (comportement par défaut, inchangé). `user_ids`/`allowed_roles` vides TOUS LES
+    DEUX n'existe pas en pratique : voir views._set_restriction, qui supprime la
+    ligne plutôt que de la laisser dans cet état (repasser par la case "aucune
+    restriction" est plus explicite qu'une ligne "restreint à personne")."""
     dataroom = models.OneToOneField(
         Dataroom, null=True, blank=True, on_delete=models.CASCADE, related_name="access_restriction"
     )
@@ -230,10 +244,11 @@ class AccessRestriction(models.Model):
         Document, null=True, blank=True, on_delete=models.CASCADE, related_name="access_restriction"
     )
     user_ids = models.JSONField(default=list)
+    allowed_roles = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         target = self.dataroom or self.folder or self.document
-        return f"Restriction sur {target} ({len(self.user_ids)} utilisateur(s))"
+        return f"Restriction sur {target} ({len(self.user_ids)} utilisateur(s), rôles {self.allowed_roles})"
 
 class Template(models.Model):
     """Structure de dossiers réutilisable pour créer des Dataroom pré-remplies —
@@ -259,19 +274,33 @@ class TemplateFolder(models.Model):
     nullable = racine du template, imbrication via self-FK, cascade sur les
     enfants à la suppression).
 
-    visible_to_roles (liste de rôles OfficeMembership.ROLE_RANK, JSONField) n'est
-    résolu en utilisateurs réels de l'office QU'AU MOMENT où le Template est
-    appliqué à une Dataroom (views._apply_template) — vide/absent = aucune
-    AccessRestriction créée pour le Folder obtenu, qui reste alors au
-    comportement d'accès par défaut selon le rôle (voir views._user_can_access,
-    changement du 01/09/2026 : ouvert pour membre/admin/superadmin, fermé pour
+    Porte EXACTEMENT le même modèle de droits qu'AccessRestriction, en miroir
+    (renommé le 02/09/2026, `visible_to_roles` → `allowed_roles`, ajout de
+    `user_ids`) — logique, puisque l'application du template (views.
+    _apply_template) copie ces deux champs directement sur l'AccessRestriction
+    du Folder réel obtenu :
+    - `allowed_roles` (liste parmi "admin"/"membre"/"client", jamais
+      "superadmin" — voir AccessRestriction) copié TEL QUEL, aucune
+      "résolution" nécessaire : AccessRestriction comprend nativement les
+      rôles depuis ce même jour.
+    - `user_ids` référence des membres de CET office (Template vit dans la
+      base tenant, donc déjà scopé à un office précis — contrairement à
+      AccessRestriction, pas besoin d'attendre l'application pour savoir de
+      quel office il s'agit). Re-vérifiés contre les OfficeMembership RÉELS
+      de l'office au moment de l'application (un utilisateur nommé ici peut
+      avoir quitté l'office entre-temps) — seule "résolution" encore
+      nécessaire, même défense en profondeur que views._set_restriction.
+    Les deux vides = aucune AccessRestriction créée pour le Folder obtenu, qui
+    reste alors au comportement d'accès par défaut selon le rôle (voir
+    views._user_can_access : ouvert pour membre/admin/superadmin, fermé pour
     client)."""
     template = models.ForeignKey(Template, on_delete=models.CASCADE, related_name="folders")
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="children"
     )
     name = models.CharField(max_length=255)
-    visible_to_roles = models.JSONField(default=list, blank=True)
+    allowed_roles = models.JSONField(default=list, blank=True)
+    user_ids = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return self.name

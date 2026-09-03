@@ -132,9 +132,15 @@ export interface FolderLevel {
   documents: DocumentSummary[];
 }
 
-/** Réponse GET/POST des endpoints d'accès (dataroom, dossier ou document). */
+/**
+ * Réponse GET/POST des endpoints d'accès (dataroom, dossier ou document).
+ * Accès si l'appelant figure dans `user_ids` OU si son rôle figure dans
+ * `allowed_roles` (superadmin toujours ouvert, hors de ces deux listes —
+ * voir CLAUDE.md, "État réel du code", 02/09/2026).
+ */
 export interface AccessRestrictionState {
   user_ids: number[];
+  allowed_roles: string[];
 }
 
 /** Une restriction active de l'office, avec libellé résolu — GET /api/access-restrictions/. */
@@ -145,6 +151,7 @@ export interface AccessRestrictionSummary {
   target_id: number;
   label: string;
   user_ids: number[];
+  allowed_roles: string[];
 }
 
 /**
@@ -202,15 +209,19 @@ export interface TemplateSummary {
 
 /**
  * Un nœud de l'arborescence d'un Template — GET/POST/PATCH/DELETE
- * /api/templates/<id>/folders/... `visible_to_roles` n'est résolu en
- * utilisateurs réels qu'au moment où le template est appliqué à une dataroom
- * (voir createDataroom) : ici, ce ne sont que des rôles, pas des ids.
+ * /api/templates/<id>/folders/... En miroir d'AccessRestriction (même
+ * critère double, rôle OU utilisateur nommé — voir CLAUDE.md, 02/09/2026) :
+ * `allowed_roles` est copié tel quel à l'application du template,
+ * `user_ids` est re-résolu contre les membres RÉELS de l'office à ce
+ * moment-là (voir createDataroom) — ici, les deux listes sont déjà
+ * directement exploitables, pas besoin de résolution différée côté front.
  */
 export interface TemplateFolderSummary {
   id: number;
   name: string;
   parent: number | null;
-  visible_to_roles: string[];
+  allowed_roles: string[];
+  user_ids: number[];
 }
 
 /** Contenu d'un niveau de l'arborescence d'un Template (racine si `parent` omis). */
@@ -408,33 +419,53 @@ export const api = {
       { method: 'POST', body: { name, parent: parentId ?? null } },
     ),
 
+  /** Renommage seul — les droits d'accès du dossier restent gérés via setFolderAccess. Réservé admin/superadmin. */
+  renameFolder: (dataroomId: number, folderId: number, name: string) =>
+    apiFetch<{ id: number; name: string; parent: number | null }>(
+      `/api/datarooms/${dataroomId}/folders/${folderId}/`,
+      { method: 'PATCH', body: { name } },
+    ),
+
   /** Restriction d'accès de la dataroom elle-même (pas un dossier/document précis). */
   getDataroomAccess: (dataroomId: number, signal?: AbortSignal) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/access/`, { signal }),
 
-  /** Réservé aux rôles admin/superadmin de l'office. `user_ids` vide = supprime la restriction (accès ouvert). */
-  setDataroomAccess: (dataroomId: number, userIds: number[]) =>
+  /**
+   * Réservé aux rôles admin/superadmin de l'office. Remplace la restriction
+   * dans son ENTIER (userIds ET allowedRoles) — pas un ajout unitaire. Les
+   * deux vides = supprime la restriction (accès ouvert, sauf client — voir
+   * CLAUDE.md).
+   */
+  setDataroomAccess: (dataroomId: number, state: { userIds: number[]; allowedRoles: string[] }) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/access/`, {
       method: 'POST',
-      body: { user_ids: userIds },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
     }),
 
   getFolderAccess: (dataroomId: number, folderId: number, signal?: AbortSignal) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/folders/${folderId}/access/`, { signal }),
 
-  setFolderAccess: (dataroomId: number, folderId: number, userIds: number[]) =>
+  setFolderAccess: (
+    dataroomId: number,
+    folderId: number,
+    state: { userIds: number[]; allowedRoles: string[] },
+  ) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/folders/${folderId}/access/`, {
       method: 'POST',
-      body: { user_ids: userIds },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
     }),
 
   getDocumentAccess: (dataroomId: number, documentId: number, signal?: AbortSignal) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/documents/${documentId}/access/`, { signal }),
 
-  setDocumentAccess: (dataroomId: number, documentId: number, userIds: number[]) =>
+  setDocumentAccess: (
+    dataroomId: number,
+    documentId: number,
+    state: { userIds: number[]; allowedRoles: string[] },
+  ) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/documents/${documentId}/access/`, {
       method: 'POST',
-      body: { user_ids: userIds },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
     }),
 
   /** Toutes les restrictions actives de l'office, libellé résolu — réservé admin/superadmin. */
@@ -532,18 +563,22 @@ export const api = {
     templateId: number,
     name: string,
     parentId?: number,
-    visibleToRoles?: string[],
+    allowedRoles?: string[],
+    userIds?: number[],
   ) =>
     apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/`, {
       method: 'POST',
-      body: { name, parent: parentId ?? null, visible_to_roles: visibleToRoles ?? [] },
+      body: {
+        name, parent: parentId ?? null,
+        allowed_roles: allowedRoles ?? [], user_ids: userIds ?? [],
+      },
     }),
 
-  /** Partiel : n'envoyer que ce qui change (name et/ou visible_to_roles). */
+  /** Partiel : n'envoyer que ce qui change (name, allowed_roles et/ou user_ids). */
   updateTemplateFolder: (
     templateId: number,
     folderId: number,
-    patch: { name?: string; visible_to_roles?: string[] },
+    patch: { name?: string; allowed_roles?: string[]; user_ids?: number[] },
   ) =>
     apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/${folderId}/`, {
       method: 'PATCH',

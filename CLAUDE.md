@@ -106,6 +106,10 @@ cd backend && python manage.py makemigrations && python manage.py migrate
 # Recréer les données de démo (idempotent, peut être relancé sans risque)
 cd backend && python manage.py seed_demo
 
+# Modèles de dataroom de démo (Template/TemplateFolder, idempotent) — hardcodé sur
+# officea/officeb, à relancer après seed_demo si besoin de les reposer
+cd backend && python manage.py seed_templates
+
 # Enregistrer/migrer la base SQLite de chaque office (à relancer après tout nouvel
 # Office créé — idempotent). Accepte --office=<subdomain> pour n'en cibler qu'un.
 cd backend && python manage.py migrate_all_tenants
@@ -231,16 +235,20 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   l'upload par extension (`datarooms/validators.py`, liste tirée de
   `EN_vision_AMOA_MVP_v0.5_fusionne.md` §4.7) — pas d'antivirus/analyse de contenu (§7.5
   du document de vision, hors périmètre POC).
-- `AccessRestriction` : quatrième modèle métier tenant (fait le 28/08/2026) — même
-  patron que `Dataroom`/`Folder`/`Document` (absent de `SHARED_MODELS`). Restreint
-  l'accès à UN Dataroom, Folder ou Document précis (`OneToOneField` nullable vers
-  chacun des trois, exactement un renseigné par ligne — invariant appliqué au niveau
-  applicatif, pas par contrainte SQL) à une liste d'utilisateurs. `user_ids`
-  (`JSONField`, liste d'entiers) référence les utilisateurs par id simple — pas de
-  `ForeignKey` vers `User` (base `default`, cross-DB impossible avec ce mécanisme,
-  même contrainte que `Dataroom` → `Office`). Héritage par la hiérarchie : une
-  restriction sur un `Folder` s'applique à tout son contenu imbriqué sauf si un niveau
-  plus profond porte sa propre restriction — c'est la restriction la PLUS PROCHE qui
+- `AccessRestriction` : quatrième modèle métier tenant (fait le 28/08/2026,
+  étendu le 03/09/2026) — même patron que `Dataroom`/`Folder`/`Document` (absent
+  de `SHARED_MODELS`). Restreint l'accès à UN Dataroom, Folder ou Document précis
+  (`OneToOneField` nullable vers chacun des trois, exactement un renseigné par
+  ligne — invariant appliqué au niveau applicatif, pas par contrainte SQL) selon
+  DEUX critères indépendants, l'un OU l'autre suffisant : `user_ids` (`JSONField`,
+  liste d'entiers — pas de `ForeignKey` vers `User`, base `default`, cross-DB
+  impossible avec ce mécanisme, même contrainte que `Dataroom` → `Office`) et
+  `allowed_roles` (`JSONField`, liste parmi `admin`/`membre`/`client` — jamais
+  `superadmin`, qui bypasse systématiquement toute restriction dans
+  `views._user_can_access`, avant même sa résolution : ni case ni colonne
+  Superadmin nulle part dans l'UI). Héritage par la hiérarchie : une restriction
+  sur un `Folder` s'applique à tout son contenu imbriqué sauf si un niveau plus
+  profond porte sa propre restriction — c'est la restriction la PLUS PROCHE qui
   s'applique (pas de fusion de plusieurs restrictions le long de la chaîne), voir
   `views._nearest_restriction`/`_user_can_access`. Absence de restriction sur toute la
   chaîne = accès ouvert par défaut, **mais depuis le 01/09/2026 uniquement pour les
@@ -248,27 +256,35 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
   part n'a désormais accès à RIEN par défaut (voir entrée dédiée du 01/09/2026 dans
   "État réel du code" pour le détail ; le comportement pour les autres rôles est
   inchangé, et `_nearest_restriction` elle-même n'a pas bougé).
-  Une liste `user_ids` vidée supprime la ligne plutôt que de la laisser vide (voir
-  `views._set_restriction`) : repasser par « aucune restriction » plutôt qu'une ligne
-  « restreint à personne ».
+  Les deux listes vidées ensemble suppriment la ligne plutôt que de la laisser
+  dans cet état (voir `views._set_restriction`) : repasser par « aucune
+  restriction » plutôt qu'une ligne « restreint à personne et à aucun rôle ».
 - `Template`/`TemplateFolder` : modèles métier tenant (fait
-  le 01/09/2026) — même patron que `Dataroom`/`Folder`/`Document`/
-  `AccessRestriction` (absents de `SHARED_MODELS`, pas de FK vers `Office`/`User`).
-  `Template` (`name`, `description`, `created_at`) est une structure de dossiers
-  RÉUTILISABLE, jamais liée à une dataroom précise. `TemplateFolder` (`template`
-  FK, `parent` self-FK nullable — même imbrication que `Folder`, `name`,
-  `visible_to_roles` JSONField liste de rôles) décrit un nœud de cette
-  arborescence ; `visible_to_roles` n'est résolu en utilisateurs réels de
-  l'office QU'AU MOMENT où le template est appliqué (`views._apply_template`),
-  vide/absent = pas de restriction créée pour ce dossier — le comportement
-  d'accès par défaut selon le rôle (voir l'entrée `AccessRestriction` ci-dessus,
-  01/09/2026) s'applique tel quel. **Copie ponctuelle, jamais un lien vivant** :
-  appliquer un `Template` à la création d'une `Dataroom` (`POST /api/datarooms/`
-  avec `template_id`) copie récursivement `TemplateFolder` en de vrais `Folder`
-  (et `AccessRestriction` pour les nœuds à `visible_to_roles` non vide) — aucune
-  référence n'est conservée vers le `Template` d'origine ensuite, modifier le
-  `Template` après coup n'affecte donc jamais les datarooms déjà créées à partir
-  d'une version antérieure (vérifié par test, voir "État réel du code").
+  le 01/09/2026, `TemplateFolder` étendu le 03/09/2026) — même patron que
+  `Dataroom`/`Folder`/`Document`/`AccessRestriction` (absents de `SHARED_MODELS`,
+  pas de FK vers `Office`/`User`). `Template` (`name`, `description`,
+  `created_at`) est une structure de dossiers RÉUTILISABLE, jamais liée à une
+  dataroom précise. `TemplateFolder` (`template` FK, `parent` self-FK nullable —
+  même imbrication que `Folder`, `name`) porte, en MIROIR exact
+  d'`AccessRestriction` depuis le 03/09/2026, `allowed_roles` (`JSONField`,
+  renommé depuis `visible_to_roles` — même sémantique) ET `user_ids`
+  (`JSONField`, nouveau) : les utilisateurs nommés sont désormais aussi une
+  option pour un template, pas seulement les rôles. `allowed_roles` est copié
+  TEL QUEL sur l'`AccessRestriction` obtenue à l'application du template ;
+  `user_ids`, lui, est re-résolu contre les `OfficeMembership` RÉELS de
+  l'office à CE moment-là (`views._apply_template`) — un id nommé au template
+  mais dont l'utilisateur a quitté l'office entre-temps est silencieusement
+  écarté, même défense en profondeur que `_set_restriction`. Les deux vides =
+  pas de restriction créée pour ce dossier — le comportement d'accès par défaut
+  selon le rôle (voir l'entrée `AccessRestriction` ci-dessus) s'applique tel
+  quel. **Copie ponctuelle, jamais un lien vivant** : appliquer un `Template` à
+  la création d'une `Dataroom` (`POST /api/datarooms/` avec `template_id`)
+  copie récursivement `TemplateFolder` en de vrais `Folder`
+  (et `AccessRestriction` pour les nœuds à `allowed_roles`/`user_ids` non vides)
+  — aucune référence n'est conservée vers le `Template` d'origine ensuite,
+  modifier le `Template` après coup n'affecte donc jamais les datarooms déjà
+  créées à partir d'une version antérieure (vérifié par test, voir "État réel
+  du code").
 - `HyperadminAccess` (fait le 01/09/2026) : marque un utilisateur comme
   hyperadmin Notantis — rôle TRANSVERSE à tous les offices, à ne pas confondre
   avec le rôle `superadmin` d'`OfficeMembership` (qui reste, lui, scopé à UN
@@ -1582,14 +1598,15 @@ session si le code a bougé.
     serveur qui répond 403 aux non-administrateurs (`_manager_role`, déjà en
     place côté backend), l'écran qui l'explique plutôt qu'une entrée qui
     disparaît sans dire pourquoi.
-  - **Écart assumé, hors périmètre de ce chantier** : `SettingsScreen` /
-    `ModulesTab` (Personnalisation) affiche déjà un onglet « Templates »
-    séparé, alimenté par `DATAROOM_TEMPLATES` (`data/demo.tsx`, données
-    figées, DISTINCT de `NEW_DATAROOM_TEMPLATES` retiré ci-dessus) — resté
-    inchangé, non demandé par ce chantier. Cet onglet reste donc doublement
-    obsolète (il affichait déjà un contenu figé avant même que `Template`
-    existe côté serveur) à côté du nouvel écran réel « Modèles de dossier » —
-    à corriger dans un chantier séparé si la confusion gêne en démo.
+  - **Écart noté ce jour-là, résolu le 02/09/2026** : `ModulesTab`
+    (Personnalisation) affichait déjà une section « Modèles de dataroom »
+    séparée, alimentée par `DATAROOM_TEMPLATES` (`data/demo.tsx`, données
+    figées, DISTINCT de `NEW_DATAROOM_TEMPLATES` retiré ci-dessus) — doublon
+    avec le nouvel écran réel. Recreusé et corrigé le jour même (voir "État
+    réel du code", 02/09/2026) : `DATAROOM_TEMPLATES` recréé en vrais
+    `Template`/`TemplateFolder` (`seed_templates`), section retirée de
+    `ModulesTab`, remplacée par un onglet « Template » dédié dans
+    Personnalisation.
   - **Vérifié en Chrome réel** (connexion `carla`, superadmin sur
     `officea.localhost`) : création d'un modèle à 2 niveaux (`Pieces
   identite` > `Confidentiel`, `visible_to_roles` réglé sur `Confidentiel` en
@@ -1615,6 +1632,460 @@ session si le code a bougé.
     `DataroomDetailScreen.tsx:185` — pour resynchroniser un état local
     depuis une prop qui change). `python manage.py test` (153/153, aucun
     changement backend dans ce chantier).
+
+- **✅ Fait le 02/09/2026 — création de dataroom élargie au rôle "membre"** :
+  `POST /api/datarooms/` était réservé admin/superadmin depuis le chantier
+  Templates (01/09/2026) — élargi pour inclure aussi "membre" ; "client" reste
+  seul rôle exclu. **Changement volontairement limité à ce seul endpoint** :
+  la création de dossier et l'upload dans une dataroom existante
+  (`folders_view`/`documents_view`) sont gatés par `_user_can_access`, pas par
+  un rang de rôle, et n'ont donc jamais été concernés par ce gate — inchangés.
+  La gestion des Templates, des utilisateurs et des restrictions d'accès
+  reste réservée admin/superadmin (`_manager_role`, inchangée) ; un test
+  dédié (`test_manager_role_endpoints_unaffected_by_dataroom_creation_change`)
+  vérifie explicitement qu'un membre — désormais autorisé à créer une
+  dataroom — reste refusé sur `POST /api/templates/`.
+  - **`_can_create_dataroom(user, office)`** (`views.py`, nouvelle fonction,
+    à côté de `_manager_role`) : seuil exprimé via `OfficeMembership.
+    ROLE_RANK["membre"]` plutôt qu'une liste de rôles en dur ou un nouveau
+    gate séparé — réutilise la même logique de rang que
+    `_roles_at_or_below`/`_validate_role_for_caller`, comme demandé.
+    `_manager_role` elle-même n'a pas bougé : les deux fonctions coexistent,
+    chacune gate un périmètre différent (création de dataroom vs. tout le
+    reste de la gestion d'office).
+  - Message d'erreur du POST changé de "réservé aux administrateurs de cet
+    office" à "réservé aux membres de cet office" — reflète le nouveau
+    périmètre plutôt que de laisser un message obsolète après l'élargissement.
+  - **⚠️ Périmètre non figé** : ce seuil ("membre" inclus, "client" exclu) est
+    la première itération demandée explicitement par l'utilisateur, mais
+    reste susceptible d'évoluer selon les retours à venir (par exemple, ouvrir
+    aussi aux clients pour un usage self-service, ou au contraire resserrer à
+    nouveau) — ne pas supposer ce seuil définitif dans un chantier futur sans
+    revérifier ici.
+  - **Tests** (`DataroomTemplateTests`, `datarooms/tests.py`) :
+    `test_non_manager_cannot_create_dataroom` renommé
+    `test_client_cannot_create_dataroom_membre_can` et son contenu changé pour
+    refléter le nouveau comportement (`membre` → `201`, `client` → `403` avec
+    le nouveau message, `admin` → `201` inchangé) ; nouveau test
+    `test_manager_role_endpoints_unaffected_by_dataroom_creation_change`
+    (ci-dessus). Suite complète : **154/154 tests verts** (153 existants,
+    1 renommé/modifié, 1 nouveau).
+  - Pas de changement frontend : `DataroomsListScreen`/`NewDataroomModal`
+    n'ont jamais gaté le bouton « Nouveau dossier » par rôle (c'est déjà le
+    serveur qui tranche) — un membre qui pouvait déjà ouvrir la modale peut
+    désormais aussi la valider avec succès, sans changement d'écran
+    nécessaire.
+
+- **✅ Fait le 02/09/2026 — la déconnexion ferme TOUTES les études ouvertes**
+  (changement de comportement, même bouton et même endpoint — pas de second
+  bouton) : jusqu'ici, `POST /api/logout/` n'appelait que `logout(request)`,
+  qui ne vide que `request.session` — la session de l'office COURANT
+  seulement, chaque office ayant son propre cookie (voir "Architecture
+  multi-tenant"). Un utilisateur ouvert sur plusieurs offices restait donc
+  connecté partout ailleurs après s'être « déconnecté ».
+  - **`logout_view`** (`views.py`) parcourt désormais
+    `django.contrib.sessions.models.Session` (base `default`, PARTAGÉE —
+    `tenancy/router.py::SHARED_APPS` — donc déjà visible depuis n'importe
+    quel office) et supprime toute ligne dont `_auth_user_id` décodé
+    correspond à l'utilisateur courant, AVANT d'appeler `logout(request)`
+    (qui reste inchangé, `flush()` sur une session déjà supprimée ne lève
+    rien). `_auth_user_id` n'est pas en clair dans la ligne (donnée
+    signée/sérialisée) : décoder chaque session est la seule façon de savoir
+    à qui elle appartient, pas de requête ORM directe possible. Sessions
+    déjà expirées ignorées (inutilisables de toute façon).
+  - **Message de confirmation corrigé** (`App.tsx`, `ConfirmModal` de
+    déconnexion) : disait auparavant l'inverse de ce qui se passe désormais
+    (« Vos autres études restent ouvertes ») — reformulé en avertissement
+    explicite (« Cette déconnexion ferme TOUTES vos études ouvertes, pas
+    seulement *<office courant>* »), avec une précision supplémentaire quand
+    l'utilisateur a plus d'un office (« un onglet resté ouvert sur un autre
+    office vous renverra à l'écran de connexion dès son prochain appel au
+    serveur »).
+  - **Onglet resté ouvert sur un autre office — corrigé un vrai angle mort,
+    pas seulement vérifié** : un onglet déjà authentifié qui ne rappelle pas
+    `/api/whoami/` (donc qui ne repasse jamais par le `catch` 401/403 déjà
+    présent dans `useSession.load`, lui seulement exécuté au montage) restait
+    auparavant bloqué sur l'erreur locale du premier appel API échoué après
+    une déconnexion ailleurs, sans jamais revenir à l'écran de connexion.
+    Corrigé par un événement global : `apiFetch`/`apiFetchBlob`
+    (`api/client.ts`) émettent `AUTH_EXPIRED_EVENT` sur toute réponse qui
+    révèle une session morte, et `useSession.ts` l'écoute pour repasser
+    directement en `anonymous`, quel que soit le hook qui a déclenché l'appel
+    et quel que soit l'écran affiché.
+    **Détection non triviale, vérifiée empiriquement plutôt que supposée** :
+    ce backend répond **403**, jamais 401, à un appel sans session valide —
+    DRF lève bien `NotAuthenticated` (401 par défaut) quand `IsAuthenticated`
+    échoue, mais `APIView.handle_exception` le rétrograde en 403 faute d'un
+    en-tête `WWW-Authenticate` (absent : `SessionAuthentication` seule est
+    configurée, `settings.REST_FRAMEWORK`). Ce même code 403 est aussi celui
+    de tous les refus métier volontaires (`_manager_role`/`_is_hyperadmin`/
+    `_can_create_dataroom`...), qu'il ne faut SURTOUT PAS confondre avec une
+    session morte — décider en déconnectant l'app entière serait une
+    régression bien pire que le bug corrigé. Distinction retenue : la FORME
+    du corps de réponse, pas seulement le code — DRF sérialise ses propres
+    exceptions en `{"detail": "..."}`, alors que toutes les vues de ce projet
+    répondent leurs refus métier à la main en `{"error": "..."}` (jamais
+    `detail`) ; un 403 avec `detail` et sans `error` ne peut donc venir que de
+    DRF, c'est-à-dire d'une session absente. 401 reste géré en plus par
+    prudence (jamais observé ici en pratique).
+  - **Tests** : `MfaLoginFlowTests.test_logout_invalidates_sessions_on_all_offices`
+    (nouveau) — deux `Client()` Django INDÉPENDANTS (un seul `Client` ne peut
+    pas porter deux sessions à la fois, chaque office ayant son propre cookie)
+    ouvrent chacun une vraie session MFA sur un office différent pour le même
+    utilisateur ; déconnexion via UN SEUL des deux ; vérifié que les DEUX
+    lignes `Session` ont disparu (pas seulement celle de l'onglet qui a
+    demandé la déconnexion), et que le prochain appel de l'autre onglet
+    répond bien `403` avec `detail` (pas `error`) — la forme exacte que
+    `AUTH_EXPIRED_EVENT` détecte côté front. Piège rencontré : django-otp
+    refuse de revérifier le MÊME code TOTP deux fois pour un même dispositif
+    (anti-rejeu, `verify_token` exige un compteur strictement supérieur à
+    `device.last_t`) — contourné en réinitialisant `last_t` entre les deux
+    connexions, comme le throttle anti-bruteforce l'est déjà ailleurs dans ce
+    fichier. Suite complète : **155/155 tests verts**.
+  - **Vérifié en Chrome réel, pas seulement en tests/curl** : `carla`
+    connectée simultanément sur `officea` (onglet A) et `officeb` (onglet B,
+    deux vraies sessions MFA) ; déconnexion depuis l'onglet A → modale avec
+    le nouveau texte (confirmé la clause supplémentaire "un onglet resté
+    ouvert..." présente pour un compte multi-offices) → redirection immédiate
+    vers l'écran de connexion sur A ; sur B, un simple clic de navigation
+    réutilisant des données déjà en cache (« Dossiers ») ne déclenche PAS de
+    nouvel appel réseau et ne prouve donc rien — un clic vers un écran encore
+    jamais visité cette session (« Annuaire de l'étude », déclenche
+    `useOfficeUsers` pour la première fois) force un VRAI appel réseau, qui
+    échoue en 403 et fait immédiatement retomber l'onglet B sur l'écran de
+    connexion, sans rechargement de page.
+
+- **✅ Fait le 02/09/2026 — Templates déplacés dans Personnalisation, maquette
+  figée remplacée par de vrais modèles** : trois changements liés.
+  - **Onglet « Modules & modèles » renommé « Modules »** (`SettingsScreen.tsx`)
+    — la partie « modèles » qu'il montrait (`ModulesTab`, section « Modèles de
+    dataroom » alimentée par `DATAROOM_TEMPLATES`, une maquette figée sans
+    équivalent en base) a disparu de cet onglet : `ModulesTabProps` perd
+    `templates`/`onCreateTemplate`/`onOpenTemplateMenu`, ce composant ne
+    connaît plus du tout la notion de modèle.
+  - **`DATAROOM_TEMPLATES` retiré**, mais seulement après avoir recréé son
+    contenu en vraies données : nouvelle commande `seed_templates`
+    (`backend/datarooms/management/commands/seed_templates.py`, même patron
+    que `seed_demo` — idempotent via `get_or_create`, hardcodée sur
+    officea/officeb, pas de `--office` comme `seed_office_content`) crée deux
+    `Template` par office, avec les mêmes intitulés que la maquette :
+    - « Vente immobilière — standard » (« 14 rubriques · diagnostics,
+      urbanisme, fiscalité… ») — la description de la maquette ne détaillait
+      pas la structure des 14 rubriques ; retrouvée dans l'Annexe A de
+      `EN_vision_AMOA_MVP_v0.5_fusionne.md` (arborescence de dataroom réelle
+      anonymisée, citée là-bas comme illustration du besoin de "templates
+      d'arborescence", §4.6) — exactement 14 catégories de premier niveau, ce
+      qui confirme la source. Un seul niveau de sous-dossiers repris de cette
+      annexe (63 `TemplateFolder` au total par office), pas les
+      sous-sous-dossiers ni les documents individuels de l'exemple, hors de
+      portée d'un `TemplateFolder`.
+    - « Dossier de divorce » (« Groupes Conjoint 1 / Conjoint 2 /
+      Magistrats ») — trois dossiers racine, rien de plus : la maquette ne
+      suggérait pas de sous-structure, aucune inventée.
+    Une fois vérifié (voir plus bas), `DATAROOM_TEMPLATES` a été retiré de
+    `data/demo.tsx`, ainsi que tout le code qui le consommait ENCORE dans le
+    vrai flux applicatif (App.tsx : la ligne `modules={{..., templates:
+    DATAROOM_TEMPLATES}}` passée à `SettingsScreen`, et une entrée fictive
+    « Modèles / <nom> » dans les résultats simulés de la palette ⌘K, qui
+    ouvrait la modale de création sans jamais mener à un vrai écran de
+    gestion). `PrototypeDemo.tsx`/`uikit/organisms.tsx`/`uikit/UiKit.tsx`/
+    `v1/V1AppView.tsx`/`v1/V1Preview.tsx` (maquettes hors backend) ont perdu
+    la même prop, sans backend à brancher derrière — `SettingsScreen.
+    templatesTab` y est simplement absent, affichant un message de repli
+    plutôt qu'un écran vide. `DataroomTemplate` (interface de
+    `TemplateOption.tsx`, qui ne typait plus que `DATAROOM_TEMPLATES`) retirée
+    avec elle ; `TemplateOption` (le composant lui-même) reste, toujours
+    utilisé par `NewDataroomModal`.
+  - **Nouvel onglet « Template »** (`SettingsScreen.tsx`, 4ᵉ onglet) —
+    accueille `TemplatesListScreen`/`TemplateDetailScreen`, déplacés depuis
+    l'ancienne entrée de navigation top-level « Modèles de dossier »
+    (`NAV_SECTIONS`, retirée). Toute la logique (hooks `useTemplates`/
+    `useTemplateTree`, état local, modales) reste dans `App.tsx`, inchangée
+    dans le fond — seul son point d'accroche change : un nouveau prop
+    `SettingsScreen.templatesTab` (`ReactNode`, optionnel) reçoit le JSX déjà
+    construit (liste ou détail, selon `openTemplateId`), calculé
+    inconditionnellement plutôt que gaté par `screen` — `SettingsScreen`
+    décide seule, via son onglet actif interne, quand l'afficher, exactement
+    comme `modules`/`identity` déjà toujours calculés pour tout l'écran
+    Personnalisation. `onOpen`/`onBackToList` ne touchent plus `screen`
+    (`setScreen('template')`/`navigate('templates')` supprimés) : seul
+    `openTemplateId` bascule entre liste et détail désormais.
+    `TemplatesListScreen`/`TemplateDetailScreen` ont perdu leur wrapper
+    `<Screen>` (devenu redondant, ce sont des onglets maintenant, pas des
+    écrans top-level — même sans lui, `SubscreenPanel` gère déjà l'affichage/
+    masquage).
+  - **⚠️ Bug latent trouvé et corrigé en vérifiant** (pas seulement observé) :
+    `useTemplateTree`/`useDataroomTree` ne remettaient `loading` à `true`
+    qu'à l'initialisation du hook, jamais quand `templateId`/`dataroomId`
+    passait de `null` à un id (ou d'un id à un autre) sur un re-rendu — ce qui
+    est justement le cas normal ici (`App.tsx` ne remonte jamais, seul
+    `openTemplateId`/`openDataroomId` change). Le temps de la marche
+    récursive de l'arborescence (un aller-retour réseau par niveau), l'écran
+    affichait donc à tort « Ce modèle n'a encore aucun dossier », avant de se
+    corriger seul une fois la marche terminée — invisible sur un petit arbre
+    (quelques dossiers, quelques centaines de ms), flagrant sur « Vente
+    immobilière — standard » (14 rubriques, 64 requêtes en cascade). Corrigé
+    dans les deux hooks : l'effet qui déclenche `load()` pose `loading: true`
+    AVANT de lancer la marche (et réinitialise proprement l'état à `id ===
+    null`), `refresh()` fait de même. `useDataroomTree` n'était pas dans le
+    périmètre demandé par ce chantier, mais partage EXACTEMENT le même bug —
+    resté invisible jusqu'ici faute d'une dataroom assez large pour
+    l'exposer ; une dataroom créée depuis le nouveau modèle "Vente
+    immobilière" (14 dossiers racine) l'aurait immédiatement révélé au premier
+    utilisateur qui l'ouvre, corrigé par la même occasion plutôt que laissé
+    en l'état.
+  - **Vérifié en Chrome réel** (`carla`, superadmin sur `officea.localhost`) :
+    plus d'entrée « Modèles de dossier » dans le menu top-level ; Personnalisation
+    affiche bien Identité/Apparence/Modules/Template ; onglet Modules sans
+    section modèles ; onglet Template — les trois modèles de l'office
+    (« Dossier de divorce », « Vente immobilière — standard », et un
+    « Test » préexistant sans rapport avec ce chantier) listés avec les bons
+    intitulés/descriptions ; ouverture de « Vente immobilière — standard »
+    reproduit bien les 14 rubriques avec leurs sous-dossiers (vérifié en
+    dépliant plusieurs branches, dont Diagnostics → ses 7 sous-dossiers) ;
+    création d'une dataroom depuis ce modèle via `NewDataroomModal` (les 3
+    vrais modèles + « Dataroom vide » proposés) → arborescence intégralement
+    reproduite en vrais `Folder` dans la dataroom obtenue. Données de test
+    nettoyées après vérification (dataroom supprimée en shell Django).
+  - **Vérifications automatisées** : `tsc -b`, `npm run check:ds` (184
+    fichiers, aucun écart nouveau), `npm run lint` (0 erreur, aucun nouvel
+    avertissement). `python manage.py test` — **155/155 tests verts**, aucun
+    changement de test nécessaire (le chantier ne touche aucun comportement
+    backend testé, `seed_templates` est une commande de données de démo, pas
+    une vue).
+
+- **✅ Fait le 03/09/2026 — droits d'accès unifiés (rôle OU utilisateur nommé),
+  bypass superadmin, refonte du tableau de droits, bug de chevron corrigé** :
+  chantier en 8 points, planifié puis implémenté en mode plan (voir la
+  demande utilisateur, non reproduite ici — le détail ci-dessous couvre tout
+  le périmètre livré).
+  - **Bug d'affichage corrigé — `Explorer.tsx`** : le chevron d'expansion
+    dépendait de `depth > 0 || !hasChildren` (`style={{visibility:'hidden'}}`
+    dès le premier niveau imbriqué, quel que soit le nombre d'enfants) — un
+    dossier à 2 niveaux ou plus n'affichait donc JAMAIS son chevron au-delà
+    de la racine. Corrigé en ne dépendant plus que de `hasChildren`. Resté
+    invisible jusqu'ici : aucun template/dataroom de démo n'avait de
+    sous-sous-dossier avant ce chantier. Vérifié en créant un dossier de test
+    à 3 niveaux (`Diagnostics > Amiante > Test chevron 3 niveaux`) dans le
+    modèle "Vente immobilière — standard" : chevron bien présent sur
+    `Amiante` (dossier intermédiaire, jusque-là toujours masqué), absent sur
+    la feuille — nettoyé après vérification.
+  - **Superadmin toujours ouvert — `_user_can_access`** (`views.py`) : un
+    utilisateur dont le rôle pour l'office courant est `superadmin` a accès
+    sans exception, retourné AVANT toute résolution de restriction
+    (`_nearest_restriction` n'est pas appelée du tout dans ce cas) — aucune
+    case ni colonne "Superadmin" nulle part dans l'UI, ce bypass n'est jamais
+    un réglage visible. `_nearest_restriction`/`_level_visible`/
+    `_subtree_has_accessible_content` n'ont pas été touchées : le bypass s'y
+    propage automatiquement puisqu'elles appellent déjà `_user_can_access` en
+    interne. Vérifié en Chrome réel (pas seulement en test) : restriction
+    `allowed_roles: ["client"]` posée sur un dossier réel (`carla` explicitement
+    absente de `user_ids` ET son rôle absent de `allowed_roles`) — `alice`
+    (admin, non-superadmin) perd bien l'accès à ce dossier après rechargement,
+    `carla` (superadmin) le garde.
+  - **Modèle de données — double critère d'accès, en miroir sur les deux
+    tables** : `AccessRestriction` (datarooms réelles) gagne `allowed_roles`
+    (`JSONField`, liste parmi `admin`/`membre`/`client` — jamais
+    `superadmin`, qui n'est pas un rôle listable mais un bypass systématique),
+    en plus de `user_ids` déjà existant. `TemplateFolder.visible_to_roles` est
+    RENOMMÉ `allowed_roles` (même sémantique, `RenameField` dans la migration
+    pour préserver l'historique plutôt qu'un remove+add) et gagne un nouveau
+    `user_ids` (`JSONField`) — les utilisateurs nommés deviennent une option
+    pour les templates aussi, résolus contre les membres RÉELS de l'office au
+    moment de la création de la dataroom (`_apply_template`, voir plus bas),
+    même mécanique que la résolution de rôle déjà en place. Migration
+    `0008_rename_visible_to_roles_templatefolder_allowed_roles_and_more.py`
+    (dépendance sur `0007_tag_template_office_is_active_and_more`),
+    `migrate_all_tenants` relancé.
+  - **`_user_can_access`** (nouvelle logique complète) :
+    ```python
+    membership = user.memberships.filter(office=office).first()
+    if membership is not None and membership.role == "superadmin":
+        return True
+    restriction = _nearest_restriction(dataroom, folder=folder, document=document)
+    if restriction is not None:
+        return user.id in restriction.user_ids or (
+            membership is not None and membership.role in restriction.allowed_roles
+        )
+    return membership is not None and membership.role != "client"
+    ```
+    Accès si l'appelant figure dans `user_ids` OU si son rôle figure dans
+    `allowed_roles` — les deux critères sont indépendants, ni l'un ni l'autre
+    n'est requis pour que l'autre s'applique. Le cas "aucune restriction
+    trouvée" (défaut par rôle du 01/09/2026) est inchangé.
+  - **`_apply_template` simplifiée** : `allowed_roles` d'un `TemplateFolder`
+    est copié TEL QUEL sur l'`AccessRestriction` du `Folder` réel obtenu — la
+    résolution rôle→ids qui existait avant ce chantier a disparu, devenue
+    inutile puisque `AccessRestriction` porte désormais `allowed_roles`
+    nativement. Seul `user_ids` continue d'être "résolu" — en réalité
+    re-filtré contre les `OfficeMembership` RÉELS de l'office au moment de
+    l'application (même défense en profondeur que `_set_restriction`) : un id
+    nommé au template mais dont l'utilisateur a quitté l'office entre-temps
+    est silencieusement écarté, vérifié par test dédié
+    (`test_apply_template_revalidates_user_ids_against_current_membership`).
+  - **`_clean_access_roles`/`ACCESS_ROLES`** (`views.py`, nouvelle fonction,
+    remplace l'ancienne `_clean_roles` qui n'avait qu'un seul usage avant ce
+    chantier — devenue `_clean_access_roles` et restreinte à
+    `{"admin", "membre", "client"}` au lieu de tout `OfficeMembership.
+    ROLE_RANK` : `"superadmin"` envoyé explicitement par un client mal
+    intentionné est silencieusement filtré, jamais accepté comme un rôle
+    listable). Sert aux DEUX modèles désormais (`_set_restriction` pour
+    `AccessRestriction`, `template_folders_view`/`template_folder_detail_view`
+    pour `TemplateFolder`).
+  - **`_set_restriction`/`_get_restriction_row`** étendues : portent
+    désormais `allowed_roles` en plus de `user_ids`, avec le même invariant
+    déjà en place — la ligne est supprimée plutôt que laissée dans un état
+    "restreint à personne et à aucun rôle" quand LES DEUX listes sont vides
+    après filtrage. `dataroom_access_view`/`folder_access_view`/
+    `document_access_view` (POST) acceptent désormais `user_ids` ET
+    `allowed_roles` ; GET/POST renvoient `{"user_ids": [...], "allowed_roles":
+    [...]}` sur les trois endpoints. `access_restrictions_view` inclut
+    `allowed_roles` dans chaque résultat.
+  - **Nouvel endpoint — renommer un vrai dossier** : `PATCH
+    /api/datarooms/<dataroom_id>/folders/<folder_id>/` (`folder_detail_view`,
+    nouveau — aucun endpoint de renommage n'existait pour un `Folder` réel
+    avant ce chantier, seulement pour un `TemplateFolder`). Même gate
+    `_manager_role` que `folder_access_view`, même scoping 404 que
+    `_resolve_folder` (un `folder_id` valide mais d'une AUTRE dataroom est
+    404, pas 403). PATCH partiel, `name` uniquement — pas de `DELETE`,
+    aucune suppression de dossier n'existe ailleurs dans cette API.
+  - **Interface des droits d'accès — un seul composant réutilisé,
+    `components/organisms/AccessRightsTable.tsx`** (nouveau) : un TABLEAU,
+    pas un popup par élément, listant tous les dossiers/documents d'une
+    dataroom (ou tous les dossiers d'un Template) sur un seul écran — trois
+    colonnes de case Admin/Membre/Client (jamais Superadmin), un bouton
+    "Tout cocher" par colonne, une cellule "utilisateurs nommés" par ligne
+    (`<Select>` des membres pas déjà ajoutés à CETTE ligne + pills retirables,
+    réutilisant l'atome `Tag` en mode `plain` plutôt qu'une nouvelle pastille
+    — décision explicite du plan pour rester simple, pas d'auto-complétion
+    avancée). Composant CONTRÔLÉ, aucun état réseau interne : les
+    modifications restent locales jusqu'à un enregistrement explicite, pas de
+    requête réseau à chaque case cochée.
+  - **`hooks/useAccessRightsDraft.ts`** (nouveau) : hook générique de
+    brouillon, `Record<rowId, {allowedRoles, userIds}>`, resynchronisé depuis
+    `original` (paramètre du hook) via un effet — `original` DOIT être une
+    référence stable côté appelant (`useMemo` keyed sur les données serveur
+    réellement chargées), sans quoi chaque rendu écraserait le brouillon en
+    cours d'édition. `setRow`, `dirtyRowIds` (diff avec `original`), `reset`.
+    Utilisé deux fois dans `App.tsx` (une instance par écran, dataroom et
+    template), chacune avec son propre `original` et sa propre logique de
+    sauvegarde (`saveDataroomAccess`/`saveTemplateAccess`, un appel API par
+    ligne modifiée, un seul rafraîchissement final).
+  - **Menu "⋮" séparé, dédié au renommage** — `Explorer.tsx` gagne deux
+    nouvelles props génériques : `onNodeMenu?: (id) => void` (icône "⋮" après
+    le libellé, visible seulement si fourni, `stopPropagation`) et
+    `renderNodeExtra?: (node) => ReactNode` (slot après le libellé, utilisé
+    par l'éditeur de template pour les pastilles de rôle — voir plus bas).
+    Nouveau `components/organisms/RenameFolderModal.tsx` (générique,
+    `{open, currentName, error, onClose, onSubmit}`) — UNIQUEMENT le
+    renommage, jamais les droits d'accès qui restent dans le tableau. Un
+    seul popup, monté une fois hors des écrans dans `App.tsx` (comme le
+    `ConfirmModal` de déconnexion), branché sur `PATCH .../folders/<id>/`
+    (vraie dataroom) ou `PATCH /api/templates/<id>/folders/<id>/` (Template)
+    selon la cible.
+  - **`DataroomDetailScreen.tsx`** : les boutons "Accès du dossier"/"Accès du
+    sous-dossier"/cadenas par document ont disparu, remplacés par
+    `onRenameFolder` (câblé sur l'icône "⋮" de l'`Explorer`) et un nouveau
+    prop `accessRightsTab` (`ReactNode`, le tableau déjà construit par
+    l'appelant). L'onglet `sub-members` est renommé "Droits d'accès" (icône
+    `lock`) ; son ancien contenu (tableau de membres factices,
+    `MEMBERS`/`data/demo.tsx`) reste le CONTENU DE REPLI quand
+    `accessRightsTab` est absent — utilisé par `PrototypeDemo.tsx`/
+    `uikit/UiKit.tsx`, qui n'ont pas d'office réel derrière eux et n'ont
+    jamais passé `onManageAccess` (confirmé par grep avant de retirer la
+    prop). Le nœud racine synthétique de l'explorateur (`ROOT_NODE_ID`,
+    "Documents") n'a pas de sens à renommer — `App.tsx` filtre ce cas dans le
+    callback `onRenameFolder`, pas dans le composant.
+  - **`TemplateDetailScreen.tsx`** : le panneau latéral de bascule de rôles
+    (Toggle par rôle, un seul dossier à la fois) a disparu, remplacé par deux
+    boutons "Arborescence"/"Droits d'accès" qui basculent tout le contenu de
+    l'écran entre l'explorateur (comme avant, plus le menu "⋮") et le même
+    `AccessRightsTable` que pour une vraie dataroom. **Piège rencontré et
+    accepté** : `Explorer` étant démonté/remonté entre les deux modes (pas de
+    tabs existants sur cet écran, juste un ternaire), son état local
+    `openIds` (nœuds dépliés) ne survit pas à un aller-retour Arborescence ↔
+    Droits d'accès — comportement mineur, pas corrigé (aurait exigé de lever
+    l'état d'ouverture hors d'`Explorer`, hors du périmètre demandé).
+  - **`frontend/src/access/templateVisibility.ts`** (nouveau) : port
+    TypeScript pur de `_user_can_access`/`_subtree_has_accessible_content`/
+    `_level_visible`, restreint aux trois rôles listables et sans `user_ids`
+    (une case "utilisateur nommé" répond à "CET individu verra-t-il", pas "un
+    membre quelconque de rôle X verra-t-il" — décision explicite du plan,
+    seul `allowed_roles` alimente ce calcul). Recalculé à chaque rendu à
+    partir du DRAFT courant du tableau de droits (pas encore enregistré) :
+    `TemplateDetailScreen` passe `renderNodeExtra` à `Explorer`, qui affiche
+    une pastille par rôle pour lequel le nœud est visible. **Vérifié en
+    Chrome réel que la visibilité de CHEMIN se reflète bien en direct** :
+    restriction `Client` posée sur une feuille profonde (`Test chevron 3
+    niveaux`, sous `Amiante`, lui-même sous `Diagnostics`) → AVANT tout
+    enregistrement, `Amiante` (qui n'a pourtant aucune restriction directe)
+    affiche déjà les pastilles `A`, `M` ET `C` (visible pour Admin/Membre par
+    défaut, et pour Client via le chemin vers la feuille restreinte),
+    confirmé par lecture DOM (`.pill` de chaque `.tree-row`) : `{"amianteBadges":
+    ["A","M","C"],"leafBadges":["C"]}` — exactement le résultat attendu de
+    `_level_visible`/`_subtree_has_accessible_content` côté serveur, sans
+    aucun aller-retour réseau.
+  - **`App.tsx`** : `useAccessRestriction` (hook single-cible) et
+    `AccessRestrictionModal` retirés entièrement (fichier
+    `components/organisms/AccessRestrictionModal.tsx` supprimé) — remplacés
+    par `useAccessRestrictionsList` (déjà existant, désormais un VRAI
+    consommateur, voir point suivant) + les deux instances de
+    `useAccessRightsDraft`. Nouvelles fonctions module-level
+    `flattenDataroomAccessRows`/`buildDataroomAccessOriginal`/
+    `flattenTemplateAccessRows`/`buildTemplateAccessOriginal` (aplatissement
+    de l'arbre en lignes de tableau + construction de l'état "enregistré" à
+    partir soit de `access_restrictions_view` (dataroom, filtré au
+    `dataroom_id` courant), soit directement de `templateTree.tree` (Template
+    — `allowed_roles`/`user_ids` déjà portés par chaque nœud, aucun appel
+    réseau supplémentaire nécessaire). `officeUsers` élargi à `screen ===
+    'dataroom' || screen === 'settings'` (alimente le sélecteur d'utilisateurs
+    nommés des deux tableaux) ; `accessRestrictionsList` activé sur `screen
+    === 'dataroom' || screen === 'users'`.
+  - **Onglet "Restrictions" de la page Utilisateurs — construit pour de bon**
+    (`useAccessRestrictionsList` n'avait jamais eu de consommateur réel avant
+    ce chantier, malgré une entrée CLAUDE.md antérieure qui le décrivait déjà
+    — corrigé) : nouveau bouton "Restrictions" par ligne dans
+    `OfficeUsersScreen.tsx` (visible si `canManage`, à côté de "Retirer" —
+    contrairement à "Retirer", disponible même sur sa propre ligne : rien
+    n'empêche un gestionnaire de consulter ses propres restrictions), ouvrant
+    `components/organisms/UserRestrictionsModal.tsx` (nouveau) — liste TOUTES
+    les restrictions de l'office (`GET /api/access-restrictions/`), une case
+    à cocher par restriction (appartenance de CET utilisateur à `user_ids`,
+    enregistrée IMMÉDIATEMENT au clic — liste courte, un aller-retour par
+    case a été jugé acceptable plutôt qu'un brouillon groupé comme pour
+    `AccessRightsTable`) + un badge "Accès via le rôle" en LECTURE SEULE
+    (pas de case) quand le rôle de l'utilisateur ouvert figure déjà dans
+    `allowed_roles` de cette restriction — un rôle n'est pas un réglage par
+    utilisateur, la case ne doit pas laisser croire le contraire. Vérifié en
+    Chrome réel : coche/décoche sur une restriction préexistante
+    (`HOLA / Dossier lvl 2`) reflétée immédiatement sans re-fetch manuel,
+    revert après vérification.
+  - **Tests** (`backend/datarooms/tests.py`) : nouvelle classe
+    `SuperadminAndRoleAccessTests` (3 tests — bypass superadmin même exclu de
+    `user_ids`/`allowed_roles`, `allowed_roles` seul donne accès sans
+    `user_ids`, rôle absent de `allowed_roles` refusé), nouvelle classe
+    `FolderRenameTests` (5 tests — 403 non-gestionnaire, 404 dossier d'une
+    autre dataroom, renommage réussi, `DELETE` non exposé (405), round-trip
+    `allowed_roles` sur `dataroom_access_view`/`access_restrictions_view`),
+    3 nouveaux tests dans `DataroomTemplateTests` (round-trip
+    `allowed_roles`/`user_ids` sur `template_folders_view`/
+    `template_folder_detail_view` avec `"superadmin"` filtré, revalidation de
+    `user_ids` à l'application du template contre les membres réels,
+    correction des deux assertions de
+    `test_dataroom_from_template_reproduces_tree_and_resolves_role_restrictions`
+    qui attendaient encore l'ancienne résolution rôle→ids). Suite complète :
+    **165/165 tests verts** (155 existants + 10 nouveaux, aucune régression).
+  - **Vérifications frontend** : `tsc -b` (0 erreur), `npm run lint` (0
+    erreur ; 2 nouveaux avertissements `react/set-state-in-effect`, même
+    famille déjà tolérée ailleurs — `RenameFolderModal.tsx`/
+    `useAccessRightsDraft.ts`, resynchronisation d'un brouillon local depuis
+    une prop qui change), `npm run check:ds` (188 fichiers, aucun écart
+    nouveau), `npm run build` (`vite build` sans erreur).
+  - **Pas d'investigation de performance séparée dans ce chantier** (demande
+    explicite) — chaque ligne modifiée du tableau de droits déclenche un
+    appel réseau à l'enregistrement, pas par case cochée ; si une lenteur
+    perceptible subsiste sur un tableau très large (type "Vente immobilière
+    — standard", 63 lignes), elle sera traitée séparément le cas échéant.
 
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
@@ -1788,29 +2259,29 @@ couverture.
       `check:ds` (143 fichiers, aucun écart nouveau). Pas encore exercé dans un
       navigateur réel** — `vite build` et `oxlint` n'étant pas lançables depuis le
       sandbox Linux (binaires natifs installés pour Windows).
-- [x] Contrôle d'accès par utilisateur sur Dataroom/Folder/Document, avec héritage —
-      **backend fait le 28/08/2026** : modèle `AccessRestriction` (base tenant,
-      quatrième modèle métier après Dataroom/Folder/Document), accès ouvert par
-      défaut à tout l'office (**nuancé le 01/09/2026 : fermé par défaut pour le
-      rôle `client`, voir "État réel du code"**), restriction ponctuelle par
-      admin/superadmin à un niveau précis, héritée par le contenu imbriqué (la
-      restriction la plus proche dans la hiérarchie l'emporte, pas de fusion),
-      visibilité de chemin (`_subtree_has_accessible_content`/`_level_visible`)
-      calculée à chaque requête, lecture seulement (la création/l'upload restent
-      gatés par l'accès direct seul). **UI reconstruite le 30/08/2026** : modale
-      `organisms/AccessRestrictionModal.tsx`, ouverte depuis trois points de
-      `DataroomDetailScreen` — bouton « Accès du dossier » (niveau dataroom),
-      « Accès du sous-dossier » (dossier affiché), et une action cadenas sur chaque
-      ligne de document. La modale dit à l'écran les deux règles du backend que
-      l'interface pourrait faire mentir : aucune case cochée = accès OUVERT à toute
-      l'étude (et non « personne »), et la restriction la plus proche l'emporte,
-      le contenu imbriqué en héritant. Le nœud racine de l'explorateur étant
-      synthétique (`ROOT_NODE_ID`, pas un Folder côté serveur), y demander les accès
-      est ramené au niveau dataroom (`toAccessTarget` dans App.tsx). L'onglet
-      « Restrictions » par utilisateur (`useAccessRestrictionsList`,
-      `GET /api/access-restrictions/`) n'est **pas** reconstruit : le hook reste sans
-      écran consommateur. **Vérifié : `tsc -b` et `check:ds` ; pas encore exercé
-      dans un navigateur réel** (même raison que ci-dessus).
+- [x] Contrôle d'accès par utilisateur ET par rôle sur Dataroom/Folder/Document,
+      avec héritage — **backend fait le 28/08/2026**, modèle étendu le 03/09/2026
+      (`AccessRestriction.allowed_roles`, bypass superadmin inconditionnel dans
+      `_user_can_access` — voir "État réel du code") : accès ouvert par défaut à
+      tout l'office (fermé par défaut pour le rôle `client` depuis le 01/09/2026),
+      restriction ponctuelle par admin/superadmin à un niveau précis (rôle OU
+      utilisateur nommé, les deux critères indépendants), héritée par le contenu
+      imbriqué (la restriction la plus proche dans la hiérarchie l'emporte, pas de
+      fusion), visibilité de chemin (`_subtree_has_accessible_content`/
+      `_level_visible`) calculée à chaque requête, lecture seulement (la
+      création/l'upload restent gatés par l'accès direct seul). **UI refaite le
+      03/09/2026** : `organisms/AccessRightsTable.tsx` (tableau unique, réutilisé
+      pour les vraies datarooms ET les Templates — cases Admin/Membre/Client,
+      jamais Superadmin, "Tout cocher" par colonne, utilisateurs nommés, édition
+      locale groupée jusqu'à enregistrement explicite), remplace l'ancienne modale
+      `AccessRestrictionModal.tsx` (supprimée) ouverte par élément. Le renommage
+      d'un dossier est désormais séparé des droits (`RenameFolderModal.tsx`, menu
+      "⋮" de l'`Explorer`). L'onglet « Restrictions » par utilisateur
+      (`useAccessRestrictionsList`) a enfin un écran consommateur —
+      `UserRestrictionsModal.tsx`, ouverte depuis un bouton "Restrictions" par
+      ligne d'`OfficeUsersScreen`. Vérifié en Chrome réel (bypass superadmin,
+      tableau, renommage, badges de visibilité en direct côté template,
+      modale Restrictions) — voir "État réel du code", 03/09/2026.
 - [x] Templates de dataroom (structure de dossiers réutilisable) — **backend
       fait le 01/09/2026** : modèles `Template`/`TemplateFolder` (base tenant,
       voir "Modèle de données clé"), CRUD réservé admin/superadmin
@@ -1818,13 +2289,21 @@ couverture.
       optionnel qui reproduit récursivement l'arborescence en vrais
       `Folder`/`AccessRestriction` (résolution des rôles en utilisateurs réels
       au moment de l'application, aucun lien conservé vers le template ensuite
-      — voir "État réel du code"). **Changement connexe décidé en revue** :
-      créer une dataroom (avec ou sans template) est désormais réservé
-      admin/superadmin, ce qui n'était pas le cas avant. **UI faite le
-      02/09/2026** : écrans `TemplatesListScreen`/`TemplateDetailScreen`
-      (nav « Modèles de dossier »), `NewDataroomModal` câblée sur les vrais
-      `Template` (voir "État réel du code") — `NEW_DATAROOM_TEMPLATES` (jeu
-      de démo factice) a disparu de `data/demo.tsx`.
+      — voir "État réel du code"). **UI faite le 02/09/2026, déplacée le même
+      jour** : écrans `TemplatesListScreen`/`TemplateDetailScreen`, d'abord
+      accessibles via une entrée de navigation top-level « Modèles de
+      dossier », puis relogés dans Personnalisation → onglet « Template »
+      (nouvel onglet, à côté de « Modules » — anciennement « Modules &
+      modèles », qui a perdu sa propre section « Modèles de dataroom »
+      figée). `NewDataroomModal` câblée sur les vrais `Template` (voir "État
+      réel du code") — `NEW_DATAROOM_TEMPLATES` (jeu de démo factice) a
+      disparu de `data/demo.tsx`, remplacé par de vrais `Template` de démo
+      (`seed_templates`, mêmes intitulés). **Qui peut créer une dataroom a
+      bougé deux fois** : ouvert à tout membre à l'origine → resserré à
+      admin/superadmin le 01/09/2026 (chantier Templates) → réélargi au rôle
+      "membre" inclus le 02/09/2026 (client seul exclu, voir "État réel du
+      code" — périmètre explicitement non figé, susceptible de bouger
+      encore).
 - [x] Interface hyperadmin (rôle Notantis transverse) — **backend fait le
       01/09/2026** : modèle `HyperadminAccess` (base default, distinct du rôle
       `superadmin` d'`OfficeMembership` qui reste scopé à un office),

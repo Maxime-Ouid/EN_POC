@@ -18,7 +18,6 @@ import type {
   ConnectedUserRow,
   DataroomDocument,
   DataroomRow,
-  DataroomTemplate,
   HistoryRow,
   InvoiceRow,
   MemberRow,
@@ -44,13 +43,14 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Office',
     items: [
-      // Annuaire de l'étude et Modèles : les deux seules entrées de cette
-      // section adossées à un vrai endpoint (/api/office-users/,
-      // /api/templates/). Elles restent visibles pour tout le monde — c'est le
-      // serveur qui répond 403 aux non-administrateurs, et l'écran qui
-      // l'explique, plutôt qu'une entrée qui disparaît sans dire pourquoi.
+      // Annuaire de l'étude : seule entrée de cette section adossée à un vrai
+      // endpoint (/api/office-users/). Elle reste visible pour tout le monde —
+      // c'est le serveur qui répond 403 aux non-administrateurs, et l'écran
+      // qui l'explique, plutôt qu'une entrée qui disparaît sans dire pourquoi.
+      // Les modèles de dossier (Template) sont gérés depuis Personnalisation
+      // → onglet Template (02/09/2026) : plus d'entrée de nav séparée pour
+      // eux, voir CLAUDE.md.
       { key: 'users', icon: 'users', label: "Annuaire de l'étude" },
-      { key: 'templates', icon: 'clip', label: 'Modèles de dossier' },
       { key: 'settings', icon: 'settings', label: 'Personnalisation' },
     ],
   },
@@ -425,11 +425,6 @@ export const MODULE_CATALOG: ModuleEntry[] = [
   { slug: 'confiance-rib', name: 'Confiance RIB', desc: 'Vérification des coordonnées bancaires', icon: 'shield', iconBg: 'var(--info-bg)', iconColor: 'var(--info)', enabled: false },
   { slug: 'chatbot', name: 'Chatbot de support client', desc: 'Répond en 1er niveau aux questions fréquentes', icon: 'msg', iconBg: 'var(--brass-100)', iconColor: 'var(--brass-700)', enabled: true },
   { slug: 'mcp', name: 'Serveur MCP', desc: "Connexion aux outils IA internes de l'étude", icon: 'layers', iconBg: 'var(--surface-alt)', iconColor: 'var(--ink-400)', muted: true, comingSoon: true },
-];
-
-export const DATAROOM_TEMPLATES: DataroomTemplate[] = [
-  { id: 'vente', name: 'Vente immobilière — standard', desc: '14 rubriques · diagnostics, urbanisme, fiscalité…' },
-  { id: 'divorce', name: 'Dossier de divorce', desc: 'Groupes Conjoint 1 / Conjoint 2 / Magistrats' },
 ];
 
 /** Options proposées dans la modale de création de dossier. */

@@ -7,7 +7,7 @@ import {
   TopbarRight, TopbarSearch,
 } from '../components';
 import {
-  CLIENT_SPACE_OPTIONS, DATAROOM_TEMPLATES, DOCS_BY_FOLDER, MODULE_CATALOG,
+  CLIENT_SPACE_OPTIONS, DOCS_BY_FOLDER, MODULE_CATALOG,
   PORTFOLIO_OPTIONS, TREE,
 } from '../data/demo';
 import { Specimen, Stage } from './Specimen';
@@ -156,7 +156,7 @@ function NewDataroomModalDemo() {
 function ModulesTabDemo() {
   const [modules, setModules] = useState(MODULE_CATALOG);
   return (
-    <ModulesTab modules={modules} templates={DATAROOM_TEMPLATES}
+    <ModulesTab modules={modules}
       onToggleModule={(slug, next) => setModules(ms => ms.map(m => (m.slug === slug ? { ...m, enabled: next } : m)))} />
   );
 }

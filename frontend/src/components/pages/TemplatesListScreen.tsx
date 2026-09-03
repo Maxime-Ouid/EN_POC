@@ -3,7 +3,6 @@ import { pagerInfo, useListPaging } from '../../hooks/useListPaging';
 import { Button } from '../atoms/Button';
 import { Card } from '../atoms/Card';
 import { Icon } from '../atoms/Icon';
-import { Screen } from '../atoms/Screen';
 import { ListControls } from '../molecules/ListControls';
 import { RowName } from '../molecules/RowName';
 import { TablePager } from '../molecules/TablePager';
@@ -55,19 +54,17 @@ export function TemplatesListScreen({
 
   if (error) {
     return (
-      <Screen>
-        <Card padded>
-          <div style={{ fontWeight: 600 }}>Liste des modèles indisponible</div>
-          <div className="tiny dim" style={{ marginTop: 6 }}>
-            {error}
-          </div>
-        </Card>
-      </Screen>
+      <Card padded>
+        <div style={{ fontWeight: 600 }}>Liste des modèles indisponible</div>
+        <div className="tiny dim" style={{ marginTop: 6 }}>
+          {error}
+        </div>
+      </Card>
     );
   }
 
   return (
-    <Screen>
+    <>
       {canManage && (
         <Toolbar>
           <Button size="sm" variant="primary" onClick={onCreate}>
@@ -124,6 +121,6 @@ export function TemplatesListScreen({
         current={list.page}
         onChange={list.setPage}
       />
-    </Screen>
+    </>
   );
 }
