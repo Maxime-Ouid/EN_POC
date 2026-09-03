@@ -1,17 +1,31 @@
 import { useState } from 'react';
 import {
   AppShell,
+  AuditTrailScreen,
   Card,
   HyperadminOfficesScreen,
+  ImpersonateModal,
   LoginScreen,
   MfaScreen,
+  MigrationConsoleScreen,
   NewOfficeModal,
   OfficeModulesModal,
+  PlatformNotificationsScreen,
+  PlatformReportingScreen,
 } from '../components';
 import type { HyperadminOfficeRow } from '../api/endpoints';
 import { useHyperadminOffices } from '../hooks/useHyperadminOffices';
 import { useSession } from '../hooks/useSession';
-import { HYPERADMIN_NAV } from './nav';
+import { HYPERADMIN_CRUMBS, HYPERADMIN_NAV } from './nav';
+import {
+  ACCOUNTING_EXPORTS,
+  IMPERSONATE_CANDIDATES,
+  MIGRATION_BATCHES,
+  PLATFORM_AUDIT_EVENTS,
+  PLATFORM_NOTICES,
+  PLATFORM_OFFICES,
+  PLATFORM_STATS,
+} from '../data/platformDemo';
 
 /**
  * Racine séparée de l'app office (App.tsx) — même statut architectural que
@@ -42,6 +56,13 @@ export function HyperadminApp() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [modulesOffice, setModulesOffice] = useState<HyperadminOfficeRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  /* Rubrique ouverte. La console n'en avait qu'une jusqu'au 03/09/2026, d'où
+     l'`activeScreen="offices"` figé et l'`onNavigate` vide qu'on remplace ici. */
+  const [screen, setScreen] = useState('offices');
+  const [impersonateOffice, setImpersonateOffice] = useState<HyperadminOfficeRow | null>(null);
+  const [migrationScenario, setMigrationScenario] = useState<
+    'nouvelles-datarooms' | 'reprise-integrale' | null
+  >(null);
 
   const offices = useHyperadminOffices(authenticated);
 
@@ -96,37 +117,79 @@ export function HyperadminApp() {
       officeRole="Toutes les études"
       showTenantSwitcher={false}
       navSections={HYPERADMIN_NAV}
-      activeScreen="offices"
-      onNavigate={() => {}}
+      activeScreen={screen}
+      onNavigate={setScreen}
       userInitials={(username.slice(0, 2) || 'NA').toUpperCase()}
       userName={username}
       // Le rail dit déjà « Hyperadmin » en haut ; le pied dit ce que la marque
       // ne dit pas — l'étendue du rôle de la personne connectée.
       userRole="Rôle transverse"
       onLogout={() => void session.logout()}
-      breadcrumbCurrent="Offices"
+      breadcrumbCurrent={HYPERADMIN_CRUMBS[screen] ?? 'Offices'}
       breadcrumbRoot="Notantis"
-      hideSectionLabels
+
       showSearch={false}
       showNotifications={false}
     >
-      <HyperadminOfficesScreen
-        offices={offices.offices}
-        modules={offices.modules}
-        loading={offices.loading}
-        error={offices.error}
-        actionError={actionError}
-        onCreateOffice={() => {
-          setCreateError(null);
-          setCreateOpen(true);
-        }}
-        onToggleActive={office => {
-          setActionError(null);
-          offices
-            .setActive(office.id, !office.is_active)
-            .catch((err: Error) => setActionError(err.message));
-        }}
-        onManageModules={office => setModulesOffice(office)}
+      {screen === 'offices' && (
+        <HyperadminOfficesScreen
+          offices={offices.offices}
+          modules={offices.modules}
+          loading={offices.loading}
+          error={offices.error}
+          actionError={actionError}
+          onCreateOffice={() => {
+            setCreateError(null);
+            setCreateOpen(true);
+          }}
+          onToggleActive={office => {
+            setActionError(null);
+            offices
+              .setActive(office.id, !office.is_active)
+              .catch((err: Error) => setActionError(err.message));
+          }}
+          onManageModules={office => setModulesOffice(office)}
+          onImpersonate={office => setImpersonateOffice(office)}
+        />
+      )}
+
+      {screen === 'reporting' && (
+        <PlatformReportingScreen
+          stats={PLATFORM_STATS}
+          offices={PLATFORM_OFFICES}
+          exports={ACCOUNTING_EXPORTS}
+        />
+      )}
+
+      {screen === 'notifications' && (
+        <PlatformNotificationsScreen
+          officeOptions={offices.offices.map(o => ({ id: String(o.id), label: o.name }))}
+          history={PLATFORM_NOTICES}
+        />
+      )}
+
+      {screen === 'securite' && (
+        <AuditTrailScreen
+          scope="plateforme"
+          events={PLATFORM_AUDIT_EVENTS}
+          retention="5 ans (journaux de sécurité)"
+        />
+      )}
+
+      {screen === 'migration' && (
+        <MigrationConsoleScreen
+          scenario={migrationScenario}
+          batches={MIGRATION_BATCHES}
+          onScenarioChange={setMigrationScenario}
+        />
+      )}
+
+      <ImpersonateModal
+        open={impersonateOffice !== null}
+        onClose={() => setImpersonateOffice(null)}
+        officeName={impersonateOffice?.name ?? ''}
+        users={IMPERSONATE_CANDIDATES}
+        onStart={() => setImpersonateOffice(null)}
       />
 
       <NewOfficeModal

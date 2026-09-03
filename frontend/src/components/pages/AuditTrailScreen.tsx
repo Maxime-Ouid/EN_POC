@@ -76,6 +76,12 @@ export interface AuditEvent {
   dataroom?: string;
   /** Origine de l'accès — attendue pour l'investigation post-incident (§7.7). */
   origin: string;
+  /**
+   * Office concerné. Vide dans le journal d'un office (il n'y en a qu'un) ;
+   * renseigné dans le journal transverse de l'application d'administration
+   * (§5.1), où c'est la première chose qu'on cherche.
+   */
+  office?: string;
 }
 
 export interface AuditTrailScreenProps {
@@ -84,6 +90,15 @@ export interface AuditTrailScreenProps {
   retention: string;
   /** Export du journal filtré. Absent = bouton inerte (maquette hors backend). */
   onExport?: (format: 'csv' | 'pdf') => void;
+  /**
+   * « office » : le journal d'une étude, tel qu'un superadmin le lit.
+   * « plateforme » : le journal transverse de l'application d'administration
+   * (§5.1) — une colonne et un filtre Office en plus, et un intitulé qui parle
+   * de sécurité plutôt que de dataroom. Le même écran sert les deux plutôt que
+   * d'en écrire un presque identique : les deux vues liront le même flux
+   * d'événements le jour où il existera.
+   */
+  scope?: 'office' | 'plateforme';
 }
 
 const PERIODS = [
@@ -101,10 +116,17 @@ function daysAgoIso(days: number, from: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScreenProps) {
+export function AuditTrailScreen({
+  events,
+  retention,
+  onExport,
+  scope = 'office',
+}: AuditTrailScreenProps) {
+  const platform = scope === 'plateforme';
   const [period, setPeriod] = useState('30');
   const [category, setCategory] = useState<'all' | AuditCategory>('all');
   const [actor, setActor] = useState('all');
+  const [office, setOffice] = useState('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const perPage = 12;
@@ -124,6 +146,12 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
     return [...seen.values()].sort((a, b) => a.localeCompare(b, 'fr'));
   }, [events]);
 
+  const offices = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of events) if (e.office) seen.add(e.office);
+    return [...seen].sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [events]);
+
   const filtered = useMemo(() => {
     const floor = period === 'all' ? null : daysAgoIso(Number(period), latestDay);
     const needle = search.trim().toLowerCase();
@@ -131,11 +159,14 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
       if (floor && e.day < floor) return false;
       if (category !== 'all' && e.category !== category) return false;
       if (actor !== 'all' && e.actor !== actor) return false;
+      if (office !== 'all' && e.office !== office) return false;
       if (!needle) return true;
       // Recherche sur ce qui est affiché : l'utilisateur cherche ce qu'il voit.
-      return `${e.action} ${e.target} ${e.dataroom ?? ''} ${e.actor}`.toLowerCase().includes(needle);
+      return `${e.action} ${e.target} ${e.dataroom ?? ''} ${e.actor} ${e.office ?? ''}`
+        .toLowerCase()
+        .includes(needle);
     });
-  }, [events, period, category, actor, search, latestDay]);
+  }, [events, period, category, actor, office, search, latestDay]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
   const current = Math.min(page, pageCount);
@@ -154,9 +185,15 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
     <Screen>
       <Card padded style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <div className="section-title">Journal des accès et modifications</div>
+          <div className="section-title">
+            {platform
+              ? 'Journal de sécurité transverse'
+              : 'Journal des accès et modifications'}
+          </div>
           <div className="tiny dim">
-            Tout accès et toute modification portant sur le contenu d'une dataroom.
+            {platform
+              ? "Événements de sécurité de tous les Espaces Notariaux, horodatés — base de l'investigation post-incident (objectif OS10)."
+              : "Tout accès et toute modification portant sur le contenu d'une dataroom."}{' '}
             Conservation&nbsp;: {retention}.
           </div>
         </div>
@@ -198,6 +235,19 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
             ))}
           </Select>
         </div>
+        {platform && (
+          <div className="field">
+            <label htmlFor="audit-office">Office</label>
+            <Select id="audit-office" value={office} onChange={e => change(setOffice)(e.target.value)}>
+              <option value="all">Tous les offices</option>
+              {offices.map(o => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <div className="field">
           <label htmlFor="audit-actor">Utilisateur</label>
           <Select id="audit-actor" value={actor} onChange={e => change(setActor)(e.target.value)}>
@@ -220,12 +270,23 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
         </div>
       </div>
 
-      <TableCard headers={['Horodatage', 'Utilisateur', 'Action', 'Objet', 'Dossier', 'Origine']}>
+      <TableCard
+        headers={[
+          'Horodatage',
+          ...(platform ? ['Office'] : []),
+          'Utilisateur',
+          'Action',
+          'Objet',
+          'Dossier',
+          'Origine',
+        ]}
+      >
         {rows.map(e => (
           <tr key={e.id}>
             <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
               {e.timestamp}
             </td>
+            {platform && <td className="dim">{e.office ?? '—'}</td>}
             <td className="row-name">
               <Avatar size="sm" gray={e.actorGray}>
                 {e.actorInitials}
@@ -245,7 +306,7 @@ export function AuditTrailScreen({ events, retention, onExport }: AuditTrailScre
         ))}
         {rows.length === 0 && (
           <tr>
-            <td colSpan={6} className="tiny dim" style={{ textAlign: 'center', padding: 28 }}>
+            <td colSpan={platform ? 7 : 6} className="tiny dim" style={{ textAlign: 'center', padding: 28 }}>
               Aucun événement ne correspond à ces filtres.
             </td>
           </tr>

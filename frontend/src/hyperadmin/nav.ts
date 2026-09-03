@@ -23,17 +23,50 @@ import type { NavSection } from '../components/organisms/navModel';
 import { applyTheme, defaultThemeState, withLayout, type ThemeState } from '../theme';
 
 /**
- * Un seul écran pour l'instant — la liste des offices. Le rail l'affiche donc
- * seul, et c'est volontaire : il nomme l'endroit où l'on se trouve et
- * accueillera les rubriques suivantes (facturation, journal transverse) sans
- * changer de coquille.
+ * Les cinq rubriques que le document de vision confie à l'application
+ * d'administration (§5.1), rangées par ce qu'on y fait :
+ *
+ *   Plateforme  — le parc lui-même : les offices, et le reporting consolidé
+ *                 et transverse qui les compare (§4.6, second niveau).
+ *   Diffusion   — les annonces envoyées aux EN (maintenance, nouveauté,
+ *                 alerte), avec leur ciblage.
+ *   Conformité  — le journal de sécurité transverse (§7.7, objectif OS10) et
+ *                 la reprise V1 → cible (§10), qui est un chantier daté et non
+ *                 une fonction permanente : elle quittera ce rail le jour où
+ *                 le dernier office aura basculé.
+ *
+ * La console n'avait qu'une rubrique jusqu'au 03/09/2026, et son commentaire
+ * annonçait déjà « facturation, journal transverse » comme suites attendues.
  */
 export const HYPERADMIN_NAV: NavSection[] = [
   {
     label: 'Plateforme',
-    items: [{ key: 'offices', icon: 'building', label: 'Offices' }],
+    items: [
+      { key: 'offices', icon: 'building', label: 'Offices' },
+      { key: 'reporting', icon: 'grid', label: 'Reporting consolidé' },
+    ],
+  },
+  {
+    label: 'Diffusion',
+    items: [{ key: 'notifications', icon: 'bell', label: 'Annonces aux EN' }],
+  },
+  {
+    label: 'Conformité',
+    items: [
+      { key: 'securite', icon: 'shield', label: 'Journal de sécurité' },
+      { key: 'migration', icon: 'register', label: 'Reprise V1 → cible' },
+    ],
   },
 ];
+
+/** Libellé du fil d'Ariane de chaque rubrique. */
+export const HYPERADMIN_CRUMBS: Record<string, string> = {
+  offices: 'Offices',
+  reporting: 'Reporting consolidé',
+  notifications: 'Annonces aux EN',
+  securite: 'Journal de sécurité',
+  migration: 'Reprise V1 → cible',
+};
 
 /** Disposition imposée de la console : rail vertical, sans mention de marque grise. */
 export function hyperadminThemeState(): ThemeState {
@@ -41,7 +74,10 @@ export function hyperadminThemeState(): ThemeState {
     // Le défaut du produit, écrit explicitement : la console ne le tient pas de
     // LAYOUT_DEFAULTS par hasard, c'est un choix qu'on a pris et documenté.
     navPlacement: 'left',
-    showSectionLabels: false,
+    // Trois sections désormais, contre une seule jusqu'au 03/09/2026 : les
+    // nommer redevient utile, c'est ce qui distingue « Plateforme » de
+    // « Conformité » dans un rail devenu long.
+    showSectionLabels: true,
     // La marque grise est une promesse faite aux ÉTUDES ; dans la console de
     // Notantis, « propulsé par Notantis » n'a rien à annoncer.
     showPoweredBy: false,

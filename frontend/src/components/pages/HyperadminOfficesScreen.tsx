@@ -32,6 +32,14 @@ export interface HyperadminOfficesScreenProps {
   onCreateOffice: () => void;
   onToggleActive: (office: HyperadminOfficeRow) => void;
   onManageModules: (office: HyperadminOfficeRow) => void;
+  /**
+   * Ouvre la prise d'identité d'un utilisateur de cet office — la fonction que
+   * le schéma d'architecture du §5 place sur l'application d'administration
+   * (« peut se connecter et prendre l'identité d'un utilisateur de l'EN »).
+   * Absente = le bouton n'apparaît pas : mieux vaut pas d'accès qu'un accès
+   * qui échoue en silence sur un office désactivé ou hors périmètre support.
+   */
+  onImpersonate?: (office: HyperadminOfficeRow) => void;
 }
 
 const COLUMNS = ['Étude', 'Sous-domaine', 'Statut', 'Modules', ''];
@@ -56,6 +64,7 @@ export function HyperadminOfficesScreen({
   onCreateOffice,
   onToggleActive,
   onManageModules,
+  onImpersonate,
 }: HyperadminOfficesScreenProps) {
   const slots = useTopbarSlots();
   const moduleName = useCallback(
@@ -192,6 +201,11 @@ export function HyperadminOfficesScreen({
                 <Button size="sm" onClick={() => onManageModules(office)}>
                   Modules
                 </Button>
+                {onImpersonate && office.is_active && (
+                  <Button size="sm" onClick={() => onImpersonate(office)}>
+                    Prendre l'identité
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => onToggleActive(office)}>
                   {office.is_active ? 'Désactiver' : 'Activer'}
                 </Button>

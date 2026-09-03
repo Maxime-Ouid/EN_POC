@@ -13,6 +13,7 @@ export * from './Explorer';
 export * from './ExportZipModal';
 export * from './GreyLabelStatementModal';
 export * from './IdentityTab';
+export * from './ImpersonateModal';
 export * from './MetadataSchemaTab';
 export * from './Modal';
 export * from './ModulesTab';
