@@ -2851,6 +2851,118 @@ dépôt sur l'accueil. C'est honnête (le libellé le dit) mais ce n'est pas le 
 une vraie zone de dépôt sur l'accueil demanderait de choisir le dossier après coup, donc un
 écran de plus.
 
+## Maquettes des fonctionnalités MVP absentes (03/09/2026)
+
+Branche `front/maquettes-mvp`, partie du tip de `front/v1-recherche-logo` (donc du tip de
+Maxime `7f34e52` plus les quatre commits rejoués). Quatre commits, un par lot.
+
+**Ce que c'est, et ce que ce n'est pas.** Une confrontation exigence par exigence entre
+`EN_vision_AMOA_MVP_v0.5_fusionne.md` et l'état réel du code a montré 20 exigences
+absentes et 13 partielles sur 39. Ce chantier en produit les **maquettes front**, dans le
+design system existant, alimentées par `src/data/demo.tsx` et `src/data/platformDemo.tsx`.
+**Aucun endpoint n'a été ajouté** : le backend est inchangé, et chaque écran disparaîtra du
+fichier de démonstration le jour où son endpoint existera — même règle que les Q&R, les
+membres et l'historique avant eux.
+
+Le but est de donner à la MOE et au client quelque chose à REGARDER pour chiffrer, pas de
+livrer la fonction. Là où la vision laisse une question ouverte (§11), l'écran EXPOSE le
+choix au lieu de le trancher en silence : stratégie de reprise, base de calcul du stockage
+refacturé, cloisonnement des Q/R, groupes prédéfinis V1.
+
+### Lot 1 — les ajouts MVP (§3.2, §4.6)
+
+- `AuditTrailScreen` — journal des accès de l'office, filtres période / type / utilisateur /
+  recherche, export. Entrée de nav « Journal des accès » dans la section Pilotage. Sert
+  aussi de journal transverse à la console (voir lot 3, prop `scope`).
+- `MetadataSchemaTab` (Personnalisation → Méta-données) et `DataroomMetadataPanel`
+  (dossier → onglet Informations) — les deux niveaux du §4.6 : champs communs à l'office,
+  champs propres à un dossier.
+- `PortfolioDetailScreen` — la vue consolidée qui manquait : `PortfoliosScreen` ouvrait
+  jusqu'ici sur la liste générale des dossiers, on voyait le regroupement sans jamais voir
+  l'ensemble. Cas APUI porté par un drapeau explicite, pas déduit.
+- `GreyLabelStatementModal` + drill-down par client dans `StatsScreen` — la refacturation en
+  marque grise, avec la base de calcul (stockage moyen / pic) exposée parce qu'elle change
+  le montant.
+- `StatsScreen` gagne un onglet « Activité & volumétrie » — le reporting côté EN du §3.2,
+  qui manquait entièrement : l'écran ne montrait que la facturation.
+- `TemporaryLinkModal` — le bouton « Lien temporaire » existait et n'était câblé sur rien.
+
+### Lot 2 — reprise de l'existant (§4)
+
+- `QAPanel` — l'onglet Q/R ne savait qu'afficher et répondre. Ajout du filtre avec/sans
+  réponse, de la modération (valider / refuser), de la désactivation, de la suppression, de
+  l'export et de `NewQuestionModal` (question sur toute la dataroom ou sur une pièce).
+- `DataroomLifecycleModal` — clôture / réouverture / archivage / suppression + durée de
+  conservation. **Ne PAS confondre avec le §8.2** (machine à états complète), hors MVP :
+  seuls les quatre gestes du §4.1 sont couverts.
+- `ExportZipModal`, `MoveDocumentModal`, `DocumentStateModal`, renommage via
+  `RenameFolderModal` rendu générique (`title`/`label`) — le §4.2 en entier. Les actions
+  passent par `molecules/RowActions`, vrai menu déroulant qui remplace le clic unique de
+  `atoms/RowMenu` (dont le commentaire annonçait déjà « à implémenter côté appli »).
+- `DataroomGroupsCard` — les groupes du §4.4, définis **dans le paramétrage de la dataroom**
+  et non de l'office, comme le dit la vision. Posé au-dessus de `AccessRightsTable`, qui
+  reste branché sur les vraies `AccessRestriction`.
+- `ShareWithOfficeModal` — partage vendeur/acquéreur, avec synchronisation temps réel
+  optionnelle. L'annuaire d'offices n'est **pas** parcourable : c'est le défaut de la V1 que
+  le §4.1 signale comme à corriger.
+- `AccountScreen` (nav : clic sur le bloc utilisateur du pied de rail) — mot de passe,
+  préférences d'affichage et de notification, état de la MFA. Au passage, cliquer son propre
+  nom ne déconnecte plus : la déconnexion reste sur son icône.
+
+### Lot 3 — administration & conformité (§5.1, §7.7, §10)
+
+La console hyperadmin passe d'une rubrique à cinq (`hyperadmin/nav.ts`, trois sections).
+
+- `PlatformNotificationsScreen` — annonces aux EN avec ciblage (tous / sélection / un
+  office) et second étage de diffusion (tous les utilisateurs de l'EN, ou ses seuls
+  administrateurs).
+- `PlatformReportingScreen` — reporting consolidé par office + suivi de l'API de facturation
+  vers la comptabilité Notantis (§4.6).
+- `AuditTrailScreen scope="plateforme"` — journal de sécurité transverse, colonne et filtre
+  Office en plus. Réutilisation plutôt qu'un second écran presque identique.
+- `MigrationConsoleScreen` — la reprise du §10, lot par lot : phases, comptages avant/après,
+  écarts d'empreinte, journal, rejeu, annulation, et bascule comme geste distinct (double
+  run du §10.6). Le choix scénario 1 / scénario 2 est un sélecteur, pas une valeur en dur.
+- `ImpersonateModal` — la prise d'identité du schéma du §5, avec motif obligatoire, durée
+  bornée, lecture seule et traçabilité annoncée.
+
+### Lot 4 — unitaires du §11.1
+
+`TermsModal` (acceptation bloquante ou consultation), `ForgotPasswordModal` (réponse
+identique que le compte existe ou non), `ForcePasswordChangeModal`, `InviteClientModal`,
+`DownloadCartSlideover` (panier vidé en changeant de dossier), `ActivityReportModal`,
+`HelpSlideover` (les trois documents distribués par la carte « Aide » de la V1), et dans
+l'explorateur les pièces **non consultées** (point + compteur + filtre) et **désactivées**
+(nom barré, non ouvrable). Les deux liens du pied de l'écran de connexion, inertes depuis le
+prototype, sont câblés.
+
+### Pièges rencontrés, à ne pas relâcher
+
+- **`--line` n'existe pas.** Le token de bordure est `--border` (et `--border-soft`). Écrit
+  `var(--line)` dans dix fichiers, il ne produit aucune erreur — ni TypeScript, ni
+  `check:ds`, qui ne vérifie que les couleurs littérales et les classes. Les bordures
+  étaient simplement invisibles, repéré à la capture. **Vérifier un token nouveau contre
+  `styles/tokens.css` avant de l'utiliser.**
+- **`check:ds` lit un numéro de ticket comme une couleur.** `#4821` dans un placeholder est
+  compté en `couleur-en-dur`. Écrire `TCK-4821`.
+- **`icon-btn` déclenche la règle `.btn`** de `check:ds` : passer par `<IconButton>`.
+- **Un tableau ne tient pas dans une modale.** `.modal` fait 560 px ; cinq colonnes y
+  perdent la dernière sans avertissement. Les listes des modales (liens temporaires,
+  partages) sont des cartes empilées, pas des `<table>`.
+- **Le gras ne suffit pas à signaler une pièce non lue** : `.row-name` est déjà en 600.
+  D'où `.unread-dot`.
+- **Aperçu esbuild** : pour une capture pleine page, neutraliser les hauteurs de `.app` /
+  `.content` / `.content-inner` (elles font défiler en interne, sinon `fullPage` ne capture
+  que le viewport). Une modale doit être rendue **hors** de `.app`, sinon l'overlay
+  n'apparaît pas.
+
+### Vérifications
+
+`npx tsc -b --force` propre, `npm run check:ds` sans écart nouveau (232 fichiers,
+53 écarts hérités inchangés), captures Playwright des quatre lots en thème clair et sombre.
+**Non vérifié en navigateur réel** — l'application n'a pas été relancée (les bases locales
+attendent toujours la migration `0008`).
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)
