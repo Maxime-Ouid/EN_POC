@@ -1,6 +1,6 @@
+import type { ReactNode } from 'react';
 import { Button } from '../atoms/Button';
-import { Select } from '../atoms/Select';
-import { Tag } from '../atoms/Tag';
+import { NamedUsersEditor, type AccessEditorUser } from './NamedUsersEditor';
 
 export type AccessRightsRowKind = 'dataroom' | 'folder' | 'document';
 
@@ -15,18 +15,24 @@ export interface AccessRightsRow {
   userIds: number[];
 }
 
-export interface AccessRightsTableUser {
-  userId: number;
-  username: string;
-  role: string;
-}
-
 export interface AccessRightsTableProps {
   rows: AccessRightsRow[];
-  officeUsers: AccessRightsTableUser[];
+  officeUsers: AccessEditorUser[];
   onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[] }) => void;
   loading?: boolean;
   error?: string | null;
+  /**
+   * Rôles EFFECTIVEMENT accordés à cette ligne via un descendant (dossier ou
+   * pièce) qui les coche explicitement — voir `access/effectiveRoles.ts`.
+   * Une case de rôle qu'un descendant accorde déjà s'affiche cochée et
+   * DÉSACTIVÉE (grisée) : ça reste un pur affichage, jamais une écriture sur
+   * cette ligne (voir CLAUDE.md, "État réel du code").
+   */
+  effectiveRoles?: (row: AccessRightsRow) => string[];
+  /** Colonne "Actions" finale, affichée UNIQUEMENT si cette prop est
+      fournie (l'écran d'une vraie dataroom ne la passe pas — le
+      renommage/la création/la suppression restent dans son Explorer). */
+  renderRowActions?: (row: AccessRightsRow) => ReactNode;
 }
 
 /** Superadmin exclu à dessein : bypass systématique côté serveur
@@ -46,9 +52,9 @@ const ROLE_COLUMNS: { role: string; label: string }[] = [
  * case cochée : l'appelant possède le brouillon (voir useAccessRightsDraft) et
  * décide seul du moment où il l'enregistre.
  */
-export function AccessRightsTable({ rows, officeUsers, onChangeRow, loading, error }: AccessRightsTableProps) {
-  const usersById = new Map(officeUsers.map(u => [u.userId, u]));
-
+export function AccessRightsTable({
+  rows, officeUsers, onChangeRow, loading, error, effectiveRoles, renderRowActions,
+}: AccessRightsTableProps) {
   function toggleRole(row: AccessRightsRow, role: string, checked: boolean) {
     const allowedRoles = checked ? [...row.allowedRoles, role] : row.allowedRoles.filter(r => r !== role);
     onChangeRow(row.id, { allowedRoles, userIds: row.userIds });
@@ -88,62 +94,47 @@ export function AccessRightsTable({ rows, officeUsers, onChangeRow, loading, err
               </th>
             ))}
             <th>Utilisateurs nommés</th>
+            {renderRowActions && <th></th>}
           </tr>
         </thead>
         <tbody>
           {rows.map(row => {
-            const availableUsers = officeUsers.filter(u => !row.userIds.includes(u.userId));
+            const inheritedRoles = effectiveRoles?.(row) ?? [];
             return (
-              <tr key={row.id}>
-                <td style={{ paddingLeft: 12 + row.depth * 16 }}>{row.label}</td>
-                {ROLE_COLUMNS.map(col => (
+            <tr key={row.id}>
+              <td style={{ paddingLeft: 12 + row.depth * 16 }}>{row.label}</td>
+              {ROLE_COLUMNS.map(col => {
+                const direct = row.allowedRoles.includes(col.role);
+                const inherited = !direct && inheritedRoles.includes(col.role);
+                return (
                   <td key={col.role}>
                     <input
                       type="checkbox"
                       aria-label={`${col.label} — ${row.label}`}
-                      checked={row.allowedRoles.includes(col.role)}
+                      checked={direct || inherited}
+                      disabled={inherited}
+                      title={inherited ? "Accordé par un sous-dossier ou une pièce — modifiable là où il est réellement accordé" : undefined}
                       onChange={e => toggleRole(row, col.role, e.target.checked)}
                     />
                   </td>
-                ))}
-                <td>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: row.userIds.length ? 6 : 0 }}>
-                    {row.userIds.map(id => (
-                      <Tag
-                        key={id}
-                        plain
-                        onRemove={() => removeUser(row, id)}
-                        removeLabel={`Retirer ${usersById.get(id)?.username ?? `#${id}`}`}
-                      >
-                        {usersById.get(id)?.username ?? `#${id}`}
-                      </Tag>
-                    ))}
-                  </div>
-                  {availableUsers.length > 0 && (
-                    <Select
-                      small
-                      auto
-                      value=""
-                      aria-label={`Ajouter un utilisateur nommé à ${row.label}`}
-                      onChange={e => {
-                        if (e.target.value) addUser(row, Number(e.target.value));
-                      }}
-                    >
-                      <option value="">+ Ajouter…</option>
-                      {availableUsers.map(u => (
-                        <option key={u.userId} value={u.userId}>
-                          {u.username}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </td>
-              </tr>
+                );
+              })}
+              <td>
+                <NamedUsersEditor
+                  userIds={row.userIds}
+                  officeUsers={officeUsers}
+                  onAdd={userId => addUser(row, userId)}
+                  onRemove={userId => removeUser(row, userId)}
+                  targetLabel={row.label}
+                />
+              </td>
+              {renderRowActions && <td>{renderRowActions(row)}</td>}
+            </tr>
             );
           })}
           {!loading && !rows.length && (
             <tr>
-              <td colSpan={2 + ROLE_COLUMNS.length} className="dim">
+              <td colSpan={2 + ROLE_COLUMNS.length + (renderRowActions ? 1 : 0)} className="dim">
                 Rien à afficher.
               </td>
             </tr>

@@ -426,24 +426,21 @@ export const api = {
       { method: 'PATCH', body: { name } },
     ),
 
-  /** Restriction d'accès de la dataroom elle-même (pas un dossier/document précis). */
-  getDataroomAccess: (dataroomId: number, signal?: AbortSignal) =>
-    apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/access/`, { signal }),
-
   /**
    * Réservé aux rôles admin/superadmin de l'office. Remplace la restriction
    * dans son ENTIER (userIds ET allowedRoles) — pas un ajout unitaire. Les
    * deux vides = supprime la restriction (accès ouvert, sauf client — voir
-   * CLAUDE.md).
+   * CLAUDE.md). Pas de `getDataroomAccess`/`getFolderAccess`/
+   * `getDocumentAccess` ici : le GET existe côté serveur (et reste couvert par
+   * les tests backend) mais aucun écran ne l'appelle — `AccessRightsTable` se
+   * préremplit en bloc via `listAccessRestrictions` (dataroom) ou directement
+   * depuis l'arbre du Template, jamais un fetch par ligne.
    */
   setDataroomAccess: (dataroomId: number, state: { userIds: number[]; allowedRoles: string[] }) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/access/`, {
       method: 'POST',
       body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
     }),
-
-  getFolderAccess: (dataroomId: number, folderId: number, signal?: AbortSignal) =>
-    apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/folders/${folderId}/access/`, { signal }),
 
   setFolderAccess: (
     dataroomId: number,
@@ -454,9 +451,6 @@ export const api = {
       method: 'POST',
       body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
     }),
-
-  getDocumentAccess: (dataroomId: number, documentId: number, signal?: AbortSignal) =>
-    apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/documents/${documentId}/access/`, { signal }),
 
   setDocumentAccess: (
     dataroomId: number,

@@ -45,6 +45,7 @@ import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
 import { useTemplates } from './hooks/useTemplates';
 import { useTemplateTree, type TemplateFolderTreeNode } from './hooks/useTemplateTree';
+import { templateEffectiveRoles, dataroomEffectiveRoles as computeDataroomEffectiveRoles } from './access/effectiveRoles';
 import {
   api, type AccessRestrictionSummary, type DocumentSummary, type TagColor, type TagSummary,
 } from './api/endpoints';
@@ -180,15 +181,6 @@ function countAllDocuments(nodes: FolderTreeNode[]): number {
   return nodes.reduce((sum, node) => sum + node.documentCount + countAllDocuments(node.children), 0);
 }
 
-/** Mappe l'arbre d'un Template (id numériques, forme API) vers TreeNodeData (id string, forme Explorer). */
-function toTemplateTreeNodes(nodes: TemplateFolderTreeNode[]): TreeNodeData[] {
-  return nodes.map(node => ({
-    id: String(node.id),
-    label: node.name,
-    children: node.children.length ? toTemplateTreeNodes(node.children) : undefined,
-  }));
-}
-
 /** Rangée plate (une entrée par TemplateFolder) pour le tableau de droits — id
     de ligne "folder:<id>", même convention qu'une vraie dataroom (voir
     flattenDataroomAccessRows). Un Template n'a que des dossiers, pas de
@@ -272,6 +264,14 @@ function findFolderLabel(nodes: TreeNodeData[], id: string): string | undefined 
     }
   }
   return undefined;
+}
+
+/** Libellé d'un TemplateFolder à partir de son id brut (sans préfixe) — lu
+    directement dans la rangée plate du tableau de droits, plus besoin de
+    parcourir un arbre (l'écran Template n'en manipule plus, voir CLAUDE.md). */
+function templateFolderLabel(rows: { id: string; label: string }[], folderId: string | undefined): string | undefined {
+  if (!folderId) return undefined;
+  return rows.find(r => r.id === `folder:${folderId}`)?.label;
 }
 
 /** Nom de fichier d'une pièce à partir de son id — l'écran ne renvoie que l'id au téléchargement. */
@@ -386,7 +386,6 @@ export default function App() {
 
   const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
   const openTemplate = templates.items.find(t => t.id === openTemplateId) ?? null;
-  const templateTreeNodes = toTemplateTreeNodes(templateTree.tree);
 
   // Tableau de droits d'une vraie dataroom : rangée plate (dataroom + chaque
   // dossier/document de son arbre) + état enregistré filtré à cette dataroom,
@@ -428,14 +427,32 @@ export default function App() {
     allowedRoles: templateAccessDraft.draft[row.id]?.allowedRoles ?? [],
     userIds: templateAccessDraft.draft[row.id]?.userIds ?? [],
   }));
-  // Pour les pastilles de visibilité en direct de l'explorateur du Template
-  // (renderNodeExtra) — indexé par id de NŒUD DE L'ARBRE (numérique en
-  // chaîne), pas par id de ligne du tableau ("folder:<id>").
-  const templateAllowedRolesByFolderId: Record<string, string[]> = {};
-  for (const row of templateAccessRows) {
-    templateAllowedRolesByFolderId[row.id.slice('folder:'.length)] =
-      templateAccessDraft.draft[row.id]?.allowedRoles ?? [];
-  }
+  // Rôles effectivement accordés à chaque ligne (directement, ou via un
+  // sous-dossier qui les coche déjà) — calculés en direct depuis le
+  // brouillon courant, indexés par id de LIGNE du tableau ("folder:<id>"),
+  // comme `templateAccessTableRows` (voir access/effectiveRoles.ts). Pur
+  // affichage (grise la case), aucune écriture n'en découle.
+  const templateEffectiveRolesByRowId = useMemo(
+    () =>
+      templateEffectiveRoles(
+        templateTree.tree,
+        folderId => templateAccessDraft.draft[`folder:${folderId}`]?.allowedRoles ?? [],
+      ),
+    [templateTree.tree, templateAccessDraft.draft],
+  );
+  // Même calcul pour une vraie dataroom — la racine ("dataroom") et chaque
+  // dossier/pièce du brouillon courant, même sémantique "explicite quelque
+  // part dans le sous-arbre" qu'un Template.
+  const dataroomEffectiveRolesByRowId = useMemo(
+    () =>
+      computeDataroomEffectiveRoles(
+        dataroomTree.tree,
+        dataroomTree.rootDocuments,
+        dataroomTree.documentsByFolderId,
+        rowId => dataroomAccessDraft.draft[rowId]?.allowedRoles ?? [],
+      ),
+    [dataroomTree.tree, dataroomTree.rootDocuments, dataroomTree.documentsByFolderId, dataroomAccessDraft.draft],
+  );
 
   const officeUsersForAccess = officeUsers.items.map(u => ({ userId: u.user_id, username: u.username, role: u.role }));
 
@@ -835,53 +852,52 @@ export default function App() {
       openTemplate && (
         <>
           <TemplateDetailScreen
-            // Même remontage que DataroomDetailScreen : le nœud sélectionné
-            // dans l'explorateur n'a aucun sens d'un modèle à l'autre.
+            // Remonté par l'identité du modèle : plus de sélection interne à
+            // réinitialiser (l'écran est un pur tableau maintenant), mais
+            // garde le remontage pour repartir d'un brouillon propre d'un
+            // modèle à l'autre (voir useAccessRightsDraft — le brouillon,
+            // lui, vit dans App.tsx et suit `openTemplateId`).
             key={openTemplate.id}
             templateName={openTemplate.name}
             templateDescription={openTemplate.description}
-            tree={templateTreeNodes}
-            allowedRolesByFolderId={templateAllowedRolesByFolderId}
-            loading={templateTree.loading}
-            error={templateTree.error}
+            rows={templateAccessTableRows}
+            officeUsers={officeUsersForAccess}
+            onChangeRow={(rowId, next) => templateAccessDraft.setRow(rowId, next)}
+            effectiveRoles={templateEffectiveRolesByRowId}
+            loading={templateTree.loading || officeUsers.loading}
+            error={templateAccessSaveError ?? officeUsers.error ?? templateTree.error}
             canManage={canManageTemplates}
             onBackToList={() => setOpenTemplateId(null)}
-            onCreateFolder={parentId => setNewTemplateFolderModal({ parentId })}
-            onRenameFolder={folderId => {
+            onCreateRootFolder={() => setNewTemplateFolderModal({ parentId: undefined })}
+            onCreateFolder={rowId => setNewTemplateFolderModal({ parentId: rowId.slice('folder:'.length) })}
+            onRenameFolder={rowId => {
+              const folderId = rowId.slice('folder:'.length);
               setRenameError(null);
               setRenameTarget({
                 kind: 'template-folder',
                 templateId: openTemplate.id,
                 folderId: Number(folderId),
-                currentName: findFolderLabel(templateTreeNodes, folderId) ?? '',
+                currentName: templateFolderLabel(templateAccessRows, folderId) ?? '',
               });
             }}
-            onDeleteFolder={folderId => {
+            onDeleteFolder={rowId => {
+              const folderId = rowId.slice('folder:'.length);
               setDeleteFolderError(null);
-              setFolderToDelete({ id: folderId, name: findFolderLabel(templateTreeNodes, folderId) ?? '' });
+              setFolderToDelete({ id: folderId, name: templateFolderLabel(templateAccessRows, folderId) ?? '' });
             }}
-            accessRightsTab={
-              <div>
-                <AccessRightsPanel
-                  dirtyCount={templateAccessDraft.dirtyRowIds.length}
-                  saving={savingTemplateAccess}
-                  onReset={templateAccessDraft.reset}
-                  onSave={() => {
-                    setTemplateAccessSaveError(null);
-                    setSavingTemplateAccess(true);
-                    saveTemplateAccess()
-                      .catch((err: Error) => setTemplateAccessSaveError(err.message))
-                      .finally(() => setSavingTemplateAccess(false));
-                  }}
-                />
-                <AccessRightsTable
-                  rows={templateAccessTableRows}
-                  officeUsers={officeUsersForAccess}
-                  onChangeRow={(rowId, next) => templateAccessDraft.setRow(rowId, next)}
-                  loading={templateTree.loading || officeUsers.loading}
-                  error={templateAccessSaveError ?? officeUsers.error}
-                />
-              </div>
+            accessSaveBar={
+              <AccessRightsPanel
+                dirtyCount={templateAccessDraft.dirtyRowIds.length}
+                saving={savingTemplateAccess}
+                onReset={templateAccessDraft.reset}
+                onSave={() => {
+                  setTemplateAccessSaveError(null);
+                  setSavingTemplateAccess(true);
+                  saveTemplateAccess()
+                    .catch((err: Error) => setTemplateAccessSaveError(err.message))
+                    .finally(() => setSavingTemplateAccess(false));
+                }}
+              />
             }
           />
           <NewTemplateFolderModal
@@ -889,7 +905,7 @@ export default function App() {
             onClose={() => setNewTemplateFolderModal(null)}
             parentLabel={
               newTemplateFolderModal?.parentId
-                ? findFolderLabel(templateTreeNodes, newTemplateFolderModal.parentId)
+                ? templateFolderLabel(templateAccessRows, newTemplateFolderModal.parentId)
                 : 'Racine du modèle'
             }
             onCreate={name => {
@@ -1236,6 +1252,7 @@ export default function App() {
                   onChangeRow={(rowId, next) => dataroomAccessDraft.setRow(rowId, next)}
                   loading={accessRestrictionsList.loading || officeUsers.loading}
                   error={dataroomAccessSaveError ?? accessRestrictionsList.error ?? officeUsers.error}
+                  effectiveRoles={row => dataroomEffectiveRolesByRowId[row.id] ?? []}
                 />
               </div>
             }

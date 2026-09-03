@@ -49,10 +49,11 @@ def login_view(request):
     # compte pouvait ouvrir une session sur n'importe quel sous-domaine d'office,
     # même sans y être jamais rattaché (les endpoints de données revérifiaient
     # bien l'appartenance ensuite, donc pas de fuite, mais la connexion elle-même
-    # n'aurait jamais dû aboutir). _is_hyperadmin en exception délibérée : un
-    # hyperadmin n'a par construction AUCUN OfficeMembership nulle part (voir
-    # HyperadminAccess) et doit pouvoir se connecter depuis n'importe quel
-    # sous-domaine d'office.
+    # n'aurait jamais dû aboutir). _has_office_access inclut le rôle transverse
+    # hyperadmin (_effective_role) : un hyperadmin n'a par construction AUCUN
+    # OfficeMembership nulle part (voir HyperadminAccess) et doit pouvoir se
+    # connecter depuis n'importe quel sous-domaine d'office, avec tous les
+    # droits une fois connecté (décision du 03/09/2026).
     #
     # hyperadmin.localhost (02/09/2026, TenantResolutionMiddleware) est un
     # troisième cas : request.office y est toujours None (ce n'est jamais un
@@ -65,7 +66,7 @@ def login_view(request):
         office = request.office
         if office is None:
             return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-        if not user.memberships.filter(office=office).exists() and not _is_hyperadmin(user):
+        if not _has_office_access(user, office):
             return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     # Mot de passe validé, mais pas de session ouverte tant que la MFA n'est pas
@@ -179,7 +180,7 @@ def tenant_config(request):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     return Response({
@@ -200,17 +201,19 @@ def tenant_theme(request):
 
     La lecture est ouverte à tout membre de l'office : le thème conditionne
     l'affichage de chacun. L'écriture est réservée aux rôles admin et superadmin
-    — un membre ou un client ne repeint pas l'espace de toute l'étude.
+    — un membre ou un client ne repeint pas l'espace de toute l'étude. Un
+    hyperadmin (_effective_role toujours "superadmin") peut donc toujours
+    écrire, sur n'importe quel office.
     """
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    membership = request.user.memberships.filter(office=office).first()
-    if membership is None:
+    role = _effective_role(request.user, office)
+    if role is None:
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     if request.method == 'PUT':
-        if membership.role not in ('superadmin', 'admin'):
+        if role not in ('superadmin', 'admin'):
             return Response(
                 {"error": "seul un administrateur de l'office peut modifier l'apparence"},
                 status=403,
@@ -307,20 +310,53 @@ def coffre_fort_view(request):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
     if not office.enabled_modules.filter(slug="coffre-fort").exists():
         return Response({"error": "module non activé pour cet office"}, status=403)
     return Response({"message": "Contenu du module Coffre-fort (démo)"})
 
+def _effective_role(user, office):
+    """Rôle EFFECTIF de `user` pour `office` : celui de son OfficeMembership
+    s'il en a un, sinon "superadmin" pour un hyperadmin Notantis (voir
+    HyperadminAccess/_is_hyperadmin) — rôle TRANSVERSE à tous les offices, qui
+    a donc TOUS les droits sur CHAQUE office (décision du 03/09/2026, "je
+    voudrais que les hyperadmin aient tous les droits sur tous les offices")
+    sans jamais y avoir de ligne OfficeMembership réelle : ça préserve
+    l'invariant déjà documenté (rien ne distingue un hyperadmin dans
+    l'annuaire d'un office, aucune case "Hyperadmin" nulle part) tout en lui
+    donnant, EN PRATIQUE, exactement les mêmes droits qu'un superadmin
+    partout où il se connecte. None si ni l'un ni l'autre — aucun accès à cet
+    office.
+
+    Point d'entrée UNIQUE pour "quel rôle cet utilisateur a-t-il ici" —
+    _manager_role/_can_create_dataroom/_user_can_access/_has_office_access
+    passent tous par elle, plutôt que de relire `user.memberships` chacun de
+    son côté, pour que le bypass hyperadmin s'applique partout de façon
+    identique plutôt qu'au cas par cas."""
+    membership = user.memberships.filter(office=office).first()
+    if membership is not None:
+        return membership.role
+    if _is_hyperadmin(user):
+        return "superadmin"
+    return None
+
+def _has_office_access(user, office):
+    """True si `user` a un motif quelconque d'accéder à `office` — un vrai
+    OfficeMembership, ou le rôle transverse hyperadmin (_effective_role).
+    Porte d'entrée générique des endpoints d'un office, à la place d'un
+    `user.memberships.filter(office=office).exists()` direct."""
+    return _effective_role(user, office) is not None
+
 def _manager_role(user, office):
     """Rôle admin/superadmin de l'appelant pour CET office précis, ou None s'il n'en a
     pas (pas membre de cet office, ou membre mais avec un rôle inférieur) — jamais
-    déduit d'un rôle que l'appelant aurait sur un autre office (ex: carla)."""
-    membership = user.memberships.filter(office=office).first()
-    if membership is None or membership.role not in ("admin", "superadmin"):
+    déduit d'un rôle que l'appelant aurait sur un autre office (ex: carla). Inclut
+    le rôle effectif d'un hyperadmin (_effective_role, toujours "superadmin")."""
+    role = _effective_role(user, office)
+    if role not in ("admin", "superadmin"):
         return None
-    return membership.role
+    return role
 
 def _can_create_dataroom(user, office):
     """Créer une dataroom (POST /api/datarooms/ UNIQUEMENT — pas la création de
@@ -332,11 +368,13 @@ def _can_create_dataroom(user, office):
     en dur, pour réutiliser la même logique de rang que _roles_at_or_below/
     _validate_role_for_caller plutôt que d'en dupliquer une — pas un nouveau
     gate séparé. Périmètre volontairement susceptible d'évoluer encore selon
-    les retours (voir CLAUDE.md, "État réel du code") : pas un choix figé."""
-    membership = user.memberships.filter(office=office).first()
-    if membership is None:
+    les retours (voir CLAUDE.md, "État réel du code") : pas un choix figé.
+    Un hyperadmin (_effective_role toujours "superadmin") passe toujours ce
+    seuil."""
+    role = _effective_role(user, office)
+    if role is None:
         return False
-    return OfficeMembership.ROLE_RANK[membership.role] >= OfficeMembership.ROLE_RANK["membre"]
+    return OfficeMembership.ROLE_RANK[role] >= OfficeMembership.ROLE_RANK["membre"]
 
 def _roles_at_or_below(rank):
     """Rôles dont le rang est <= rank — ce qu'un gestionnaire de ce rang peut voir/gérer.
@@ -542,13 +580,14 @@ def consume_sso_ticket(request):
 # ---------------------------------------------------------------------------
 
 def _office_member_guard(request):
-    """(office, None) si l'appelant est membre de l'office résolu, (None, Response)
-    sinon — exactement les deux mêmes réponses que les vues existantes, factorisées
-    ici parce que les quatre vues de tags les répètent à l'identique."""
+    """(office, None) si l'appelant est membre de l'office résolu (ou hyperadmin,
+    voir _has_office_access), (None, Response) sinon — exactement les deux mêmes
+    réponses que les vues existantes, factorisées ici parce que les quatre vues
+    de tags les répètent à l'identique."""
     office = request.office
     if office is None:
         return None, Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return None, Response({"error": "accès non autorisé à cet office"}, status=403)
     return office, None
 
@@ -743,7 +782,7 @@ def datarooms_view(request):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     if request.method == 'POST':
@@ -878,7 +917,10 @@ def _user_can_access(user, office, dataroom, folder=None, document=None):
     de `user_ids`/`allowed_roles` garde quand même l'accès. C'est ce
     court-circuit, et lui seul, qui porte cette garantie — voir
     AccessRestriction, "superadmin" n'apparaît d'ailleurs jamais dans
-    `allowed_roles` (filtré par _clean_access_roles).
+    `allowed_roles` (filtré par _clean_access_roles). Un hyperadmin en
+    bénéficie de la même façon (_effective_role lui vaut toujours
+    "superadmin", changement du 03/09/2026) sans avoir de ligne
+    OfficeMembership réelle.
 
     Pour tout autre rôle : si une restriction existe quelque part sur la
     chaîne (_nearest_restriction, inchangée), l'accès est accordé si l'id de
@@ -894,15 +936,13 @@ def _user_can_access(user, office, dataroom, folder=None, document=None):
     par rôle). Un utilisateur sans membership pour cet office (ne devrait pas
     arriver : tous les appelants vérifient déjà l'appartenance en amont) est
     traité comme un client, par défaut fermé plutôt qu'ouvert."""
-    membership = user.memberships.filter(office=office).first()
-    if membership is not None and membership.role == "superadmin":
+    role = _effective_role(user, office)
+    if role == "superadmin":
         return True
     restriction = _nearest_restriction(dataroom, folder=folder, document=document)
     if restriction is not None:
-        return user.id in restriction.user_ids or (
-            membership is not None and membership.role in restriction.allowed_roles
-        )
-    return membership is not None and membership.role != "client"
+        return user.id in restriction.user_ids or (role is not None and role in restriction.allowed_roles)
+    return role is not None and role != "client"
 
 def _subtree_has_accessible_content(user, office, dataroom, folder=None):
     """True si le sous-arbre ENFANT de `folder` (racine de la dataroom si None) —
@@ -1125,7 +1165,7 @@ def documents_view(request, dataroom_id):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     dataroom, error = _dataroom_or_404(dataroom_id)
@@ -1182,7 +1222,7 @@ def folders_view(request, dataroom_id):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     dataroom, error = _dataroom_or_404(dataroom_id)
@@ -1382,7 +1422,7 @@ def search_view(request):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     query = (request.GET.get('q') or '').strip()
@@ -1563,7 +1603,7 @@ def document_content_view(request, dataroom_id, document_id):
     office = request.office
     if office is None:
         return Response({"error": "sous-domaine d'office non résolu"}, status=404)
-    if not request.user.memberships.filter(office=office).exists():
+    if not _has_office_access(request.user, office):
         return Response({"error": "accès non autorisé à cet office"}, status=403)
 
     dataroom, error = _dataroom_or_404(dataroom_id)

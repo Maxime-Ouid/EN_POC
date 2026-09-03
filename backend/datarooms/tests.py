@@ -1562,6 +1562,136 @@ class RoleBasedDefaultAccessTests(unittest.TestCase):
         self.assertEqual([d["id"] for d in data["documents"]], [self.doc_in_f1.id])
 
 
+class HyperadminFullAccessTests(unittest.TestCase):
+    """Teste le changement du 03/09/2026 (voir CLAUDE.md, "État réel du code",
+    demande utilisateur : "je voudrais que les hyperadmin aient tous les
+    droits sur tous les offices") : _effective_role fait qu'un hyperadmin
+    (HyperadminAccess, sans AUCUN OfficeMembership réel) se comporte partout
+    comme un superadmin de l'office sur lequel il se connecte — bypass
+    _user_can_access, passe tous les gates _manager_role/_can_create_dataroom,
+    sans jamais gagner de ligne OfficeMembership réelle (invariant préservé,
+    voir HyperadminAccess).
+
+    Même patron que RoleBasedDefaultAccessTests/SuperadminAndRoleAccessTests
+    ci-dessus (unittest.TestCase nu, tenant sqlite dédié migré/nettoyé par
+    test)."""
+
+    SUBDOMAIN = "hyperfullaccess"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Hyperadmin Full Access Office")
+        self.addCleanup(self.office.delete)
+
+        self.hyperadmin_user = User.objects.create_user(username="hfa_hyperadmin", password="pw123456")
+        self.addCleanup(self.hyperadmin_user.delete)
+        HyperadminAccess.objects.create(user=self.hyperadmin_user)
+
+        self.admin_user = User.objects.create_user(username="hfa_admin", password="pw123456")
+        self.addCleanup(self.admin_user.delete)
+        OfficeMembership.objects.create(user=self.admin_user, office=self.office, role="admin")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="D-hyperadmin")
+            self.folder = Folder.objects.create(dataroom=self.dataroom, parent=None, name="F1")
+            self.document = Document.objects.create(
+                dataroom=self.dataroom, folder=self.folder, name="doc.pdf", file="fake/doc.pdf"
+            )
+            # Restriction qui EXCLUT explicitement le hyperadmin (ni dans user_ids,
+            # ni son (absence de) rôle dans allowed_roles) — le bypass doit passer
+            # outre quand même, exactement comme pour un superadmin (voir
+            # SuperadminAndRoleAccessTests).
+            AccessRestriction.objects.create(folder=self.folder, user_ids=[self.admin_user.id], allowed_roles=[])
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def test_hyperadmin_bypasses_access_restriction_like_superadmin(self):
+        # Le hyperadmin n'est nommé nulle part dans la restriction du dossier, et
+        # n'a AUCUN OfficeMembership sur cet office — malgré ça, accès complet.
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+
+        res = self.client.get("/api/datarooms/", HTTP_HOST=host)
+        self.assertIn(self.dataroom.id, {d["id"] for d in res.json()})
+
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/folders/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([f["id"] for f in res.json()["folders"]], [self.folder.id])
+
+        res = self.client.get(
+            f"/api/datarooms/{self.dataroom.id}/documents/?folder={self.folder.id}", HTTP_HOST=host
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([d["id"] for d in res.json()], [self.document.id])
+
+    def test_hyperadmin_passes_manager_gated_endpoints(self):
+        # office-users (_manager_role) : un hyperadmin peut lister/créer/gérer les
+        # utilisateurs d'un office où il n'a jamais eu de membership.
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+
+        res = self.client.get("/api/office-users/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        usernames = {m["username"] for m in res.json()}
+        self.assertIn("hfa_admin", usernames)
+
+        # Peut même créer un membership superadmin — rang le plus élevé,
+        # confirmant _effective_role vaut bien "superadmin" et pas seulement
+        # "admin" pour un hyperadmin.
+        res = self.client.post(
+            "/api/office-users/",
+            {"username": "hfa_new_superadmin", "password": "S3curePassw0rd!", "role": "superadmin"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        self.addCleanup(lambda: User.objects.filter(username="hfa_new_superadmin").delete())
+
+        # dataroom_access_view (_manager_role) : peut aussi gérer les droits d'accès.
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/access/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+
+    def test_hyperadmin_can_create_dataroom(self):
+        # _can_create_dataroom : ouvert à partir de "membre", donc a fortiori au
+        # rôle effectif "superadmin" d'un hyperadmin.
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+
+        res = self.client.post(
+            "/api/datarooms/", {"name": "Créée par hyperadmin"},
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+
+    def test_hyperadmin_gains_no_real_office_membership(self):
+        # Invariant préservé : rien de ce qui précède ne doit avoir créé de ligne
+        # OfficeMembership réelle pour le hyperadmin — le bypass est entièrement
+        # calculé (_effective_role), jamais matérialisé en base.
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        self.client.get("/api/datarooms/", HTTP_HOST=host)
+        self.client.get("/api/office-users/", HTTP_HOST=host)
+
+        self.assertFalse(
+            OfficeMembership.objects.filter(user=self.hyperadmin_user, office=self.office).exists()
+        )
+
+
 class SuperadminAndRoleAccessTests(unittest.TestCase):
     """Teste le changement du 02/09/2026 (voir CLAUDE.md, "État réel du code") :
     _user_can_access gagne un bypass superadmin inconditionnel (avant toute

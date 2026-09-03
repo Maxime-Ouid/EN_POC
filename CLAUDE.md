@@ -2087,6 +2087,305 @@ session si le code a bougé.
     perceptible subsiste sur un tableau très large (type "Vente immobilière
     — standard", 63 lignes), elle sera traitée séparément le cas échéant.
 
+- **✅ Fait le 03/09/2026 — Template devient un tableau direct (plus
+  d'Explorer), troncature des puces d'utilisateurs nommés + popup, Dataroom
+  inchangé** : redesign issu de plusieurs allers-retours avec l'utilisateur
+  en mode plan (voir le fil de conversation) — la demande initiale
+  ("fusionner Arborescence et Droits d'accès en un panneau qui suit la
+  sélection") a été réajustée en cours de route : l'utilisateur voulait au
+  contraire que les droits de CHAQUE dossier soient visibles EN PERMANENCE,
+  sans sélection préalable — d'où un tableau (comme l'ancien
+  `AccessRightsTable`, jamais remplacé) plutôt qu'un panneau qui ne montre
+  qu'un élément à la fois. Décision finale, qui fait foi :
+  - **`AccessRightsTable.tsx`** : gardé et étendu, PAS supprimé — c'est lui
+    qui porte le même visuel entre Template et Dataroom. Deux nouvelles
+    props optionnelles : `renderRowBadges` (pastilles insérées après le
+    libellé — Template uniquement) et `renderRowActions` (colonne "Actions"
+    finale, affichée seulement si fournie — Template uniquement ; Dataroom
+    ne passe ni l'une ni l'autre, donc **rigoureusement inchangé** dans son
+    onglet "Droits d'accès", qui reste, lui, en place tel quel : une
+    dataroom a des PIÈCES en plus des dossiers, qui restent des lignes
+    `kind: 'document'` du même tableau — jamais des nœuds d'arbre, donc pas
+    concernées par la disparition de l'Explorer côté Template).
+  - **`components/organisms/NamedUsersEditor.tsx`** (nouveau) : remplace le
+    contenu de la cellule "Utilisateurs nommés" dans `AccessRightsTable`,
+    utilisé identiquement par les deux écrans. Ligne visible
+    (`display:flex; flex-wrap:nowrap`) ne montrant que les puces qui
+    tiennent dans la largeur RÉELLE du conteneur (mesurée via
+    `ResizeObserver` sur un `<div style="width:100%">`, recalculée au
+    montage et à chaque redimensionnement — jamais un seuil de nombre de
+    puces codé en dur) ; le reste devient un bouton "+N autres…" qui ouvre
+    une `Modal` listant TOUS les userIds (puces retirables + son propre
+    `<Select>` d'ajout, partageant le même état que la ligne tronquée — un
+    ajout/retrait dans la popup se reflète donc immédiatement dans le
+    tableau une fois la popup fermée, vérifié en Chrome réel). Le
+    `<Select>` "+ Ajouter…" du tableau, lui, reste TOUJOURS visible sous les
+    puces, jamais tronqué. Algorithme de mesure : une ligne cachée
+    (`position:'fixed', top:-10000, left:-10000` — hors flux, aucun risque
+    de scroll parasite, contrairement à un `position:absolute` dans un
+    ancêtre non maîtrisé) contient TOUTES les puces + une puce factice
+    "+N…" pour réserver la largeur du bouton d'overflow ; si la somme de
+    TOUTES les puces tient sans réserver cette largeur, rien n'est tronqué.
+    Piège déjà documenté ailleurs dans ce fichier (`DashboardGrid.tsx`,
+    `WidthProvider`) appliqué ici aussi : l'observation se fait dans un
+    `useLayoutEffect` standard (`observe`/`disconnect` dans le cleanup), pas
+    un callback de montage one-shot, pour rester correct sous le double
+    montage de `<StrictMode>`.
+  - **`access/templateVisibility.ts`** gagne `computeRoleBadgesByFolderId`
+    (nouvelle fonction exportée, colocalisée avec `visibleRolesFor`) :
+    encapsule tout le parcours d'arbre nécessaire pour calculer, à partir du
+    DRAFT courant (pas nécessairement enregistré), les rôles pour lesquels
+    chaque dossier serait visible une fois le modèle appliqué — indexé par
+    id de LIGNE du tableau (`"folder:<id>"`). Remplace `toVisibilityNodes`/
+    la marche par id qui vivaient auparavant à l'intérieur de
+    `TemplateDetailScreen.tsx` (l'écran n'a plus besoin de connaître la
+    forme de l'arbre, il ne reçoit plus que des lignes déjà aplaties).
+  - **`components/pages/TemplateDetailScreen.tsx`** entièrement réécrit,
+    redevenu un pur composant de présentation (comme avant le chantier des
+    droits) : plus d'`Explorer`, plus de `DocPanel`, plus de toggle
+    Arborescence/Droits d'accès. Nouvelles props : `rows` (déjà aplati +
+    fusionné au brouillon par App.tsx, même forme que Dataroom),
+    `officeUsers`, `onChangeRow`, `rowBadges`, `onCreateRootFolder` (bouton
+    persistant "+ Nouveau dossier" à la racine), `onCreateFolder`/
+    `onRenameFolder`/`onDeleteFolder` (déclenchés PAR LIGNE via
+    `renderRowActions` — icônes `i-plus`/`i-dots`/`i-x`, toutes trois déjà
+    existantes dans `IconSprite.tsx`, aucune nouvelle icône ajoutée),
+    `accessSaveBar` (la barre Enregistrer/Annuler, contenu inchangé,
+    simplement déplacée au-dessus du tableau). Le menu "⋮" de renommage
+    reste séparé des droits (ouvre toujours `RenameFolderModal`, inchangé).
+  - **`App.tsx`** : `flattenDataroomAccessRows`/`dataroomAccessRows`/
+    `dataroomAccessTableRows` inchangés (toujours utilisés par l'onglet
+    Dataroom). `flattenTemplateAccessRows`/`templateAccessRows` GARDÉS
+    (servent encore à construire `templateRowBadges` via
+    `computeRoleBadgesByFolderId`) ; seul `templateAccessTableRows` reste
+    tel quel mais change de destination (alimente directement l'écran au
+    lieu d'un mode parmi deux). `toTemplateTreeNodes`/`templateTreeNodes`
+    (conversion vers `TreeNodeData`, qui n'a plus de consommateur une fois
+    l'Explorer retiré de Template) supprimés ; les 3 usages de
+    `findFolderLabel(templateTreeNodes, ...)` remplacés par un nouveau
+    petit helper `templateFolderLabel(rows, folderId)`, qui lit directement
+    le libellé dans la rangée plate (plus besoin de parcourir un arbre pour
+    un simple lookup par id). Bloc Dataroom (JSX) **rigoureusement
+    inchangé**.
+  - **Vérifié en Chrome réel** (`carla`, superadmin, `officea.localhost`,
+    template "Vente immobilière — standard", 14 rubriques) : tableau direct
+    sans arbre, chaque ligne affiche déjà ses pastilles de visibilité sans
+    clic ; bouton "+" d'une ligne ouvre bien "Nouveau dossier — Dans :
+    <ligne>" ; "⋮" ouvre le renommage seul ; icône de suppression retire la
+    ligne (+ ses enfants) après confirmation ; cocher "Client" sur une ligne
+    profonde propage en direct les pastilles "A M C" sur TOUS ses parents
+    dans le tableau (même mécanique de visibilité de chemin qu'avant,
+    maintenant visible sans navigation) ; ajout de 4 utilisateurs nommés à
+    une ligne puis réduction forcée de la largeur du conteneur (`maxWidth`
+    injecté en test) déclenche bien "+4 autres…", la popup liste les 4,
+    retirer un utilisateur dans la popup met à jour "+N autres…" AVANT même
+    la fermeture de la popup ; `Annuler` réinitialise tout le brouillon (y
+    compris les lignes touchées par erreur) ; un `Enregistrer` réel suivi
+    d'un rechargement complet de page confirme la persistance côté serveur
+    (vérifié aussi par inspection directe de `TemplateFolder.allowed_roles`
+    en shell Django) ; l'onglet "Droits d'accès" d'une vraie dataroom
+    (`Folder Test Dataroom`) reste identique à avant ce chantier — mêmes
+    lignes dossier/pièce, pas de colonne Actions, pas de pastilles. Aucune
+    erreur console sur les deux écrans. Données de test nettoyées après
+    vérification (dossier de test supprimé, case cochée pour le test de
+    persistance revertée et resauvegardée).
+  - **Vérifications automatisées** : `tsc -b` (0 erreur), `npm run lint` (0
+    erreur, aucun nouvel avertissement), `npm run check:ds` (189 fichiers,
+    aucun écart nouveau), `npm run build` (sans erreur). `python manage.py
+    test` — **165/165 tests verts**, aucun changement backend dans ce
+    chantier (redesign frontend pur, les endpoints `/api/.../access/`
+    existants suffisent tels quels).
+
+- **✅ Fait le 03/09/2026 (plus tard dans la journée) — pastilles A/M/C
+  retirées côté Template, case de rôle grisée par héritage étendue à une
+  vraie dataroom** : deux ajustements demandés sur l'entrée juste au-dessus,
+  le jour même.
+  - **Pastilles retirées** : `renderRowBadges`/`rowBadges` disparaissent
+    entièrement d'`AccessRightsTable.tsx`/`TemplateDetailScreen.tsx` — jugées
+    redondantes avec les cases à cocher elles-mêmes, qui portent désormais le
+    même renseignement directement (voir point suivant).
+  - **Case de rôle grisée par héritage, plutôt qu'une pastille séparée** :
+    remplace le mécanisme de pastilles pour Template ET l'étend pour la
+    première fois à Dataroom (qui n'avait jusqu'ici AUCUN affichage
+    d'héritage). Donner un rôle à un sous-dossier ou une pièce coche
+    désormais **aussi** ce rôle, à l'affichage, sur TOUS ses parents dans le
+    tableau — transitivement jusqu'à la racine (le `Template` ou la
+    `Dataroom` elle-même) — la case correspondante y apparaît cochée et
+    **désactivée** (`disabled`, infobulle "Accordé par un sous-dossier ou une
+    pièce — modifiable là où il est réellement accordé").
+  - **Sémantique volontairement différente de `_user_can_access`/
+    `_level_visible` côté serveur** — confirmé explicitement avec
+    l'utilisateur avant implémentation ("tant que cela ne bloque rien sur les
+    droits d'accès derrière") : ce calcul est un **pur affichage côté
+    client**, recalculé à chaque rendu depuis le brouillon courant
+    (`useAccessRightsDraft`), **jamais écrit** sur la ligne parente qui
+    l'affiche — décocher la ligne enfant fait disparaître le grisé du parent
+    immédiatement, sans aucun appel réseau dans les deux sens. N'imite PAS le
+    défaut serveur "aucune restriction nulle part = accès ouvert" (voir
+    l'entrée du 01/09/2026 sur `_user_can_access`) : seule une case
+    **explicitement cochée** quelque part dans le sous-arbre compte ici — un
+    parent sans aucun descendant ayant de rôle explicite ne grise jamais rien
+    (le texte d'aide au-dessus du tableau couvre déjà ce défaut serveur, pas
+    besoin de le répéter case par case).
+  - **`access/effectiveRoles.ts`** (nouveau, remplace entièrement
+    `access/templateVisibility.ts`, supprimé) : `subtreeGrants`/
+    `effectiveRolesFor`/`computeEffectiveRolesByRowId` (parcours récursif
+    générique sur un `RoleTreeNode { id, allowedRoles, children? }`) +
+    deux fonctions exportées qui adaptent cet arbre générique aux deux
+    formes de données réelles : `templateEffectiveRoles(tree,
+    allowedRolesFor)` (à partir de `TemplateFolderTreeNode`) et
+    `dataroomEffectiveRoles(tree, rootDocuments, documentsByFolderId,
+    allowedRolesFor)` (à partir de `FolderTreeNode` — les pièces sont des
+    feuilles, jamais de `children`, la racine synthétique porte l'id
+    `"dataroom"`). Les deux renvoient un `Record<rowId, string[]>` — même
+    convention d'id que `AccessRightsRow` (`"dataroom"`/`"folder:<id>"`/
+    `"document:<id>"`).
+  - **`AccessRightsTable.tsx`** : `renderRowBadges` remplacé par
+    `effectiveRoles?: (row: AccessRightsRow) => string[]` (optionnelle,
+    absente = comportement d'avant, aucune case jamais grisée). Chaque case
+    de rôle devient `checked={direct || inherited}`,
+    `disabled={inherited}` (`inherited = !direct && effectiveRoles(row).
+    includes(role)` — une ligne qui coche elle-même le rôle reste toujours
+    éditable, seul l'héritage PUR désactive).
+  - **`App.tsx`** : deux nouveaux memos parallèles à
+    `templateAccessTableRows`/`dataroomAccessTableRows`, tous deux dérivés du
+    même brouillon déjà en place (aucun nouvel état, aucun nouvel appel
+    réseau) — `templateEffectiveRolesByRowId` (via `templateEffectiveRoles`)
+    et `dataroomEffectiveRolesByRowId` (nouveau pour Dataroom, via
+    `dataroomEffectiveRoles`). Branchés respectivement sur
+    `<TemplateDetailScreen effectiveRoles={...}>` et sur l'`<AccessRightsTable
+    effectiveRoles={row => dataroomEffectiveRolesByRowId[row.id] ?? []}>` de
+    l'onglet "Droits d'accès" — **premier changement de ce chantier sur le
+    bloc Dataroom**, jusqu'ici rigoureusement intact depuis le 03/09/2026
+    (matin) ; limité à l'ajout de cette seule prop, aucune autre modification
+    de câblage.
+  - **Vérifié en Chrome réel** (`carla`, superadmin, `officea.localhost`) :
+    - Template "Dossier de divorce" (3 dossiers racine) : plus aucune
+      pastille A/M/C dans "Élément" ; sous-dossier "Bruno" créé sous
+      "Conjoint 1", case Admin cochée sur "Bruno" → "Conjoint 1" se coche
+      et se grise instantanément (zoom confirmé : case bleue normale sur
+      "Bruno", case grisée sur "Conjoint 1"), "Conjoint 2"/"Magistrats"
+      non affectés ; clic sur la case grisée de "Conjoint 1" ne fait rien
+      (toujours grisée, "Bruno" toujours coché) ; compteur "Enregistrer
+      (1)" ne compte QUE la ligne réellement modifiée ("Bruno"), jamais le
+      parent grisé par calcul ; "Annuler" restaure les deux lignes à l'état
+      d'origine. Dossier de test "Bruno" supprimé après vérification.
+    - Dataroom réelle "Succession Dupont" (2 pièces à la racine, pas de
+      sous-dossier) : cocher Membre sur la pièce `contrat.pdf` grise
+      immédiatement Membre sur la ligne racine "Succession Dupont" (le
+      même mécanisme, jamais démontré pour une dataroom avant ce
+      chantier), `minio-test.pdf` non affecté ; "Annuler" restaure l'état
+      d'origine, rien n'a jamais été enregistré côté serveur.
+  - **Vérifications automatisées** : `tsc -b` (0 erreur), `npm run lint` (0
+    erreur, aucun nouvel avertissement), `npm run check:ds` (189 fichiers,
+    aucun écart nouveau), `npm run build` (sans erreur). `python manage.py
+    test` — **165/165 tests verts**, aucun changement backend (chantier
+    frontend pur, comme celui du matin).
+
+- **✅ Fait le 03/09/2026 (fin de journée) — un hyperadmin a désormais TOUS
+  les droits sur TOUS les offices** (demande utilisateur : "je voudrais que
+  les hyperadmin aient tous les droits sur tous les offices") : jusqu'ici,
+  `_is_hyperadmin` ne gatait QUE les trois endpoints `/api/hyperadmin/...` et
+  la connexion elle-même (déjà permise sur n'importe quel sous-domaine
+  d'office, correctif du 01/09/2026) — une fois connecté sur un office
+  précis, un hyperadmin s'y comportait comme n'importe quel compte SANS
+  `OfficeMembership`, c'est-à-dire refusé partout (`_manager_role`/
+  `_user_can_access`/`_can_create_dataroom` et une douzaine de gates
+  `user.memberships.filter(office=office).exists()` renvoyaient tous 403/404).
+  - **`_effective_role(user, office)`** (`views.py`, nouvelle fonction, juste
+    avant `_manager_role`) : rôle réel de l'`OfficeMembership` s'il existe,
+    sinon `"superadmin"` pour un hyperadmin (`_is_hyperadmin`), sinon `None`.
+    Point d'entrée UNIQUE désormais pour "quel rôle cet utilisateur a-t-il
+    sur cet office" — `_manager_role`/`_can_create_dataroom`/
+    `_user_can_access` sont réécrites pour l'appeler plutôt que de relire
+    `user.memberships` chacune de son côté, pour que le bypass s'applique
+    partout de façon identique. **Invariant préservé** : aucune ligne
+    `OfficeMembership` n'est jamais créée pour un hyperadmin — le rôle
+    `"superadmin"` est calculé à la volée à chaque appel, jamais matérialisé
+    en base (vérifié par test, voir plus bas) ; rien ne le distingue donc
+    dans l'annuaire d'un office (`office-users`), conformément à la décision
+    déjà prise pour `HyperadminAccess` (aucune case "Hyperadmin" nulle part).
+  - **`_has_office_access(user, office)`** (nouvelle, juste après) :
+    `_effective_role(...) is not None` — remplace directement les ~10
+    `user.memberships.filter(office=office).exists()` qui servaient de porte
+    d'entrée générique à un endpoint d'office (`tenant_config`,
+    `coffre_fort_view`, `_office_member_guard` (tags), `datarooms_view`,
+    `documents_view`, `folders_view`, `search_view`,
+    `document_content_view`, et le contrôle de connexion dans `login_view`,
+    déjà partiellement écrit pour l'exception hyperadmin — simplifié pour
+    passer par ce même point d'entrée unique).
+  - **`_manager_role`/`_can_create_dataroom`/`_user_can_access`** réécrites
+    pour consulter `_effective_role` au lieu de relire `user.memberships`
+    directement — comportement inchangé pour tout utilisateur réel (même
+    lecture, juste indirectement), mais un hyperadmin y obtient désormais
+    `"superadmin"` partout. Conséquence en cascade, SANS AUCUN changement
+    dans les ~10 vues qui les appellent déjà (`office_users_view`,
+    `attach_office_user_view`, `office_user_detail_view`,
+    `dataroom_access_view`/`folder_access_view`/`document_access_view`,
+    `access_restrictions_view`, `template*_view`, `folder_detail_view`
+    (renommage), `tag_detail_view`, `POST /api/datarooms/`, tout
+    `_user_can_access`/`_level_visible`/`_subtree_has_accessible_content`) :
+    un hyperadmin passe tous ces gates, et le bypass superadmin déjà
+    existant dans `_user_can_access` (02/09/2026) s'applique à lui de la même
+    façon — accès inconditionnel même à un contenu dont une restriction
+    l'exclurait explicitement de `user_ids`/`allowed_roles`.
+  - **`tenant_theme`** (écriture réservée admin/superadmin) adaptée pour lire
+    `_effective_role` plutôt qu'un objet `membership.role` — pas de
+    changement de comportement pour un vrai membre, hyperadmin peut
+    désormais écrire.
+  - **Exception délibérée, documentée, non traitée** : `dashboard_view`
+    (disposition personnelle de l'écran d'accueil) reste gatée sur un VRAI
+    `OfficeMembership` — c'est une préférence PERSONNELLE stockée sur la
+    ligne de membership elle-même (`membership.dashboard`), et un hyperadmin
+    n'en a structurellement aucune où l'écrire sans violer l'invariant
+    ci-dessus. Un hyperadmin qui visite l'écran d'accueil d'un office reçoit
+    donc le template par défaut de son rôle sans pouvoir le personnaliser
+    pour CET office — le hook front (`useDashboardLayout`) traite déjà tout
+    échec de lecture comme "jamais personnalisé" (repli silencieux sur le
+    template, pas d'erreur affichée), donc aucune régression visible, juste
+    une fonctionnalité de confort qui ne s'applique pas à ce rôle. Pas un
+    "droit" au sens de la demande — une préférence d'affichage individuelle.
+  - **`issue_sso_ticket` (bascule d'office sans reconnexion) volontairement
+    INCHANGÉE** : ce mécanisme sert à un compte avec de VRAIS
+    `OfficeMembership` sur plusieurs offices (le scénario carla) de passer de
+    l'un à l'autre sans ressaisir ses identifiants — un hyperadmin peut déjà
+    se connecter directement sur n'importe quel sous-domaine d'office
+    (`login_view`, correctif du 01/09/2026), ce n'est donc pas un mécanisme
+    dont il a besoin. Étendre `issue_sso_ticket` à un rôle qui n'apparaît
+    dans AUCUNE liste `my-offices` aurait été un chantier séparé, hors
+    demande (le sélecteur d'offices de l'AppShell resterait vide pour un
+    hyperadmin quoi qu'il arrive, `my-offices` continuant de ne lister que
+    les vrais `OfficeMembership`).
+  - **Tests** (`HyperadminFullAccessTests`, `datarooms/tests.py`, 4 nouveaux,
+    même patron `unittest.TestCase` nu + tenant sqlite dédié que
+    `RoleBasedDefaultAccessTests`/`SuperadminAndRoleAccessTests`) : un
+    hyperadmin SANS AUCUN `OfficeMembership` contourne une `AccessRestriction`
+    qui l'exclut explicitement de `user_ids`/`allowed_roles` sur un dossier
+    imbriqué, exactement comme un superadmin
+    (`test_hyperadmin_bypasses_access_restriction_like_superadmin`) ; passe
+    les endpoints gatés `_manager_role` — liste les membres de l'office (y
+    compris son superadmin), crée même un membership `role="superadmin"`
+    (confirme que `_effective_role` vaut bien `"superadmin"` et pas
+    seulement `"admin"`), gère les droits d'accès d'une dataroom
+    (`test_hyperadmin_passes_manager_gated_endpoints`) ; peut créer une
+    dataroom (`test_hyperadmin_can_create_dataroom`) ; et, régression de
+    contrôle de l'invariant, aucune de ces actions ne crée de ligne
+    `OfficeMembership` réelle pour le hyperadmin
+    (`test_hyperadmin_gains_no_real_office_membership`). Suite complète
+    relancée : **169/169 tests verts** (165 existants + 4 nouveaux, aucune
+    régression).
+  - **Vérifié aussi en Chrome réel** (compte `hyperadmin`, dispositif TOTP déjà
+    confirmé dans cet environnement) : connexion directe sur
+    `officea.localhost:5173` (pas `hyperadmin.localhost`) → shell normal de
+    l'office (`AppShell`, pas l'app hyperadmin séparée) ; « Annuaire de
+    l'étude » affiche les 4 membres réels d'Office A, carla comprise avec son
+    rôle superadmin — et `hyperadmin` lui-même N'Y APPARAÎT PAS (invariant
+    confirmé visuellement, pas seulement par test) ; « Dossiers » affiche les
+    6 datarooms réelles de l'office, bouton « Nouveau dossier » disponible ;
+    Personnalisation → onglet Template (gate `_manager_role`) charge les 3
+    modèles réels de l'office sans erreur. Déconnexion en fin de vérification
+    (ferme toutes les sessions, comportement du 02/09/2026, inchangé ici).
+
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
 **⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**
@@ -2282,6 +2581,16 @@ couverture.
       ligne d'`OfficeUsersScreen`. Vérifié en Chrome réel (bypass superadmin,
       tableau, renommage, badges de visibilité en direct côté template,
       modale Restrictions) — voir "État réel du code", 03/09/2026.
+      **Template repassé en tableau direct, sans Explorer, le même
+      03/09/2026 (plus tard dans la journée)** : les droits de chaque
+      dossier sont visibles en permanence, sans sélection préalable
+      (demande explicite de l'utilisateur, après un premier essai en
+      panneau-sur-sélection jugé pas assez direct) — `AccessRightsTable`
+      gagne `renderRowActions`/`renderRowBadges` (Template seulement,
+      Dataroom inchangé) et la cellule "Utilisateurs nommés" tronque
+      désormais selon la largeur réelle avec une popup "+N autres…"
+      (`NamedUsersEditor.tsx`, nouveau) — voir l'entrée dédiée de "État réel
+      du code".
 - [x] Templates de dataroom (structure de dossiers réutilisable) — **backend
       fait le 01/09/2026** : modèles `Template`/`TemplateFolder` (base tenant,
       voir "Modèle de données clé"), CRUD réservé admin/superadmin
@@ -2321,7 +2630,13 @@ couverture.
       activation/désactivation, gestion des modules (`GET
       /api/hyperadmin/modules/`, nouveau). Les endpoints `/api/hyperadmin/...`
       eux-mêmes restent volontairement indépendants de l'hôte (décision
-      inchangée). Notifications globales laissées au backlog.
+      inchangée). Notifications globales laissées au backlog. **Tous les
+      droits sur tous les offices depuis le 03/09/2026** (`_effective_role`,
+      voir "État réel du code") : un hyperadmin connecté sur N'IMPORTE QUEL
+      sous-domaine d'office s'y comporte comme un superadmin (bypass complet
+      des restrictions d'accès, tous les endpoints de gestion), sans jamais
+      obtenir de ligne `OfficeMembership` réelle — invariant vérifié par
+      test ET en Chrome (absent de l'annuaire de l'office qu'il visite).
 - [x] **Tags** (catalogue par office, pose sur dossiers ET pièces, filtre et
       recherche) — fait le 01/09/2026 : modèle `Tag`, création à la volée
       dédupliquée sur le nom replié, filtre multi-sélection en OU, tags
