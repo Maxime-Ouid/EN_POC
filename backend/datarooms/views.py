@@ -1495,13 +1495,91 @@ def _folder_path_labels(folder):
         node = node.parent
     return list(reversed(labels))
 
+def _accessible_stats(user, office, dataroom, folder=None):
+    """Ce que `user` peut RÉELLEMENT ouvrir sous `folder` (racine de `dataroom` si None),
+    à toute profondeur : (nombre de pièces, nombre de sous-dossiers, date de dépôt de la
+    pièce la plus récente ou None).
+
+    Passe par _user_can_access/_level_visible et par rien d'autre : un compteur est une
+    fuite d'information comme une autre, et annoncer « 12 pièces » sur un dossier dont
+    onze sont restreintes révélerait leur existence — exactement ce que la recherche
+    s'interdit déjà pour les lignes elles-mêmes (voir search_view).
+
+    Un sous-dossier de TRANSIT (fermé lui-même mais menant à un contenu accordé plus
+    bas) est compté : c'est un dossier que l'utilisateur verra vraiment en ouvrant le
+    dossier, même règle que les endpoints de lecture.
+
+    Recalculée à chaque requête, sans cache — même parti pris que
+    _subtree_has_accessible_content, pour la même raison (taille d'une dataroom de POC),
+    et le nombre de dossiers examinés par frappe reste borné par SEARCH_LIMIT_PER_KIND.
+    """
+    documents = 0
+    folders = 0
+    last = None
+    for d in Document.objects.filter(dataroom=dataroom, folder=folder):
+        if not _user_can_access(user, office, dataroom, folder=folder, document=d):
+            continue
+        documents += 1
+        if last is None or d.uploaded_at > last:
+            last = d.uploaded_at
+    for f in Folder.objects.filter(dataroom=dataroom, parent=folder):
+        if not _level_visible(user, office, dataroom, folder=f):
+            continue
+        folders += 1
+        sub_documents, sub_folders, sub_last = _accessible_stats(
+            user, office, dataroom, folder=f
+        )
+        documents += sub_documents
+        folders += sub_folders
+        if sub_last is not None and (last is None or sub_last > last):
+            last = sub_last
+    return documents, folders, last
+
+def _file_kind(name):
+    """« PDF », « DOCX »… ou None quand le nom ne porte pas d'extension exploitable.
+
+    Lu sur le NOM et non sur le fichier stocké, et sans le POIDS : le stockage est
+    S3/MinIO (settings.STORAGES), donc `document.file.size` coûte une requête HEAD par
+    résultat — jusqu'à vingt par frappe sur un endpoint appelé à chaque caractère. Si
+    le poids devient nécessaire, il se stocke à l'upload (colonne + migration), il ne
+    se lit pas ici.
+    """
+    _, dot, ext = name.rpartition('.')
+    if not dot or not ext.isalnum() or len(ext) > 5:
+        return None
+    return ext.upper()
+
+# Champs de fiche communs à TOUS les types de résultat (ajoutés le 02/09/2026 : la
+# palette n'avait que le nom, le type et un chemin qui, pour un dossier, répétait le
+# nom). Valeurs neutres par défaut plutôt qu'absence de clé : le front n'a pas à
+# tester la présence d'un champ type par type, et un résultat sans tags doit se lire
+# comme un résultat aux tags vides.
+#
+# `location` est l'endroit OÙ SE TROUVE l'élément — ses ancêtres, sans lui — là où
+# `path` (inchangé) est son chemin complet, lui inclus. Les deux existent parce
+# qu'ils ne répondent pas à la même question : la palette affiche le nom en titre,
+# donc c'est `location` qu'elle met en dessous.
+_HIT_FIELDS = {
+    "location": "",
+    "tags": [],
+    "document_count": None,
+    "folder_count": None,
+    "created_at": None,
+    "last_activity": None,
+    "file_kind": None,
+    "role": None,
+    "email": None,
+}
+
 # Les deux seuls types de résultats qui peuvent remonter par DEUX chemins (leur nom ou
 # un de leurs tags) : la construction du dict est factorisée pour que les deux passages
 # ne puissent pas diverger — un `path` calculé deux fois finirait par ne plus être le
 # même. `matched_tag` reste None sur une correspondance par nom : c'est la palette qui
 # décide d'afficher une justification, elle ne doit pas avoir à la deviner.
-def _dataroom_hit(dataroom, matched_tag=None):
+def _dataroom_hit(user, office, dataroom, matched_tag=None):
+    documents, folders, last = _accessible_stats(user, office, dataroom)
     return {
+        **_HIT_FIELDS,
         "kind": "dataroom",
         "id": dataroom.id,
         "name": dataroom.name,
@@ -1510,6 +1588,14 @@ def _dataroom_hit(dataroom, matched_tag=None):
         "folder_id": None,
         "path": dataroom.name,
         "matched_tag": matched_tag,
+        # Rien au-dessus d'un dossier : il est à la racine de l'étude, et l'étude est
+        # la seule dans laquelle on cherche.
+        "location": "",
+        "tags": _tags_of(dataroom),
+        "document_count": documents,
+        "folder_count": folders,
+        "created_at": dataroom.created_at,
+        "last_activity": last,
     }
 
 def _document_hit(document, matched_tag=None):
@@ -1517,6 +1603,7 @@ def _document_hit(document, matched_tag=None):
     # niveau que l'interface doit ouvrir pour la montrer, pas la pièce elle-même.
     path_labels = _folder_path_labels(document.folder) if document.folder else []
     return {
+        **_HIT_FIELDS,
         "kind": "document",
         "id": document.id,
         "name": document.name,
@@ -1525,6 +1612,37 @@ def _document_hit(document, matched_tag=None):
         "folder_id": document.folder_id,
         "path": " / ".join([document.dataroom.name, *path_labels, document.name]),
         "matched_tag": matched_tag,
+        "location": " / ".join([document.dataroom.name, *path_labels]),
+        "tags": _tags_of(document),
+        "created_at": document.uploaded_at,
+        "file_kind": _file_kind(document.name),
+    }
+
+def _folder_hit(user, office, folder):
+    """Un sous-dossier. Pas de `matched_tag` possible ni de tags à énumérer : le M2M
+    n'est déclaré que côté Dataroom et Document (voir models.py)."""
+    labels = _folder_path_labels(folder)
+    documents, folders, last = _accessible_stats(
+        user, office, folder.dataroom, folder=folder
+    )
+    return {
+        **_HIT_FIELDS,
+        "kind": "folder",
+        "id": folder.id,
+        "name": folder.name,
+        "dataroom_id": folder.dataroom_id,
+        "dataroom_name": folder.dataroom.name,
+        "folder_id": folder.id,
+        "path": " / ".join([folder.dataroom.name, *labels]),
+        # Toujours None : un Folder ne porte pas de tags. Le champ est quand même
+        # présent pour que la forme d'un résultat ne dépende pas de son type.
+        "matched_tag": None,
+        # Ses ancêtres, lui exclu — `labels` se termine par lui-même.
+        "location": " / ".join([folder.dataroom.name, *labels[:-1]]),
+        "document_count": documents,
+        "folder_count": folders,
+        "created_at": folder.created_at,
+        "last_activity": last,
     }
 
 @api_view(['GET'])
@@ -1554,6 +1672,16 @@ def search_view(request):
     palette). Les éléments trouvés par leur tag portent `matched_tag` : sans lui, la
     palette afficherait un nom où la frappe est introuvable, et le résultat paraîtrait
     arbitraire.
+
+    Contenu d'un résultat (02/09/2026) : chaque ligne porte de quoi être reconnue sans
+    être ouverte — `location` (les ancêtres de l'élément, là où `path` est son chemin
+    complet, lui inclus), ses `tags`, sa date, et selon le type le contenu accessible
+    (`document_count`/`folder_count`/`last_activity`), le type de fichier (`file_kind`)
+    ou le rôle et l'adresse (`role`/`email`). Deux choix à retenir : les compteurs
+    passent par les mêmes contrôles d'accès que les lignes (_accessible_stats — un
+    compteur ne doit pas révéler une pièce restreinte), et le POIDS d'une pièce est
+    volontairement absent (une requête HEAD S3 par résultat, à chaque frappe — voir
+    _file_kind).
 
     Limite connue : la casse n'est repliée que pour l'ASCII — « ERIC » trouve
     « eric », mais « ÉRIC » ne trouve pas « éric ». Accepté tel quel pour le POC
@@ -1597,11 +1725,13 @@ def search_view(request):
     # scan_limit + 1 : la ligne excédentaire n'est jamais affichée, elle sert
     # uniquement à savoir que la fenêtre était pleine.
     matched_datarooms, cut = take(
-        Dataroom.objects.filter(name__iregex=name_pattern).order_by('name')[:scan_limit + 1],
+        Dataroom.objects.filter(name__iregex=name_pattern)
+        .prefetch_related('tags')
+        .order_by('name')[:scan_limit + 1],
         lambda d: _level_visible(user, office, d),
     )
     truncated = truncated or cut
-    results.extend(_dataroom_hit(d) for d in matched_datarooms)
+    results.extend(_dataroom_hit(user, office, d) for d in matched_datarooms)
 
     matched_folders, cut = take(
         Folder.objects.filter(name__iregex=name_pattern)
@@ -1610,24 +1740,12 @@ def search_view(request):
         lambda f: _level_visible(user, office, f.dataroom, folder=f),
     )
     truncated = truncated or cut
-    for f in matched_folders:
-        results.append({
-            "kind": "folder",
-            "id": f.id,
-            "name": f.name,
-            "dataroom_id": f.dataroom_id,
-            "dataroom_name": f.dataroom.name,
-            "folder_id": f.id,
-            "path": " / ".join([f.dataroom.name, *_folder_path_labels(f)]),
-            # Toujours None : un Folder ne porte pas de tags (M2M déclarés côté
-            # Dataroom et Document seulement, voir models.py). Le champ est quand même
-            # présent pour que la forme d'un résultat ne dépende pas de son type.
-            "matched_tag": None,
-        })
+    results.extend(_folder_hit(user, office, f) for f in matched_folders)
 
     matched_documents, cut = take(
         Document.objects.filter(name__iregex=name_pattern)
         .select_related('dataroom', 'folder')
+        .prefetch_related('tags')
         .order_by('-uploaded_at')[:scan_limit + 1],
         lambda d: _user_can_access(user, office, d.dataroom, folder=d.folder, document=d),
     )
@@ -1674,7 +1792,9 @@ def search_view(request):
             lambda d: _level_visible(user, office, d),
         )
         truncated = truncated or cut
-        results.extend(_dataroom_hit(d, justifying_tag(d)) for d in tagged_datarooms)
+        results.extend(
+            _dataroom_hit(user, office, d, justifying_tag(d)) for d in tagged_datarooms
+        )
 
         tagged_documents, cut = take(
             Document.objects.filter(tags__in=matching_tags)
@@ -1709,6 +1829,7 @@ def search_view(request):
         truncated = truncated or cut
         for m in matched_people:
             results.append({
+                **_HIT_FIELDS,
                 "kind": "person",
                 # L'id du MEMBERSHIP, pas celui du User : c'est la clé que manipule
                 # déjà /api/office-users/<id>/, et un compte peut appartenir à
@@ -1722,6 +1843,14 @@ def search_view(request):
                 # Toujours None, comme pour les sous-dossiers : une personne ne porte
                 # pas de tags.
                 "matched_tag": None,
+                # Vide et non le nom de l'étude : tout ce que la recherche renvoie
+                # appartient à l'étude courante, le redire sur chaque ligne de
+                # personne n'apprendrait rien.
+                "location": "",
+                "role": m.get_role_display(),
+                # Chaîne vide en base quand le compte n'en a pas — ramenée à None pour
+                # que le front n'ait pas à distinguer « absent » de « vide ».
+                "email": m.user.email or None,
             })
 
     return Response({"query": query, "results": results, "truncated": truncated})

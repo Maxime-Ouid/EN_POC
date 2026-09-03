@@ -2559,6 +2559,81 @@ isolation entre offices, en-têtes du relais) — 25/25 avec les classes voisine
 `tsc -b` et `check:ds` propres ; **dépôt réel vérifié dans Chrome** sur officeb, le logo
 apparaît dans le bandeau et officea garde la marque Notantis.
 
+## Fiche de résultat dans la palette de recherche (02/09/2026)
+
+**Le déclencheur** : sur un dossier, la palette affichait le nom en titre et, juste en
+dessous, son `path` — qui pour une `Dataroom` **est** son nom. La seule ligne disponible
+pour renseigner répétait donc celle du dessus, et les résultats les plus fréquents
+(les dossiers) étaient les moins documentés.
+
+**Backend, `GET /api/search/`** — la charge utile d'un hit passe de 8 à 17 champs, de
+forme CONSTANTE quel que soit le type (`_HIT_FIELDS`, valeurs `null`/`[]` là où la
+notion n'existe pas) : le front n'a pas à tester la présence d'un champ type par type.
+
+- `location` — les ANCÊTRES de l'élément, lui exclu, à côté de `path` (inchangé, chemin
+  complet, lui inclus). Les deux existent parce qu'ils ne répondent pas à la même
+  question ; la palette affiche `location`, `path` reste la forme canonique testée par
+  `test_path_is_the_full_readable_chain`. Vide pour un dossier et pour une personne.
+- `document_count` / `folder_count` / `last_activity` (dossier, sous-dossier) —
+  contenu du sous-arbre à toute profondeur, calculé par `_accessible_stats`, qui
+  n'utilise **que** `_user_can_access` / `_level_visible`. **C'est le point sensible** :
+  un compteur est une fuite comme une autre, et annoncer « 3 pièces » à qui n'en ouvre
+  qu'une lui apprend l'existence des deux autres. Un sous-dossier de transit est
+  compté, comme il l'est déjà par les endpoints de lecture.
+- `tags` (dossier, pièce) — tous les tags, en plus de `matched_tag` qui reste la
+  justification de la remontée. `prefetch_related('tags')` ajouté sur les deux
+  requêtes par NOM, qui ne l'avaient pas (celles par tag l'avaient déjà).
+- `file_kind` (pièce) — extension en capitales, lue sur le NOM. Le **poids n'est pas
+  exposé** : le stockage est S3/MinIO, donc `document.file.size` coûte une requête HEAD
+  par résultat, jusqu'à vingt par frappe sur un endpoint appelé à chaque caractère. S'il
+  devient nécessaire, il se stocke à l'upload (colonne + migration), il ne se lit pas ici.
+- `role` / `email` (personne).
+- `created_at` — création (dossier, sous-dossier) ou dépôt (pièce).
+
+Le bloc `folder` de `search_view` est devenu `_folder_hit`, par symétrie avec
+`_dataroom_hit`/`_document_hit` : trois types construits de trois façons différentes
+finissaient par diverger sur `path`.
+
+**Front** — `search/facts.ts` traduit la fiche en faits courts (« 12 pièces »,
+« dernière pièce le 28/08/2026 », « PDF »). La mise en forme vit côté client parce que
+ce sont des choix d'affichage, pas des données : le serveur envoie des nombres et des
+dates ISO. Deux partis pris à connaître :
+
+- **Une seule date par ligne.** Sur un dossier qui vit, la date de création n'ajoute
+  rien à celle de la dernière pièce déposée, et les deux bout à bout ne tiennent pas sur
+  la ligne : `last_activity` si elle existe, `created_at` sinon — c'est-à-dire
+  exactement quand elle renseigne. À revoir si l'ancienneté d'un dossier devient un
+  critère de tri.
+- **Un fait qui vaut zéro n'est pas affiché** (« 0 sous-dossier » occupe la place de
+  « 4 sous-dossiers » sans rien apprendre), mais un dossier dont RIEN n'est accessible
+  le dit (« Aucune pièce ») : une ligne sans aucun fait se lirait comme une fiche qui
+  n'a pas chargé.
+
+Trois tags au maximum sont énumérés, un « +N » résume le reste. Le tag qui a justifié la
+remontée reste à côté du nom et est retiré de l'énumération (`metaTags`) : deux pastilles
+identiques dont une seule s'allume feraient chercher la différence.
+
+**Le rail d'accent de la ligne active a été retiré** (`.search-hit.is-active::before`),
+à la demande de Jean-Marie. Trois signaux portent déjà la sélection au même endroit —
+fond teinté, pastille d'icône éclaircie, « ↵ » à droite — et un `border-left` de 3 px sur
+une ligne arrondie coupe le rayon du coin gauche.
+
+**Vérifications** : `manage.py test datarooms.tests.SearchApiTests` — 27 tests OK (avec
+`TenantContextTests`, obligatoire pour que les bases de test soient provisionnées), dont
+6 nouveaux : contenu et tags d'un dossier ; **les compteurs ne révèlent pas une pièce
+restreinte** (pendant de `test_search_never_reveals_a_restricted_document`) ; `location`
+ne répète jamais le nom, aux trois niveaux ; type et tags d'une pièce, sans `size` ;
+rôle et e-mail d'une personne ; forme identique pour les quatre types.
+`PathVisibilityTests`, `RoleBasedDefaultAccessTests`, `TagApiTests`,
+`AccessRestrictionPermissionTests`, `DataroomTemplateTests`, `OfficeUsersApiTests`,
+`HyperadminTests` repassés (49 tests) — les helpers d'accès sont partagés. `tsc -b` et
+`npm run check:ds` OK. Rendu contrôlé sur maquette statique (le vrai CSS, clair ET
+sombre) : troncature du chemin par la gauche, tenue de la ligne à 660 px avec trois
+faits et deux pastilles. **Non vérifié en navigateur réel** — parcours à refaire :
+⌘K, « guerin », comparer les compteurs d'un même dossier connecté à `carla`
+(superadmin) puis à `alice` (cliente sur officeb : elle doit voir moins, ou ne pas
+voir le dossier du tout).
+
 ## État actuel du POC
 
 - [x] Squelette Django/React connecté (endpoint `ping`, CORS configuré)

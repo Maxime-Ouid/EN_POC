@@ -406,6 +406,17 @@ html,body,#root{height:100%;}
 .topbar-slot-end{gap:6px;}
 .topbar-search input{border:none;background:transparent;outline:none;font-size:13px;flex:1;color:var(--ink-900);font-family:inherit;}
 .topbar-search kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-400);}
+/* Point d'entrée de la palette : un vrai bouton depuis le 02/09/2026 (voir
+   TopbarSearch.tsx). Il garde l'apparence d'un champ — c'est cette forme que
+   l'œil cherche dans une barre — sans en avoir la promesse de saisie. */
+.topbar-search-trigger{font-family:inherit;text-align:left;cursor:pointer;}
+.topbar-search-trigger:hover{border-color:var(--brass-400);background:var(--surface);}
+.topbar-search-trigger:hover .topbar-search-label{color:var(--ink-900);}
+.topbar-search-trigger:focus-visible{outline:2px solid var(--brass-500);outline-offset:2px;}
+/* `--ink-700` et non `--ink-500` : ce n'est plus un texte d'invite qu'on peut
+   remplacer en tapant, c'est le libellé du bouton — il doit se lire (WCAG 2.1
+   AA, 1.4.3). */
+.topbar-search-label{flex:1;min-width:0;font-size:13px;color:var(--ink-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
 .icon-btn{
   width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--surface);
@@ -824,24 +835,122 @@ select.control.control-sm{padding-right:26px;}
 /* palette de recherche (⌘K) — réutilise .overlay, mais ancrée en haut plutôt que
    centrée : une liste qui grandit vers le bas ne doit pas faire remonter le champ
    de saisie sous les yeux de l'utilisateur en train d'écrire. */
-.search-palette-overlay{align-items:flex-start;padding-top:12vh;}
-.search-palette{background:var(--surface);border-radius:var(--radius-lg);width:620px;max-width:92vw;box-shadow:var(--shadow-lg);overflow:hidden;}
-.search-palette-field{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--border);color:var(--ink-500);}
-.search-palette-field input{border:none;background:transparent;outline:none;font-size:14.5px;flex:1;color:var(--ink-900);font-family:inherit;}
-.search-palette-field kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--surface-alt);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--ink-400);}
-.search-palette-results{max-height:min(52vh,420px);overflow-y:auto;padding:6px;}
-.search-palette-empty{padding:16px 12px;text-align:center;}
+.search-palette-overlay{align-items:flex-start;padding-top:10vh;}
+/* Colonne à hauteur bornée : champ, filet, pastilles et pied restent en place,
+   seule la liste défile. Avant, la palette entière grandissait avec ses
+   résultats et le pied descendait hors de l'écran. */
+.search-palette{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+  width:660px;max-width:94vw;max-height:min(74vh,620px);box-shadow:var(--shadow-lg);
+  overflow:hidden;display:flex;flex-direction:column;
+  animation:searchPaletteIn .16s cubic-bezier(.2,.8,.3,1);
+}
+/* Apparue d'un bloc, la palette se lit comme un changement d'écran ; le court
+   glissement depuis le haut la rattache au champ dont elle sort. */
+@keyframes searchPaletteIn{
+  from{opacity:0;transform:translateY(-10px) scale(.985);}
+  to{opacity:1;transform:none;}
+}
+@media (prefers-reduced-motion:reduce){ .search-palette{animation:none;} }
+.search-palette-field{display:flex;align-items:center;gap:10px;padding:15px 18px;color:var(--ink-500);flex:none;}
+.search-palette-field>svg.icon{flex:none;width:18px;height:18px;}
+.search-palette-field input{border:none;background:transparent;outline:none;font-size:15px;flex:1;min-width:0;color:var(--ink-900);font-family:inherit;}
+.search-palette-clear{
+  flex:none;display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;
+  border:none;border-radius:99px;background:var(--surface-alt);color:var(--ink-700);cursor:pointer;
+}
+.search-palette-clear:hover{background:var(--brass-100);color:var(--brass-700);}
+.search-palette-clear svg.icon{width:11px;height:11px;}
+/* Filet de séparation ET barre de progression : le même élément, donc aucune
+   hauteur qui apparaît ou disparaît pendant la frappe. La recherche se signale
+   là où l'œil est déjà — sous la frappe — plutôt qu'en bas d'une liste. */
+.search-palette-rule{position:relative;height:1px;background:var(--border);overflow:hidden;flex:none;}
+.search-palette-rule-bar{position:absolute;top:0;bottom:0;left:0;width:34%;background:var(--brass-500);opacity:0;}
+.search-palette-rule.is-loading .search-palette-rule-bar{opacity:1;animation:searchPaletteScan 1.1s ease-in-out infinite;}
+@keyframes searchPaletteScan{
+  from{transform:translateX(-110%);}
+  to{transform:translateX(400%);}
+}
+@media (prefers-reduced-motion:reduce){
+  .search-palette-rule.is-loading .search-palette-rule-bar{animation:none;width:100%;opacity:.55;}
+}
+/* Pastilles de portée. Le décompte est en `--ink-700` et non en `--ink-400` :
+   à 10,5px, le gris clair du reste des mentions secondaires tombe sous le
+   rapport de contraste 4.5:1 exigé par WCAG 2.1 AA pour du texte de cette
+   taille. */
+.search-scopes{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:11px 16px;flex:none;border-bottom:1px solid var(--border-soft);}
+.search-scope{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:99px;
+  border:1px solid var(--border);background:var(--surface);color:var(--ink-700);
+  font-family:inherit;font-size:12px;font-weight:600;line-height:1.5;cursor:pointer;
+}
+.search-scope:hover:not(:disabled){border-color:var(--brass-400);color:var(--ink-900);}
+.search-scope[aria-pressed="true"]{background:var(--brass-100);border-color:var(--brass-400);color:var(--brass-700);}
+.search-scope:disabled{opacity:.45;cursor:default;}
+.search-scope-count{font-family:var(--font-mono);font-size:10.5px;font-weight:700;color:var(--ink-700);}
+.search-scope[aria-pressed="true"] .search-scope-count{color:var(--brass-700);}
+.search-scope:focus-visible,
+.search-palette-clear:focus-visible,
+.search-group-action:focus-visible,
+.search-palette-link:focus-visible{outline:2px solid var(--brass-500);outline-offset:2px;}
+.search-palette-results{flex:1;min-height:0;overflow-y:auto;padding:6px;}
+.search-palette-empty{padding:20px 14px;text-align:center;}
+.search-palette-hint{padding:10px 12px 2px;}
+.search-palette-link{
+  border:none;background:none;padding:0;font:inherit;color:var(--brass-700);
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer;
+}
+/* Titre de bloc, collant : cinq lignes plus bas, sans lui, on ne sait plus si on
+   lit des dossiers ou des pièces. */
+.search-group-head{
+  position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;
+  gap:10px;padding:10px 12px 5px;background:var(--surface);
+  font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-700);
+}
+.search-group-action,.search-group-note{font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink-700);}
+.search-group-action{border:none;background:none;padding:0;font-family:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
+.search-group-action:hover{color:var(--brass-700);}
 /* flex obligatoire : svg.icon est en display:block, l'icône passerait sinon
    au-dessus du libellé (même piège que le chevron du fil d'Ariane). */
-.search-hit{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:9px 11px;border:none;border-radius:8px;background:transparent;font-family:inherit;color:var(--ink-900);cursor:pointer;}
-.search-hit.is-active{background:var(--surface-alt);}
-.search-hit>svg.icon{flex:none;color:var(--brass-600);}
+.search-hit{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:7px 11px;border:none;border-radius:10px;background:transparent;font-family:inherit;color:var(--ink-900);cursor:pointer;position:relative;}
+/* La ligne active se distinguait par un simple gris, le même que celui du survol
+   des tableaux : au clavier, rien ne disait que c'était CETTE ligne qu'Entrée
+   ouvrirait. Trois signaux la portent désormais, tous groupés sur la ligne : fond
+   teinté, pastille d'icône éclaircie, et « ↵ » à droite. Un quatrième, un rail
+   d'accent collé au bord gauche, a été retiré le 02/09/2026 : il ne disait rien que
+   les trois autres ne disaient déjà, et coupait le rayon du coin gauche. */
+.search-hit.is-active{background:var(--brass-100);}
+.search-hit-icon{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--surface-alt);color:var(--ink-700);}
+.search-hit.is-active .search-hit-icon{background:var(--surface);color:var(--brass-700);}
 .search-hit-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
 .search-hit-name{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Deuxième ligne : le chemin, puis les faits du résultat (contenu, dates, type de
+   fichier, rôle), puis ses tags. Un dossier n'y répète plus son nom — son `path`
+   côté serveur EST son nom, et le redire sous le nom occupait la seule ligne qui
+   pouvait dire quelque chose d'utile. Le chemin est le seul élément compressible
+   (`flex:0 1 auto` + `min-width:0`) : les faits sont courts et se lisent entiers ou
+   pas du tout. */
+.search-hit-meta{display:flex;align-items:center;gap:5px;min-width:0;}
 /* direction:rtl : sur un chemin trop long, c'est le DÉBUT qu'on tronque, la fin
    (le dossier contenant) portant l'information utile pour se situer. */
-.search-hit-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;}
+.search-hit-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;min-width:0;flex:0 1 auto;}
+.search-hit-fact{flex:none;white-space:nowrap;}
+/* Point médian et non barre verticale : deux faits de même rang se séparent d'une
+   respiration, pas d'un trait qui dessinerait une colonne inexistante. */
+.search-hit-sep{flex:none;color:var(--ink-400);}
+/* Les tags énumérés ici n'ont pas d'icône, contrairement à celui qui justifie la
+   remontée (à côté du nom) : ils complètent la fiche, ils n'expliquent rien, et
+   quatre petites étiquettes à icône identique feraient une frise. */
+.search-hit-meta .tag{flex:none;font-size:10px;padding:1px 6px;}
 .search-hit-kind{flex:none;}
+/* Sur la ligne active, « ↵ » remplace le type : c'est là, et seulement là, que
+   la touche a un effet, et le bloc au-dessus dit déjà de quel type il s'agit. */
+.search-hit-enter{display:none;}
+.search-hit.is-active .search-hit-kind{display:none;}
+.search-hit.is-active .search-hit-enter{
+  display:inline-block;flex:none;font-family:var(--font-mono);font-size:10.5px;
+  background:var(--surface);border:1px solid var(--brass-400);border-radius:4px;padding:0 5px;color:var(--brass-700);
+}
 /* Pastille du tag ayant justifié la remontée. Le surlignage y repasse sur la couleur
    du texte de la pastille : le violet de `.hl` serait illisible sur un fond de tag
    rouge ou vert, et un tag dont on ne lit plus le nom ne justifie plus rien. Le
@@ -860,8 +969,17 @@ select.control.control-sm{padding-right:26px;}
    jaune de navigateur qui n'existe nulle part dans la palette notariale. La
    couleur suffit à faire ressortir, sans découper le mot en morceaux. */
 .hl{background:transparent;color:var(--brass-700);font-weight:700;}
-.search-palette-foot{display:flex;gap:16px;padding:9px 16px;border-top:1px solid var(--border);background:var(--surface-alt);}
+.search-palette-foot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 16px;border-top:1px solid var(--border);background:var(--surface-alt);flex:none;}
 .search-palette-foot kbd{font-family:var(--font-mono);font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:0 4px;margin-right:3px;color:var(--ink-400);}
+/* Sur petite fenêtre la palette occupe la largeur : les rappels clavier du pied
+   n'y servent plus à rien (il n'y a pas de clavier) et le type de chaque ligne
+   passe après son nom. */
+@media (max-width:600px){
+  .search-palette-overlay{padding-top:4vh;}
+  .search-palette{max-height:88vh;}
+  .search-palette-foot{display:none;}
+  .search-hit-kind,.search-hit-enter{display:none;}
+}
 
 .tpl-option{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:9px;}
 .tpl-option:hover{border-color:var(--brass-400);background:var(--surface-alt);}

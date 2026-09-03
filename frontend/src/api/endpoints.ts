@@ -161,6 +161,11 @@ export interface AccessRestrictionSummary {
  * résultat lui-même : pour un `document` c'est son dossier contenant (`null` =
  * racine de la dataroom), pour un `folder` c'est lui-même, pour une `dataroom`
  * c'est `null`. L'interface peut donc naviguer sans retraiter les trois cas.
+ *
+ * Depuis le 02/09/2026 la fiche est complète : tous les types portent TOUS les
+ * champs ci-dessous, avec `null`/`[]` là où la notion n'existe pas — la palette
+ * n'a donc pas à tester la présence d'un champ type par type (voir
+ * `_HIT_FIELDS` côté Django, dont cette interface est le miroir).
  */
 export interface SearchHit {
   kind: 'dataroom' | 'folder' | 'document' | 'person';
@@ -183,6 +188,33 @@ export interface SearchHit {
    * savoir quoi surligner pour que le résultat ne paraisse pas arbitraire.
    */
   matched_tag: TagSummary | null;
+  /**
+   * Où se trouve l'élément — ses ANCÊTRES, lui exclu, là où `path` est son chemin
+   * complet, lui inclus. Les deux existent parce qu'ils ne répondent pas à la même
+   * question : la palette affiche le nom en titre, c'est donc `location` qu'elle
+   * met en dessous. Vide pour un dossier (rien au-dessus de lui) et pour une
+   * personne (tout appartient à l'étude courante).
+   */
+  location: string;
+  /** Tous les tags de l'élément, ordonnés par nom. `[]` pour un sous-dossier et une personne. */
+  tags: TagSummary[];
+  /**
+   * Contenu ACCESSIBLE du sous-arbre, à toute profondeur — dossier et sous-dossier
+   * seulement, `null` ailleurs. Filtré par les mêmes contrôles d'accès que les
+   * lignes elles-mêmes : un compteur ne révèle pas une pièce restreinte.
+   */
+  document_count: number | null;
+  folder_count: number | null;
+  /** Création (dossier, sous-dossier) ou dépôt (pièce). `null` pour une personne. */
+  created_at: string | null;
+  /** Dépôt de la pièce accessible la plus récente du sous-arbre — `null` s'il n'y en a aucune. */
+  last_activity: string | null;
+  /** Extension en capitales (« PDF ») — pièces seulement. Le poids n'est pas exposé : il
+      coûterait une requête HEAD par résultat à chaque frappe (voir `_file_kind` côté Django). */
+  file_kind: string | null;
+  /** Personnes seulement : rôle affichable et adresse du compte (`null` si vide). */
+  role: string | null;
+  email: string | null;
 }
 
 export interface SearchResponse {

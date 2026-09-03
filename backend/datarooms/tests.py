@@ -2792,6 +2792,89 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(hit["folder_id"], self.actes.id)
         self.assertEqual(hit["dataroom_id"], self.dataroom.id)
 
+    # --- Fiche d'un résultat (02/09/2026) -----------------------------------
+    # La palette n'affichait qu'un nom, un type et un chemin. Ces tests portent sur
+    # les champs ajoutés pour qu'une ligne se reconnaisse sans être ouverte — et
+    # surtout sur le fait qu'ils n'ouvrent aucune fuite que le reste de l'endpoint
+    # s'interdit déjà.
+
+    def test_dataroom_hit_carries_its_content_and_tags(self):
+        self.client.force_login(self.alice)
+        hit = next(h for h in self._search("succession")["results"] if h["kind"] == "dataroom")
+        # Tout le sous-arbre, à n'importe quelle profondeur : 3 pièces, 2 sous-dossiers.
+        self.assertEqual(hit["document_count"], 3)
+        self.assertEqual(hit["folder_count"], 2)
+        self.assertIsNotNone(hit["created_at"])
+        self.assertIsNotNone(hit["last_activity"])
+        self.assertEqual([t["name"] for t in hit["tags"]], ["Vente"])
+
+    def test_counters_never_reveal_a_restricted_document(self):
+        # Pendant de test_search_never_reveals_a_restricted_document pour les
+        # compteurs : annoncer « 3 pièces » à bob, qui n'en ouvre qu'une, lui
+        # apprendrait l'existence des deux autres — une fuite sans le nom, mais une
+        # fuite. Il ne voit que « Actes Martin » et son unique pièce accessible.
+        self.client.force_login(self.bob)
+        hit = next(h for h in self._search("succession")["results"] if h["kind"] == "dataroom")
+        self.assertEqual(hit["document_count"], 1)
+        self.assertEqual(hit["folder_count"], 1)
+
+    def test_location_never_repeats_the_element_name(self):
+        # C'est toute la raison d'être de `location` à côté de `path` : la palette
+        # affiche le nom en titre, donc la ligne du dessous doit situer l'élément
+        # sans le redire. Un dossier n'a rien au-dessus de lui.
+        self.client.force_login(self.alice)
+        by_name = {h["name"]: h for h in self._search("martin")["results"]}
+        self.assertEqual(by_name["Succession Martin"]["location"], "")
+        self.assertEqual(by_name["Actes Martin"]["location"], "Succession Martin")
+        self.assertEqual(
+            by_name["acte-vente-martin.pdf"]["location"],
+            "Succession Martin / Actes Martin",
+        )
+
+    def test_document_hit_carries_its_type_and_tags(self):
+        self.client.force_login(self.alice)
+        hit = next(h for h in self._search("acte-vente")["results"] if h["kind"] == "document")
+        self.assertEqual(hit["file_kind"], "PDF")
+        self.assertIsNotNone(hit["created_at"])
+        self.assertEqual([t["name"] for t in hit["tags"]], ["Vente"])
+        # Le POIDS reste volontairement hors de la charge utile : le stockage est
+        # S3/MinIO, une taille coûterait une requête HEAD par résultat sur un
+        # endpoint appelé à chaque caractère tapé.
+        self.assertNotIn("size", hit)
+
+    def test_person_hit_carries_role_and_email(self):
+        self.gestionnaire.email = "gestion@etude.test"
+        self.gestionnaire.save()
+        self.client.force_login(self.patronne)
+        hit = next(
+            h for h in self._search("searchq_gestion")["results"] if h["kind"] == "person"
+        )
+        self.assertEqual(hit["role"], "Admin")
+        self.assertEqual(hit["email"], "gestion@etude.test")
+        # Vide : tout ce que renvoie la recherche appartient à l'étude courante.
+        self.assertEqual(hit["location"], "")
+
+    def test_every_kind_carries_the_same_fields(self):
+        # Forme CONSTANTE quel que soit le type : le front ne doit pas tester la
+        # présence d'un champ type par type. Un sous-dossier porte `tags: []`, une
+        # personne `document_count: None` — la clé est là dans les deux cas.
+        self.gestionnaire.email = "gestion@etude.test"
+        self.gestionnaire.save()
+        self.client.force_login(self.patronne)
+        results = (
+            self._search("martin")["results"] + self._search("searchq_gestion")["results"]
+        )
+        self.assertEqual(
+            {h["kind"] for h in results}, {"dataroom", "folder", "document", "person"}
+        )
+        expected = {
+            "kind", "id", "name", "dataroom_id", "dataroom_name", "folder_id", "path",
+            "matched_tag", "location", "tags", "document_count", "folder_count",
+            "created_at", "last_activity", "file_kind", "role", "email",
+        }
+        for hit in results:
+            self.assertEqual(set(hit), expected, hit["name"])
+
     def test_empty_query_returns_nothing(self):
         # Seul le vide (ou les espaces seuls) ne cherche rien : ouvrir la palette ne
         # doit pas lister tout l'office. Le seuil est à 1 depuis le 31/08/2026.

@@ -8,6 +8,7 @@ import { SidebarBrand } from '../molecules/SidebarBrand';
 import { SidebarFoot } from '../molecules/SidebarFoot';
 import { TenantSwitcher, type TenantOption } from '../molecules/TenantSwitcher';
 import { TopbarSearch } from '../molecules/TopbarSearch';
+import { SEARCH_SHORTCUT_LABEL } from '../../search/shortcut';
 import { NavBar } from '../organisms/NavBar';
 import { SearchPalette } from '../organisms/SearchPalette';
 import { Sidebar } from '../organisms/Sidebar';
@@ -283,9 +284,13 @@ export function AppShell({
                 barre, elle coupait les onglets de l'accueil de leurs propres
                 commandes. Toutes les actions de la barre sont désormais du
                 même côté, la gauche étant réservée au repère d'écran. */}
+            {/* Le libellé du bouton est court — la phrase complète reste dans le
+                champ de la palette, où il y a la place de la lire. Tronquée à
+                380px puis à 260px, elle ne disait de toute façon plus que
+                « Rechercher un dossier, une pièce, un t… ». */}
             <TopbarSearch
-              placeholder="Rechercher un dossier, une pièce, un tag, une personne, un écran…"
-              shortcut="⌘K"
+              placeholder="Rechercher dans l’étude…"
+              shortcut={SEARCH_SHORTCUT_LABEL}
               onActivate={searchEnabled ? () => setSearchOpen(true) : undefined}
             />
             <div className="topbar-slot topbar-slot-end" ref={setSlotEnd} />
