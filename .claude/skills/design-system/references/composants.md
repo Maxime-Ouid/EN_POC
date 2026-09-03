@@ -20,7 +20,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `Grid` | Grille responsive — .grid-2 (1.5fr/1fr), .grid-3, .grid-4 — repasse à 1-2 colonnes sous 980px (voir components.css). |
 | `Highlight` | Souligne dans `text` les lettres trouvées par la recherche. |
 | `Icon` | Icône référençant le sprite SVG global (voir IconSprite.tsx, à monter une seule fois — main.tsx — dans l'app). |
-| `has3d`, `Icon3d` | Illustrations 3D (src/assets/icons-3d) tenant la place du glyphe du sprite pour les sept types d'objets qui en ont une ;… |
+| `has3d`, `Icon3d` | Illustrations 3D (src/assets/icons-3d) tenant la place du glyphe du sprite pour les neuf types d'objets qui en ont une ;… |
 | `IconButton` | Bouton icône seul, rond (cloche, notifications…) — voir .icon-btn dans la topbar. |
 | `IconChip` | Pastille d'icône : carré arrondi teinté portant un glyphe du sprite, OU l'illustration 3D quand l'objet en a une (dossier,… |
 | `IconSprite` | — |
@@ -87,10 +87,13 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `ConfirmModal` | Confirmation d'une action, avec son énoncé complet. |
 | `DashboardGrid` | — |
 | `DashboardTabs` | Barre d'onglets des écrans personnalisés. |
+| `DataroomMetadataPanel` | — |
 | `DocumentPreview` | Aperçu du contenu d'une pièce, affiché dans le volet document. |
 | `DocumentSlideover` | Volet latéral de fiche document — index_16.html #doc-slideover. |
 | `Explorer` | Layout deux colonnes (arbre + panneau de documents) — §6.8. L'ouverture des noeuds est gérée ici (état purement UI) ; la… |
+| `GreyLabelStatementModal` | — |
 | `IdentityTab` | Personnalisation → Identité (index_16.html #sub3-identite). |
+| `MetadataSchemaTab` | — |
 | `Modal` | Overlay + boîte modale — §6.11. `open` pilote `.overlay.is-active` (le prototype le faisait en JS via openModal()/closeModal()). |
 | `ModulesTab` | Personnalisation → Modules (index_16.html #sub3-modules). |
 | `NamedUsersEditor` | Puces d'utilisateurs nommés, avec un champ d'ajout TOUJOURS visible en dessous. |
@@ -98,6 +101,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `NewDataroomModal` | Modale "Nouveau dossier" — index_16.html #modal-new. |
 | `NewFolderModal` | Modale "Nouveau dossier" — même patron que NewDataroomModal, un seul champ : le dossier parent est déjà déterminé par… |
 | `NewOfficeModal` | Création d'un office ET de son premier admin, dans le même geste que le backend (POST /api/hyperadmin/offices/ fait les deux… |
+| `NewPortfolioModal` | — |
 | `NewTemplateFolderModal` | Modale "Nouveau dossier" d'un Template — même patron exact que NewFolderModal (dataroom réelle) : le dossier parent est déjà… |
 | `NewTemplateModal` | Création ou modification d'un modèle de dataroom (Template) — juste son nom et sa description ; l'arborescence de dossiers se… |
 | `OfficeContentTab` | — |
@@ -111,6 +115,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `TableCard` | Enveloppe une <table> dans .card > .table-wrap — §6.5. Passer les <tr> déjà composés en children (typiquement via… |
 | `TagPicker` | Sélecteur de tags d'un élément (dossier ou pièce) : les pastilles posées, une croix pour retirer, un bouton « + » qui ouvre le… |
 | `TemplateGallery` | Galerie des dispositions prêtes à l'emploi. |
+| `TemporaryLinkModal` | — |
 | `TokenEditor` | Toute la grille de couleurs, générée depuis TOKEN_SCHEMA et regroupée par TOKEN_GROUPS — équivalent React de renderGroups()… |
 | `Topbar` | — |
 | `UserRestrictionsModal` | Restrictions d'accès qui nomment (ou pourraient nommer) cet utilisateur — ouverte depuis le bouton "Restrictions" d'une ligne… |
@@ -126,7 +131,8 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 
 | Composant | Rôle |
 |---|---|
-| `DataroomDetailScreen` | Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents / Q&R / Membres / Historique). |
+| `AuditTrailScreen` | — |
+| `DataroomDetailScreen` | Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents / Informations / Q&R / Droits d'accès / Historique). |
 | `DataroomsListScreen` | Écran "Dossiers" (liste) — index_16.html #screen-datarooms. |
 | `HomeScreen` | Écran d'accueil / dashboard — voir index_16.html #screen-dashboard. |
 | `HyperadminOfficesScreen` | Liste des offices — GET /api/hyperadmin/offices/. Même patron que OfficeUsersScreen (barre d'outils, « afficher N », tableau,… |
@@ -134,6 +140,7 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `MfaScreen` | Deuxième temps de la connexion (MFA, TOTP) — même structure à deux panneaux que LoginScreen (§6.15), pour rester dans la même… |
 | `ModuleScreen` | Écran d'un module activé pour l'office. |
 | `OfficeUsersScreen` | Annuaire de l'étude — utilisateurs de l'office courant (GET /api/office-users/). |
+| `PortfolioDetailScreen` | — |
 | `PortfoliosScreen` | Écran "Portefeuilles" — index_16.html #screen-portfolios. |
 | `SettingsScreen` | Écran Personnalisation — index_16.html #screen-settings. |
 | `StatsScreen` | Écran Statistiques & facturation — index_16.html #screen-stats. |

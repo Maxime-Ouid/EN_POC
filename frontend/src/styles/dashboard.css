@@ -242,19 +242,17 @@
   box-shadow:var(--shadow-sm);font:inherit;
 }
 .w-tile:hover{border-color:var(--brass-400);box-shadow:var(--shadow-md);}
-/* Le libellé remonte contre la pastille, la description reste plaquée en bas :
-   sur trois lignes de grille la place varie, et c'est l'écart du milieu qui
-   doit absorber la différence — pas l'espacement du texte lui-même. */
+/* Tout est calé EN HAUT, et le vide s'accumule en bas. Une première version
+   plaquait le libellé vers le bas de la tuile : trois tuiles côte à côte dont
+   les descriptions ne font pas le même nombre de lignes affichaient alors leurs
+   titres à trois hauteurs différentes — la rangée entière semblait bancale. */
 .w-tile-icon{
   flex:none;display:inline-flex;align-items:center;justify-content:center;
   width:30px;height:30px;border-radius:8px;
   background:var(--brass-100);color:var(--brass-700);
 }
 .w-tile-icon > .icon{width:16px;height:16px;}
-.w-tile-label{
-  margin-top:auto;
-  font-family:var(--font-display);font-size:14.5px;color:var(--ink-900);
-}
+.w-tile-label{font-family:var(--font-display);font-size:14.5px;color:var(--ink-900);}
 .w-tile-desc{font-size:11.5px;line-height:1.35;color:var(--ink-500);}
 /* Action fermée à ce rôle : la tuile ne prétend plus être un bouton. */
 .w-tile-off{cursor:default;}
@@ -292,6 +290,10 @@
 .qa-ctl:disabled{cursor:default;color:var(--ink-400);opacity:.5;}
 .qa-ctl-off:hover:not(:disabled){color:var(--critical);border-color:var(--critical);}
 .qa-ctl > .icon{width:12px;height:12px;}
+/* Le sprite n'a pas de chevron vers le haut : celui du bas, retourné. `#i-up`
+   existe mais c'est la flèche de TENDANCE des chiffres-clés (« +3 ce mois ») —
+   la reprendre ici ferait dire « en hausse » à un bouton qui déplace. */
+.qa-ctl-up > .icon{transform:rotate(180deg);}
 .qa-empty{
   font-size:11.5px;color:var(--ink-500);
   padding:10px 12px;border-radius:var(--radius-md);

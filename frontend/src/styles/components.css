@@ -229,7 +229,13 @@ html,body,#root{height:100%;}
 }
 .foot-name{font-size:12.5px;font-weight:600;color:var(--brand-strong);}
 .foot-role{font-size:10.5px;color:var(--brand-soft);}
-.foot-user svg{margin-left:auto;color:var(--shell-text-dim);width:15px;height:15px;}
+/* `brand-soft` et non `shell-text-dim` (corrigé le 03/09/2026) : `shell-text-dim`
+   est un lavande pâle calibré pour l'ANCIEN rail foncé. Le rail est un blanc
+   translucide en thème clair (`--nav-bg`) depuis la refonte, et l'icône y
+   disparaissait — seul son calque duotone restait visible, en carré mauve.
+   `brand-soft` est LE token du texte atténué de ce pied de rail, celui que
+   `.foot-role` utilise juste au-dessus, et il est défini pour les deux thèmes. */
+.foot-user svg{margin-left:auto;color:var(--brand-soft);width:15px;height:15px;}
 .notantis-mark{margin-top:10px;font-size:10px;color:var(--brand-soft);display:flex;align-items:center;gap:5px;letter-spacing:.03em;}
 
 .main{
@@ -1731,7 +1737,7 @@ button.v1-tool-row-name{background:none;border:none;padding:0;text-align:left;co
 button.v1-tool-row-name:hover{color:var(--brass-700);}
 
 /* --- Icônes 3D ------------------------------------------------------------ */
-/* Les sept types d'objets qui ont une illustration 3D (src/assets/icons-3d)
+/* Les neuf types d'objets qui ont une illustration 3D (src/assets/icons-3d)
    la portent au lieu du glyphe du sprite. L'image a ses propres couleurs :
    la pastille perd son fond teinté, son cadre et son rayon, sinon deux aplats
    se battent derrière un rendu volumétrique. Ces icônes ne sont donc pas

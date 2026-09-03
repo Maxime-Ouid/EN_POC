@@ -14,6 +14,7 @@
 
 import type { ReactNode } from 'react';
 import type {
+  AuditEvent,
   ClientUsageRow,
   ConnectedUserRow,
   DataroomDocument,
@@ -21,10 +22,14 @@ import type {
   HistoryRow,
   InvoiceRow,
   MemberRow,
+  MetadataFieldDef,
   ModuleEntry,
   NavSection,
+  OfficeActivityStats,
   Portfolio,
+  PortfolioDataroomRow,
   QAEntry,
+  TemporaryLink,
   TreeNodeData,
 } from '../components';
 export const NAV_SECTIONS: NavSection[] = [
@@ -38,7 +43,12 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Pilotage',
-    items: [{ key: 'stats', icon: 'clock', label: 'Statistiques & facturation' }],
+    items: [
+      { key: 'stats', icon: 'clock', label: 'Statistiques & facturation' },
+      // Audit trail de l'office (§3.2, §4.6) — distinct de l'onglet
+      // « Historique » d'un dossier, qui ne montre que la vie de CELUI-LÀ.
+      { key: 'audit', icon: 'shield', label: 'Journal des accès' },
+    ],
   },
   {
     label: 'Office',
@@ -397,10 +407,49 @@ export const RECENT_ACTIVITY: DemoActivityEntry[] = [
 ];
 
 export const CLIENT_USAGE: ClientUsageRow[] = [
-  { id: 'republique', name: 'République', dataroomCount: 18, storage: '96,4 Go', sharePercent: 31, lastActivity: "Aujourd'hui" },
-  { id: 'arsenal', name: 'Arsenal', dataroomCount: 52, storage: '142,0 Go', sharePercent: 45, lastActivity: 'Hier' },
-  { id: 'ivry', name: 'Ivry — Le Monde', dataroomCount: 4, storage: '54,8 Go', sharePercent: 18, shareWarning: true, lastActivity: '3 jours' },
-  { id: 'modeles', name: 'Modèles internes', dataroomCount: 4, storage: '1,1 Go', sharePercent: 2, lastActivity: '—' },
+  {
+    id: 'republique', name: 'République', dataroomCount: 18, storage: '96,4 Go',
+    sharePercent: 31, lastActivity: "Aujourd'hui",
+    datarooms: [
+      { id: 'caudan', name: 'Dossier de vente Caudan', documents: 412, storage: '18,2 Go', sharePercent: 19, lastActivity: "Aujourd'hui" },
+      { id: 'republique-2', name: 'Cession parts SCI République', documents: 268, storage: '41,7 Go', sharePercent: 43, lastActivity: '2 jours' },
+      { id: 'republique-3', name: 'Baux commerciaux 2026', documents: 154, storage: '36,5 Go', sharePercent: 38, lastActivity: '6 jours' },
+    ],
+  },
+  {
+    id: 'arsenal', name: 'Arsenal', dataroomCount: 52, storage: '142,0 Go',
+    sharePercent: 45, lastActivity: 'Hier',
+    datarooms: [
+      { id: 'arsenal-1', name: 'Portefeuille Arsenal — lot A', documents: 1206, storage: '78,3 Go', sharePercent: 55, lastActivity: 'Hier' },
+      { id: 'arsenal-2', name: 'Portefeuille Arsenal — lot B', documents: 884, storage: '49,1 Go', sharePercent: 35, lastActivity: '4 jours' },
+      { id: 'arsenal-3', name: 'Contentieux Arsenal', documents: 197, storage: '14,6 Go', sharePercent: 10, lastActivity: '3 semaines' },
+    ],
+  },
+  {
+    id: 'ivry', name: 'Ivry — Le Monde', dataroomCount: 4, storage: '54,8 Go',
+    sharePercent: 18, shareWarning: true, lastActivity: '3 jours',
+    datarooms: [
+      { id: 'ivry-halle', name: 'Ivry — Halle commerciale', documents: 523, storage: '31,4 Go', sharePercent: 57, lastActivity: '3 jours' },
+      { id: 'ivry-bureaux', name: 'Ivry — Plateau de bureaux', documents: 341, storage: '18,9 Go', sharePercent: 35, lastActivity: '5 jours' },
+      { id: 'ivry-parking', name: 'Ivry — Parkings', documents: 88, storage: '4,5 Go', sharePercent: 8, lastActivity: '2 semaines' },
+    ],
+  },
+  {
+    id: 'modeles', name: 'Modèles internes', dataroomCount: 4, storage: '1,1 Go',
+    sharePercent: 2, lastActivity: '—',
+    datarooms: [
+      { id: 'modeles-1', name: 'Trame vente d\'actif', documents: 42, storage: '0,7 Go', sharePercent: 64, lastActivity: '—' },
+      { id: 'modeles-2', name: 'Trame APUI', documents: 21, storage: '0,4 Go', sharePercent: 36, lastActivity: '—' },
+    ],
+  },
+];
+
+/** Périodes proposées au relevé d'usage en marque grise (§4.6). */
+export const STATEMENT_PERIODS = [
+  'Août 2026',
+  'Juillet 2026',
+  '3e trimestre 2026',
+  '2e trimestre 2026',
 ];
 
 export const INVOICES: InvoiceRow[] = [
@@ -480,3 +529,176 @@ export const DEMO_DATAROOM_DETAIL = {
     { label: 'Modèle', value: 'Vente immobilière — standard' },
   ],
 };
+
+/* ---------------------------------------------------------------------------
+   Lot « valeur MVP » (§3.2 / §4.6) — jeux de démonstration des écrans ajoutés
+   le 03/09/2026 : journal des accès, méta-données, portefeuille consolidé,
+   liens temporaires et reporting d'activité.
+
+   Comme tout ce fichier : rien de ceci n'a d'équivalent en base. Ces constantes
+   disparaîtront au fur et à mesure que les endpoints apparaîtront — l'audit
+   trail en premier, puisque le reporting d'activité en dépend entièrement.
+   ------------------------------------------------------------------------- */
+
+/** Durée de conservation affichée par le journal. Non arbitrée (§11) : la
+    valeur ci-dessous est une proposition, pas une règle appliquée. */
+export const AUDIT_RETENTION = '3 ans glissants';
+
+export const AUDIT_EVENTS: AuditEvent[] = [
+  { id: 'a1', timestamp: '03/09/2026 16:42', day: '2026-09-03', actor: 'Delphine Briand', actorInitials: 'DB', category: 'depot', action: 'Dépôt de document', target: 'Rapport Géorisques du 09.07.2026.pdf', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+  { id: 'a2', timestamp: '03/09/2026 16:31', day: '2026-09-03', actor: 'Sandrine — Acquéreur', actorInitials: 'SA', actorGray: true, category: 'acces', action: 'Téléchargement du document', target: 'DPE Bâtiment Entier.pdf', dataroom: 'Dossier de vente Caudan', origin: '78.203.x.x · Web' },
+  { id: 'a3', timestamp: '03/09/2026 15:58', day: '2026-09-03', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'droits', action: "Ajout d'un membre au dossier", target: 'Maître Hamon — lecture', dataroom: 'Cession parts SCI République', origin: '92.184.x.x · Web' },
+  { id: 'a4', timestamp: '03/09/2026 15:12', day: '2026-09-03', actor: 'Delphine Briand', actorInitials: 'DB', category: 'partage', action: "Création d'un lien temporaire", target: 'État des Risques du 09.07.2026.pdf', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+  { id: 'a5', timestamp: '03/09/2026 14:03', day: '2026-09-03', actor: 'Jean Delaunay', actorInitials: 'JD', category: 'modification', action: "Renommage d'un sous-dossier", target: '7. Urbanisme → 7. Urbanisme et cadastre', dataroom: 'Ivry — Halle commerciale', origin: '92.184.x.x · Web' },
+  { id: 'a6', timestamp: '03/09/2026 11:47', day: '2026-09-03', actor: 'Sandrine — Acquéreur', actorInitials: 'SA', actorGray: true, category: 'acces', action: "Consultation de l'arborescence", target: '10. Diagnostics', dataroom: 'Dossier de vente Caudan', origin: '78.203.x.x · Web' },
+  { id: 'a7', timestamp: '03/09/2026 09:22', day: '2026-09-03', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'securite', action: 'Connexion avec authentification forte', target: 'Session ouverte', origin: '92.184.x.x · Web' },
+  { id: 'a8', timestamp: '02/09/2026 18:36', day: '2026-09-02', actor: 'Delphine Briand', actorInitials: 'DB', category: 'suppression', action: "Suppression d'un document", target: 'Plan topographique T1 (brouillon).dwg', dataroom: 'Ivry — Halle commerciale', origin: '92.184.x.x · Web' },
+  { id: 'a9', timestamp: '02/09/2026 17:04', day: '2026-09-02', actor: 'Hélène Hamon', actorInitials: 'HH', category: 'depot', action: 'Dépôt multiple (12 documents)', target: '8. Autorisations administratives', dataroom: 'Cession parts SCI République', origin: '92.184.x.x · Web' },
+  { id: 'a10', timestamp: '02/09/2026 16:15', day: '2026-09-02', actor: 'Sandrine — Acquéreur', actorInitials: 'SA', actorGray: true, category: 'acces', action: 'Téléchargement groupé ZIP', target: '4. Situation hypothécaire (7 pièces)', dataroom: 'Dossier de vente Caudan', origin: '78.203.x.x · Web' },
+  { id: 'a11', timestamp: '02/09/2026 14:51', day: '2026-09-02', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'droits', action: 'Restriction posée sur un sous-dossier', target: '12. Situation locative — étude seule', dataroom: 'Baux commerciaux 2026', origin: '92.184.x.x · Web' },
+  { id: 'a12', timestamp: '02/09/2026 10:08', day: '2026-09-02', actor: 'Jean Delaunay', actorInitials: 'JD', category: 'modification', action: 'Modification des méta-données', target: 'Prix de cession — 4 250 000 €', dataroom: 'Ivry — Halle commerciale', origin: '92.184.x.x · Web' },
+  { id: 'a13', timestamp: '01/09/2026 19:22', day: '2026-09-01', actor: 'Sandrine — Acquéreur', actorInitials: 'SA', actorGray: true, category: 'securite', action: "Échec d'authentification (code invalide)", target: '3e tentative consécutive', origin: '78.203.x.x · Web' },
+  { id: 'a14', timestamp: '01/09/2026 16:40', day: '2026-09-01', actor: 'Delphine Briand', actorInitials: 'DB', category: 'partage', action: "Révocation d'un lien temporaire", target: 'Note de désignation.doc', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+  { id: 'a15', timestamp: '01/09/2026 15:03', day: '2026-09-01', actor: 'Hélène Hamon', actorInitials: 'HH', category: 'acces', action: "Prévisualisation d'un document", target: 'Statuts SOCIÉTÉ A - 11.09.2025.pdf', dataroom: 'Cession parts SCI République', origin: '92.184.x.x · Web' },
+  { id: 'a16', timestamp: '01/09/2026 11:30', day: '2026-09-01', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'modification', action: 'Clôture du dossier', target: 'Copropriété Nice Étoile', dataroom: 'Copropriété Nice Étoile', origin: '92.184.x.x · Web' },
+  { id: 'a17', timestamp: '31/08/2026 17:58', day: '2026-08-31', actor: 'Jean Delaunay', actorInitials: 'JD', category: 'depot', action: 'Dépôt de document', target: 'Audit énergétique du 28.05.2026.pdf', dataroom: 'Ivry — Plateau de bureaux', origin: '92.184.x.x · Web' },
+  { id: 'a18', timestamp: '31/08/2026 14:12', day: '2026-08-31', actor: 'Delphine Briand', actorInitials: 'DB', category: 'droits', action: "Retrait d'un membre", target: 'Stagiaire — accès révoqué', dataroom: 'Baux commerciaux 2026', origin: '92.184.x.x · Web' },
+  { id: 'a19', timestamp: '28/08/2026 16:44', day: '2026-08-28', actor: 'Hélène Hamon', actorInitials: 'HH', category: 'acces', action: 'Consultation de la liste des questions', target: '6 questions sans réponse', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+  { id: 'a20', timestamp: '28/08/2026 09:15', day: '2026-08-28', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'securite', action: 'Modification du mot de passe', target: 'Compte cyril.dumont', origin: '92.184.x.x · Web' },
+  { id: 'a21', timestamp: '24/08/2026 15:36', day: '2026-08-24', actor: 'Jean Delaunay', actorInitials: 'JD', category: 'depot', action: 'Dépôt multiple (30 documents)', target: '13. Technique — courriers décret tertiaire', dataroom: 'Ivry — Halle commerciale', origin: '92.184.x.x · Web' },
+  { id: 'a22', timestamp: '19/08/2026 10:02', day: '2026-08-19', actor: 'Delphine Briand', actorInitials: 'DB', category: 'partage', action: 'Partage du dossier avec un autre office', target: 'SCP Moreau & Associés — vendeur', dataroom: 'Cession parts SCI République', origin: '92.184.x.x · Web' },
+  { id: 'a23', timestamp: '12/08/2026 11:19', day: '2026-08-12', actor: 'Cyril Dumont', actorInitials: 'CD', category: 'modification', action: 'Archivage du dossier', target: 'Vente actifs Choleur SA', dataroom: 'Vente actifs Choleur SA', origin: '92.184.x.x · Web' },
+  { id: 'a24', timestamp: '05/07/2026 14:47', day: '2026-07-05', actor: 'Hélène Hamon', actorInitials: 'HH', category: 'suppression', action: "Suppression d'un sous-dossier vide", target: '6. Organisation juridique', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+  { id: 'a25', timestamp: '02/06/2026 09:31', day: '2026-06-02', actor: 'Delphine Briand', actorInitials: 'DB', category: 'depot', action: 'Création du dossier', target: 'Dossier de vente Caudan', dataroom: 'Dossier de vente Caudan', origin: '92.184.x.x · Web' },
+];
+
+/** Schéma de méta-données de l'office — §4.6, volet « champs définis ». */
+export const METADATA_FIELDS: MetadataFieldDef[] = [
+  { id: 'mf-type', label: "Type d'opération", type: 'liste', required: true, options: ["Vente d'actif", 'Acquisition', 'Cession de parts', 'Bail commercial', 'Succession'] },
+  { id: 'mf-ref', label: "Référence de l'étude", type: 'texte', required: true, help: 'Ex. 2026-BH-0142' },
+  { id: 'mf-notaire', label: 'Notaire référent', type: 'texte', required: true },
+  { id: 'mf-prix', label: "Prix / montant de l'opération", type: 'montant', required: false },
+  { id: 'mf-signature', label: 'Date de signature prévisionnelle', type: 'date', required: false },
+  { id: 'mf-confidentiel', label: 'Dossier confidentiel', type: 'booleen', required: false },
+];
+
+/** Champs ajoutés pour la seule dataroom ouverte en démonstration. */
+export const DATAROOM_CUSTOM_FIELDS: MetadataFieldDef[] = [
+  { id: 'df-cadastre', label: 'Référence cadastrale', type: 'texte', required: false },
+  { id: 'df-surface', label: 'Surface utile (m²)', type: 'nombre', required: false },
+];
+
+export const DATAROOM_METADATA_VALUES: Record<string, string> = {
+  'mf-type': "Vente d'actif",
+  'mf-ref': '2026-BH-0142',
+  'mf-notaire': 'Delphine Briand',
+  'mf-prix': '4 250 000 €',
+  'mf-signature': '2026-11-14',
+  'mf-confidentiel': 'non',
+  'df-cadastre': 'AB 0142 / AB 0143',
+  'df-surface': '1840',
+};
+
+/** Liens temporaires en cours sur la dataroom de démonstration — §3.2. */
+export const TEMPORARY_LINKS: TemporaryLink[] = [
+  { id: 'tl1', target: 'DPE Bâtiment Entier.pdf', recipient: 'expert@bureau-controle.fr', expiresAt: '10 sept. 2026, 18:00', downloads: 1, maxDownloads: 3, passwordProtected: true },
+  { id: 'tl2', target: 'État des Risques du 09.07.2026.pdf', recipient: 'sandrine.acquereur@exemple.fr', expiresAt: '06 sept. 2026, 12:00', downloads: 2, maxDownloads: 2, passwordProtected: false, expired: true },
+  { id: 'tl3', target: '4. Situation hypothécaire (dossier)', recipient: 'banque@credit-exemple.fr', expiresAt: '30 sept. 2026, 23:59', downloads: 0, maxDownloads: null, passwordProtected: true },
+];
+
+/** Reporting d'activité de l'office — §3.2, volet « côté EN d'un office ». */
+export const OFFICE_ACTIVITY: OfficeActivityStats = {
+  activeDatarooms: 24,
+  activeDatatoomsDelta: '+3 ce mois',
+  documentsAdded30d: 1284,
+  documentsAdded30dDelta: '+18 %',
+  activeUsers30d: 47,
+  openQuestions: 6,
+  storageTotal: '294,3 Go',
+  storageGrowth30d: '+21,4 Go',
+  topDatarooms: [
+    { id: 'arsenal-1', name: 'Portefeuille Arsenal — lot A', storage: '78,3 Go', sharePercent: 27 },
+    { id: 'arsenal-2', name: 'Portefeuille Arsenal — lot B', storage: '49,1 Go', sharePercent: 17 },
+    { id: 'republique-2', name: 'Cession parts SCI République', storage: '41,7 Go', sharePercent: 14 },
+    { id: 'republique-3', name: 'Baux commerciaux 2026', storage: '36,5 Go', sharePercent: 12 },
+    { id: 'ivry-halle', name: 'Ivry — Halle commerciale', storage: '31,4 Go', sharePercent: 11 },
+  ],
+  members: [
+    { id: 'm1', initials: 'DB', name: 'Delphine Briand', role: 'Notaire', documentsAdded: 218, documentsViewed: 1140, questionsAnswered: 34, lastSeen: "Aujourd'hui" },
+    { id: 'm2', initials: 'CD', name: 'Cyril Dumont', role: 'Superadmin', documentsAdded: 96, documentsViewed: 872, questionsAnswered: 12, lastSeen: "Aujourd'hui" },
+    { id: 'm3', initials: 'HH', name: 'Hélène Hamon', role: 'Notaire', documentsAdded: 341, documentsViewed: 654, questionsAnswered: 27, lastSeen: 'Hier' },
+    { id: 'm4', initials: 'JD', name: 'Jean Delaunay', role: 'Clerc', documentsAdded: 512, documentsViewed: 1508, questionsAnswered: 9, lastSeen: 'Hier' },
+    { id: 'm5', initials: 'SA', name: 'Sandrine — Acquéreur', gray: true, role: 'Client', documentsAdded: 0, documentsViewed: 396, questionsAnswered: 0, lastSeen: "Aujourd'hui" },
+  ],
+};
+
+/** Vue consolidée par portefeuille — §2.1. Clé = id de PORTFOLIOS. */
+export const PORTFOLIO_DETAILS: Record<
+  string,
+  {
+    apui: boolean;
+    meta: Array<{ label: string; value: string }>;
+    stats: {
+      dataroomCount: number;
+      documentCount: number;
+      storage: string;
+      memberCount: number;
+      openQuestions: number;
+    };
+    datarooms: PortfolioDataroomRow[];
+  }
+> = {
+  ivry: {
+    apui: true,
+    meta: [
+      { label: 'Client', value: 'Le Monde Commerce' },
+      { label: 'Opération', value: 'APUI — 4 participants' },
+      { label: 'Office pilote', value: 'Briand & Hamon' },
+      { label: 'Ouvert le', value: '12 février 2026' },
+    ],
+    stats: { dataroomCount: 4, documentCount: 1284, storage: '86,4 Go', memberCount: 18, openQuestions: 4 },
+    datarooms: [
+      { id: 'ivry-halle', name: 'Ivry — Halle commerciale', holder: 'Briand & Hamon', status: { kind: 'success', label: 'Actif' }, documents: 523, storage: '31,4 Go', sharePercent: 36, lastActivity: '3 jours', members: [{ label: 'DB' }, { label: '+5', gray: true }] },
+      { id: 'ivry-bureaux', name: 'Ivry — Plateau de bureaux', holder: 'SCP Moreau & Associés', status: { kind: 'success', label: 'Actif' }, documents: 341, storage: '18,9 Go', sharePercent: 22, lastActivity: '5 jours', members: [{ label: 'PM', gray: true }, { label: '+3', gray: true }] },
+      { id: 'ivry-parking', name: 'Ivry — Parkings', holder: 'Étude Vasseur', status: { kind: 'warning', label: 'En attente' }, documents: 88, storage: '4,5 Go', sharePercent: 5, lastActivity: '2 semaines', members: [{ label: 'EV', gray: true }] },
+      { id: 'ivry-commun', name: 'Ivry — Pièces communes', holder: 'Briand & Hamon', status: { kind: 'success', label: 'Actif' }, documents: 332, storage: '31,6 Go', sharePercent: 37, lastActivity: "Aujourd'hui", members: [{ label: 'DB' }, { label: 'HH', gray: true }, { label: '+8', gray: true }] },
+    ],
+  },
+  jo2024: {
+    apui: false,
+    meta: [
+      { label: 'Client', value: 'Foncière JO 2024' },
+      { label: 'Opération', value: 'Multi-actifs — 12 immeubles' },
+      { label: 'Référent', value: 'Hélène Hamon' },
+      { label: 'Ouvert le', value: '4 novembre 2025' },
+    ],
+    stats: { dataroomCount: 12, documentCount: 4820, storage: '1,8 To', memberCount: 31, openQuestions: 2 },
+    datarooms: [
+      { id: 'jo-1', name: 'Immeuble Pantin — Cartier', holder: 'Hélène Hamon', status: { kind: 'success', label: 'Actif' }, documents: 612, storage: '244,0 Go', sharePercent: 13, lastActivity: 'Hier', members: [{ label: 'HH' }, { label: '+4', gray: true }] },
+      { id: 'jo-2', name: 'Immeuble Saint-Denis — Nord', holder: 'Hélène Hamon', status: { kind: 'success', label: 'Actif' }, documents: 588, storage: '218,5 Go', sharePercent: 12, lastActivity: '2 jours', members: [{ label: 'HH' }, { label: '+3', gray: true }] },
+      { id: 'jo-3', name: 'Village — lots résiduels', holder: 'Jean Delaunay', status: { kind: 'neutral', label: 'Clôturé' }, documents: 219, storage: '61,2 Go', sharePercent: 3, lastActivity: '12 juil. 2026', members: [{ label: 'JD', gray: true }] },
+    ],
+  },
+  'nice-etoile': {
+    apui: false,
+    meta: [
+      { label: 'Client', value: 'Syndicat Nice Étoile' },
+      { label: 'Opération', value: "Vente d'actif" },
+      { label: 'Référent', value: 'Hélène Hamon' },
+      { label: 'Clôturé le', value: '12 juillet 2026' },
+    ],
+    stats: { dataroomCount: 2, documentCount: 318, storage: '14,2 Go', memberCount: 6, openQuestions: 0 },
+    datarooms: [
+      { id: 'nice-1', name: 'Nice Étoile — Lot principal', holder: 'Hélène Hamon', status: { kind: 'neutral', label: 'Archivé' }, documents: 244, storage: '11,8 Go', sharePercent: 83, lastActivity: '12 juil. 2026', members: [{ label: 'HH' }, { label: '+2', gray: true }] },
+      { id: 'nice-2', name: 'Nice Étoile — Annexes', holder: 'Hélène Hamon', status: { kind: 'neutral', label: 'Archivé' }, documents: 74, storage: '2,4 Go', sharePercent: 17, lastActivity: '12 juil. 2026', members: [{ label: 'HH' }] },
+    ],
+  },
+};
+
+/** Fil d'activité consolidé d'un portefeuille — même forme que RECENT_ACTIVITY. */
+export const PORTFOLIO_ACTIVITY = [
+  { id: 'pa1', icon: 'file', iconBg: 'var(--info-bg)', iconColor: 'var(--info)', text: <><b>Delphine Briand</b> a déposé 12 pièces dans <b>Ivry — Pièces communes</b></>, time: "Aujourd'hui, 16:42" },
+  { id: 'pa2', icon: 'msg', iconBg: 'var(--warning-bg)', iconColor: 'var(--warning)', text: <><b>SCP Moreau &amp; Associés</b> a posé une question sur <b>Ivry — Plateau de bureaux</b></>, time: 'Hier, 11:08' },
+  { id: 'pa3', icon: 'users', iconBg: 'var(--success-bg)', iconColor: 'var(--success)', text: <><b>Étude Vasseur</b> a rejoint le portefeuille comme participant APUI</>, time: '28 août 2026' },
+  { id: 'pa4', icon: 'zip', iconBg: 'var(--brass-100)', iconColor: 'var(--brass-700)', text: <><b>Le Monde Commerce</b> a exporté l'ensemble du portefeuille</>, time: '24 août 2026' },
+];

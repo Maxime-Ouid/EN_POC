@@ -1,3 +1,5 @@
+import buildingPng from '../../assets/icons-3d/building.png';
+import checkPng from '../../assets/icons-3d/check.png';
 import docPng from '../../assets/icons-3d/doc.png';
 import folderPng from '../../assets/icons-3d/folder.png';
 import layersPng from '../../assets/icons-3d/layers.png';
@@ -8,9 +10,10 @@ import zipPng from '../../assets/icons-3d/zip.png';
 
 // Correspondance identifiant du sprite -> illustration 3D. La clé est celle
 // qu'attend <Icon id="…"> : un appelant qui passe déjà `folder` ou `file`
-// bascule en 3D sans rien changer chez lui. `x` n'est là que pour la
-// suppression dans un fil d'activité — la croix de fermeture d'une modale
-// n'est pas une pastille et garde son glyphe (voir IconChip).
+// bascule en 3D sans rien changer chez lui. `x` et `check` ne sont là que pour
+// les pastilles (suppression dans un fil d'activité, office actif) — la croix
+// de fermeture d'une modale et la coche d'un bouton ou d'un statut ne sont pas
+// des pastilles et gardent leur glyphe (voir IconChip).
 export const ICON_3D: Record<string, string> = {
   folder: folderPng,
   layers: layersPng,
@@ -19,10 +22,12 @@ export const ICON_3D: Record<string, string> = {
   file: docPng,
   zip: zipPng,
   x: trashPng,
+  building: buildingPng,
+  check: checkPng,
 };
 
 // Illustrations 3D (src/assets/icons-3d) tenant la place du glyphe du sprite pour
-// les sept types d'objets qui en ont une ; `has3d` dit si un identifiant en a.
+// les neuf types d'objets qui en ont une ; `has3d` dit si un identifiant en a.
 export function has3d(icon: string): boolean {
   return Object.prototype.hasOwnProperty.call(ICON_3D, icon);
 }

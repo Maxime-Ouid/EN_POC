@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AppShell,
+  AuditTrailScreen,
   LoginScreen,
   MfaScreen,
   PortfoliosScreen,
+  PortfolioDetailScreen,
+  TemporaryLinkModal,
   DataroomsListScreen,
   type DataroomRow,
   DataroomDetailScreen,
@@ -33,6 +36,8 @@ import {
   TemplateDetailScreen,
   NewTemplateModal,
   NewTemplateFolderModal,
+  NewPortfolioModal,
+  type MetadataFieldDef,
 } from './components';
 import { DashboardScreen, allowedActionKeys } from './dashboard';
 import { useSession } from './hooks/useSession';
@@ -53,19 +58,29 @@ import {
 import { matchesWordStart } from './search/match';
 import type { LocalEntry } from './search/localEntries';
 import {
+  AUDIT_EVENTS,
+  AUDIT_RETENTION,
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
   CONNECTED_USERS,
+  DATAROOM_CUSTOM_FIELDS,
+  DATAROOM_METADATA_VALUES,
   DEMO_HOME_STATS,
   HISTORY,
   INVOICES,
   MEMBERS,
+  METADATA_FIELDS,
   MODULE_CATALOG,
   NAV_SECTIONS,
+  OFFICE_ACTIVITY,
   PORTFOLIOS,
+  PORTFOLIO_ACTIVITY,
+  PORTFOLIO_DETAILS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
   RECENT_ACTIVITY,
+  STATEMENT_PERIODS,
+  TEMPORARY_LINKS,
 } from './data/demo';
 
 /* ===========================================================================
@@ -94,9 +109,11 @@ import {
 type ScreenKey =
   | 'dashboard'
   | 'portfolios'
+  | 'portfolio'
   | 'datarooms'
   | 'dataroom'
   | 'stats'
+  | 'audit'
   | 'users'
   | 'settings';
 
@@ -113,9 +130,11 @@ const moduleSlugOf = (key: string) =>
 const CRUMB_LABELS: Record<ScreenKey, string> = {
   dashboard: 'Accueil',
   portfolios: 'Portefeuilles',
+  portfolio: 'Portefeuilles',
   datarooms: 'Dossiers',
   dataroom: 'Dossiers',
   stats: 'Statistiques & facturation',
+  audit: 'Journal des accès',
   users: "Annuaire de l'étude",
   settings: 'Personnalisation',
 };
@@ -314,6 +333,19 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey | undefined>(undefined);
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  /* Lot « valeur MVP » du 03/09/2026 — §3.2 / §4.6. Ces états portent des
+     écrans dont AUCUN endpoint n'existe encore : ils vivent donc ici, en
+     mémoire, alimentés par src/data/demo.tsx. Chacun disparaîtra au profit
+     d'un hook `use…` le jour où le serveur saura répondre, exactement comme
+     les tags et les modèles avant eux. */
+  const [openPortfolioId, setOpenPortfolioId] = useState<string | null>(null);
+  const [newPortfolioOpen, setNewPortfolioOpen] = useState(false);
+  const [temporaryLinkOpen, setTemporaryLinkOpen] = useState(false);
+  const [metadataFields, setMetadataFields] = useState<MetadataFieldDef[]>(METADATA_FIELDS);
+  const [dataroomCustomFields, setDataroomCustomFields] =
+    useState<MetadataFieldDef[]>(DATAROOM_CUSTOM_FIELDS);
+  const [metadataValues, setMetadataValues] =
+    useState<Record<string, string>>(DATAROOM_METADATA_VALUES);
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
   const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
@@ -545,6 +577,13 @@ export default function App() {
   }, [modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
+
+  /* Portefeuille ouvert. Deux sources parce que la liste et le détail n'ont pas
+     la même forme : PORTFOLIOS porte la carte (nom, statut, pile d'avatars) et
+     PORTFOLIO_DETAILS la consolidation. Elles fusionneront le jour où un
+     endpoint les servira ensemble. */
+  const openPortfolio = PORTFOLIOS.find(p => p.id === openPortfolioId) ?? null;
+  const portfolioDetail = openPortfolioId ? (PORTFOLIO_DETAILS[openPortfolioId] ?? null) : null;
 
   /**
    * Ce que la palette ⌘K trouve en plus des résultats du serveur.
@@ -1211,11 +1250,47 @@ export default function App() {
       )}
 
       {!openModuleEntry && screen === 'portfolios' && (
-        <PortfoliosScreen
-          portfolios={PORTFOLIOS}
-          onCreate={() => {}}
-          onFilter={() => {}}
-          onOpen={() => setScreen('datarooms')}
+        <>
+          <PortfoliosScreen
+            portfolios={PORTFOLIOS}
+            onCreate={() => setNewPortfolioOpen(true)}
+            onFilter={() => {}}
+            /* Jusqu'au 03/09/2026 ce clic renvoyait vers la liste générale des
+               dossiers : on voyait le regroupement sans jamais voir l'ensemble,
+               ce qui vidait le portefeuille de sa raison d'être (§2.1). */
+            onOpen={id => {
+              setOpenPortfolioId(id);
+              setScreen('portfolio');
+            }}
+          />
+          <NewPortfolioModal
+            open={newPortfolioOpen}
+            onClose={() => setNewPortfolioOpen(false)}
+            clientSpaceOptions={CLIENT_SPACE_OPTIONS}
+            dataroomOptions={datarooms.items.map(d => ({ id: String(d.id), label: d.name }))}
+            onCreate={() => setNewPortfolioOpen(false)}
+          />
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'portfolio' && openPortfolio && portfolioDetail && (
+        <PortfolioDetailScreen
+          key={openPortfolio.id}
+          name={openPortfolio.name}
+          desc={openPortfolio.desc}
+          status={openPortfolio.status}
+          apui={portfolioDetail.apui}
+          meta={portfolioDetail.meta}
+          stats={portfolioDetail.stats}
+          datarooms={portfolioDetail.datarooms}
+          activity={PORTFOLIO_ACTIVITY}
+          onBackToList={() => navigate('portfolios')}
+          /* Les datarooms du portefeuille sont des lignes de démonstration :
+             leurs identifiants ne correspondent à aucune Dataroom réelle. On
+             ouvre donc la liste des dossiers plutôt que de tenter un détail qui
+             tomberait en 404 — même honnêteté que les résultats `simulated` de
+             la palette de recherche. */
+          onOpenDataroom={() => navigate('datarooms')}
         />
       )}
 
@@ -1294,6 +1369,28 @@ export default function App() {
             qaEntries={QA_ENTRIES}
             members={MEMBERS}
             history={HISTORY}
+            metadata={{
+              officeFields: metadataFields,
+              customFields: dataroomCustomFields,
+              values: metadataValues,
+              // Même gate que les droits d'accès : renseigner les informations
+              // du dossier est un geste de gestion, pas de consultation.
+              readOnly: !canManageOffice,
+              onValueChange: (fieldId, value) =>
+                setMetadataValues(prev => ({ ...prev, [fieldId]: value })),
+              onAddCustomField: field => setDataroomCustomFields(prev => [...prev, field]),
+              onRemoveCustomField: fieldId => {
+                setDataroomCustomFields(prev => prev.filter(f => f.id !== fieldId));
+                // La valeur part avec le champ : la laisser derrière ferait
+                // réapparaître une ancienne saisie si le champ est recréé.
+                setMetadataValues(prev => {
+                  const next = { ...prev };
+                  delete next[fieldId];
+                  return next;
+                });
+              },
+            }}
+            onTemporaryLink={() => setTemporaryLinkOpen(true)}
             onBackToList={() => navigate('datarooms')}
             onAddDocuments={(activeFolderId, files) => {
               const parentId = toParentId(activeFolderId);
@@ -1370,6 +1467,12 @@ export default function App() {
               const parentId = toParentId(newFolderModal?.parentId);
               void dataroomTree.createFolder(name, parentId).then(() => setNewFolderModal(null));
             }}
+          />
+          <TemporaryLinkModal
+            open={temporaryLinkOpen}
+            onClose={() => setTemporaryLinkOpen(false)}
+            target={openDataroom.name}
+            links={TEMPORARY_LINKS}
           />
         </>
       )}
@@ -1488,12 +1591,29 @@ export default function App() {
       )}
 
       {!openModuleEntry && screen === 'stats' && (
-        <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
+        <StatsScreen
+          usage={CLIENT_USAGE}
+          invoices={INVOICES}
+          connected={CONNECTED_USERS}
+          activity={OFFICE_ACTIVITY}
+          officeName={session.tenant?.name ?? 'votre office'}
+          statementPeriods={STATEMENT_PERIODS}
+        />
+      )}
+
+      {!openModuleEntry && screen === 'audit' && (
+        <AuditTrailScreen events={AUDIT_EVENTS} retention={AUDIT_RETENTION} />
       )}
 
       {!openModuleEntry && screen === 'settings' && (
         <SettingsScreen
           defaultTab={settingsTab}
+          metadata={{
+            fields: metadataFields,
+            // Réservé aux administrateurs, comme l'identité et les modules : le
+            // schéma vaut pour TOUS les dossiers de l'étude.
+            onChange: canManageOffice ? setMetadataFields : undefined,
+          }}
           identity={{
             identity: {
               displayName: session.tenant?.name ?? '',

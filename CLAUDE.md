@@ -2702,24 +2702,25 @@ esbuild du vrai code (AppShell + écran réels, portails compris, données figé
 le rail, la topbar à commandes, les trois cartes et le tableau tiennent la même
 grille que l'accueil d'une étude.
 
-**Défaut PRÉEXISTANT repéré au passage (pas une régression, à trancher séparément)** :
-`.foot-user svg` (`components.css`) colore l'icône de déconnexion du pied de rail en
-`var(--shell-text-dim)` — `#b6acdb`, un lavande pâle calibré pour l'ANCIEN rail
-foncé. Depuis que le rail est un blanc translucide en thème clair
-(`--nav-bg: rgba(255,255,255,.45)`), l'icône y est quasi invisible : seul le calque
-duotone (`--icon-accent` à .55) se voit, ce qui donne un carré mauve. En thème sombre
-elle est correcte. **L'app d'office est touchée exactement pareil** — même composant,
-même règle CSS. Correctif d'une ligne : `var(--brand-soft)` (`#4e3f96` clair /
-`#a89ed4` sombre), le token que `.foot-role` utilise déjà juste à côté sur cette même
-surface. Non appliqué : il change l'apparence d'un écran d'office déjà validé. **Non vérifié en navigateur réel** — parcours
+**Défaut PRÉEXISTANT corrigé au passage (repéré ici, mais il touchait l'app d'office
+depuis la refonte du rail)** : `.foot-user svg` (`components.css`) colorait l'icône de
+déconnexion du pied de rail en `var(--shell-text-dim)` — `#b6acdb`, un lavande pâle
+calibré pour l'ANCIEN rail foncé. Depuis que le rail est un blanc translucide en thème
+clair (`--nav-bg: rgba(255,255,255,.45)`), l'icône y était quasi invisible : seul le
+calque duotone (`--icon-accent` à .55) se voyait, ce qui donnait un carré mauve. En
+thème sombre elle était correcte, d'où le fait que personne ne l'ait vue. Passée à
+`var(--brand-soft)` (`#4e3f96` clair / `#a89ed4` sombre) sur décision de Jean-Marie —
+c'est LE token du texte atténué de ce pied de rail, celui que `.foot-role` utilise juste
+au-dessus, et il est défini pour les deux thèmes. **La sidebar de l'app d'office change
+donc aussi**, et c'est l'objet du correctif : les deux affichaient le même défaut. **Non vérifié en navigateur réel** — parcours
 à refaire sur `hyperadmin.localhost` : connexion, filtre, création d'office, modules,
 activation/désactivation.
 
 
 ## Icônes 3D dans les pastilles (03/09/2026)
 
-Sept types d'objets — dossier, calques, question, membres, document, archive ZIP,
-suppression — portent désormais une **illustration 3D** au lieu du glyphe Phosphor du
+Neuf types d'objets — dossier, calques, question, membres, document, archive ZIP,
+suppression, immeuble (office) et validation — portent désormais une **illustration 3D** au lieu du glyphe Phosphor du
 sprite. Les images viennent de planches fournies par le client, détourées (fond crème et
 ombre au sol retirés) et rangées dans `frontend/src/assets/icons-3d/*.png` (PNG
 transparents 128 px, 15-20 Ko). Le même remplacement a été fait dans le prototype de
@@ -2746,6 +2747,11 @@ pastilles écrites sur place), `PortfoliosScreen`, `dashboard/widgets.tsx` (`Wid
 l'appellent directement ; `Explorer` utilise `Icon3d` pour le dossier de l'arborescence.
 CSS en fin de `components.css` (`.icon-3d`, `.icon-chip-3d` et les tailles par contexte).
 
+Ajout du 03/09/2026 au soir : `building` (immeuble, carte « Offices » de la console
+hyperadmin) et `check` (validation, carte « Offices actifs »). Le socle crème sous
+l'immeuble a été retiré au détourage — il est de la teinte du fond de la planche et
+aurait fait une barre beige flottante sur les cartes.
+
 ### Pièges
 
 - **`x` est à double emploi.** Le même identifiant sert de croix de fermeture (modale,
@@ -2761,7 +2767,7 @@ CSS en fin de `components.css` (`.icon-3d`, `.icon-chip-3d` et les tailles par c
   couleurs, elle n'hérite pas de `currentColor` et ne consomme pas `--icon-accent` : une
   étude qui repeint son espace en vert gardera un dossier bleu. C'est un choix assumé
   (illustration, pas token) — si la personnalisation redevient une exigence, il faudra
-  soit des variantes par palette, soit revenir aux glyphes sur ces sept types.
+  soit des variantes par palette, soit revenir aux glyphes sur ces neuf types.
 - **Une pastille qui encodait un état par sa couleur perd la nuance** : `muted` (dossier
   clôturé) n'a plus d'effet visuel en 3D, et les documents rouges (PDF) / bleus (DWG) de
   la dataroom sont désormais le même document bleu. Le `muted` est conservé côté API et
@@ -2771,6 +2777,79 @@ Vérifié : `npx tsc -b --force` propre, `check:ds` sans écart nouveau (200 fic
 53 écarts hérités), et rendu réel en navigateur via le bundle esbuild (accueil complet +
 arborescence, thèmes clair et sombre, aucune erreur console). Non rejoué dans
 l'application servie par Django.
+
+## Widgets d'action rapide sur l'accueil (03/09/2026)
+
+Jusqu'ici l'accueil ne savait qu'AFFICHER : chaque widget abrégeait un écran, et le
+seul widget « Raccourcis » ouvrait des écrans avec une liste figée dans le code. Un
+widget peut maintenant DÉCLENCHER un geste — créer un dossier, déposer un fichier,
+inviter un utilisateur, ouvrir la recherche.
+
+**Le catalogue est un fichier, pas un composant** : `src/dashboard/actions.ts` liste les
+neuf actions (clé courte, libellé, description, icône, exécutant, droits requis). Les
+widgets, la fenêtre de configuration et `App.tsx` le lisent tous les trois ; ajouter une
+action, c'est ajouter une entrée — comme pour les widgets eux-mêmes.
+
+**Deux formes, décidées avec Jean-Marie** :
+
+- la carte « Actions rapides » (gabarit SIDE), dont le CONTENU se choisit. Elle garde
+  l'identifiant `raccourcis` du widget qu'elle remplace : le renommer aurait fait
+  disparaître la carte de tous les accueils déjà rangés et des templates, `resolveWidgets`
+  écartant silencieusement les identifiants inconnus ;
+- trois tuiles unitaires au gabarit d'un chiffre-clé (`action-dossier`, `action-depot`,
+  `action-invite`), nouvelle famille « Actions » dans la bibliothèque. Trois et pas neuf :
+  neuf tuiles doubleraient la bibliothèque pour y mettre neuf fois la même chose, et les
+  six autres actions se posent dans la carte, qui existe pour ça.
+
+**Ce que ça a demandé, et pourquoi ça ne demandait pas plus** :
+
+- `WidgetContext` gagne `runAction(key)` et `allowedActions`. Un widget ne fait toujours
+  rien lui-même : il nomme un geste, l'application l'exécute — même règle que pour les
+  données.
+- `App.runQuickAction` navigue ET ouvre la fenêtre voulue dans le même geste. C'est
+  possible sans plomberie nouvelle parce que ces fenêtres sont montées dans le bloc de
+  leur écran et que leur état vit déjà dans `App.tsx`. L'action part toujours de
+  l'accueil, donc l'écran d'arrivée n'est jamais déjà monté — c'est ce qui rend
+  `defaultTab` fiable pour « Créer un modèle » (qui doit atterrir sur l'onglet Modèles),
+  et `navigate` prend pour cela un second argument optionnel.
+- La recherche fait exception : la palette appartient à AppShell. D'où
+  `components/templates/shellCommands.ts`, symétrique de `topbarSlots.ts` — l'écran
+  déclenche une commande de la coquille au lieu de faire remonter `searchOpen` dans
+  `App.tsx` puis dans tous ses appelants. Hors AppShell (UI kit, démos) la commande vaut
+  `null` et l'action est retirée du catalogue : pas de bouton sans effet.
+- Les droits filtrent le CATALOGUE : « Inviter » et « Créer un modèle » sont réservés à
+  `canManageOffice`, et leurs tuiles ne sont même pas proposées dans la bibliothèque à qui
+  n'a pas le droit (`WidgetDefinition.action`). Le serveur refusait déjà l'écriture ; on
+  évite ici de proposer un geste qui finirait en 403.
+
+**Le champ `options` des placements sert enfin** (il était prévu depuis le début, et
+personne ne l'écrivait). Le contenu de la carte y tient dans UNE clé, `actions`, une liste
+ordonnée séparée par des virgules — plutôt qu'un booléen par action, qui perdrait l'ordre
+et mangerait les dix clés que le serveur accepte. Deux corrections que ça a imposées :
+
+- `sameLayout` comparait seulement les positions : une carte reconfigurée sans bouger d'un
+  pixel passait pour inchangée et n'était jamais enregistrée ;
+- `setWidgets` recevait de la grille des positions SANS réglages : un simple déplacement
+  effaçait la configuration, panne silencieuse puisque la carte repartait sur son contenu
+  par défaut, qui ressemble à un contenu. Les réglages sont maintenant recopiés depuis
+  l'état courant.
+
+**Défaut latent corrigé au passage** : en mode édition, les boutons du CORPS d'un widget
+restaient cliquables alors que la carte entière est la poignée de déplacement — un clic
+destiné à saisir un bloc pouvait ouvrir un écran. `.widget-editing .widget-body button`
+les neutralise (`pointer-events`, et non `disabled` : un bouton désactivé n'émet aucun
+évènement de souris, la zone cesserait donc aussi d'être saisissable).
+
+**Vérifications** : `npx tsc -b --force` propre, `check:ds` sans écart nouveau (203
+fichiers, 53 hérités), aperçu esbuild + captures Playwright en thèmes clair et sombre, en
+consultation, en édition et fenêtre de configuration ouverte — sept widgets rendus, aucune
+erreur console. **Non vérifié en navigateur réel** : les actions n'ont pas été jouées sur
+l'application lancée (les bases locales attendent toujours la migration `0008`).
+
+**Point ouvert** : « Déposer un fichier » ouvre le dossier le plus récent, faute de zone de
+dépôt sur l'accueil. C'est honnête (le libellé le dit) mais ce n'est pas le geste idéal —
+une vraie zone de dépôt sur l'accueil demanderait de choisir le dossier après coup, donc un
+écran de plus.
 
 ## État actuel du POC
 

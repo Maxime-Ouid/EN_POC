@@ -1,3 +1,4 @@
+export * from './AuditTrailScreen';
 export * from './DataroomDetailScreen';
 export * from './DataroomsListScreen';
 // HomeScreen est l'accueil FIGÉ du prototype V2 : depuis le 31/08/2026,
@@ -11,6 +12,7 @@ export * from './LoginScreen';
 export * from './MfaScreen';
 export * from './ModuleScreen';
 export * from './OfficeUsersScreen';
+export * from './PortfolioDetailScreen';
 export * from './PortfoliosScreen';
 export * from './SettingsScreen';
 export * from './StatsScreen';

@@ -15,11 +15,13 @@ import { TabStrip } from '../molecules/TabStrip';
 import { TagFilter } from '../molecules/TagFilter';
 import { DocumentSlideover } from '../organisms/DocumentSlideover';
 import { Explorer } from '../organisms/Explorer';
+import { DataroomMetadataPanel } from '../organisms/DataroomMetadataPanel';
 import { QACard } from '../organisms/QACard';
 import { TagPicker } from '../organisms/TagPicker';
 import { useTopbarSlots } from '../templates/topbarSlots';
 import type { PillKind } from '../atoms/Pill';
 import type { TabDef } from '../molecules/TabStrip';
+import type { DataroomMetadataPanelProps } from '../organisms/DataroomMetadataPanel';
 import type { DocumentActivityEntry, DocumentCustomField } from '../organisms/DocumentSlideover';
 import type { TreeNodeData } from '../organisms/Explorer';
 import type { TagColor } from '../atoms/Tag';
@@ -131,10 +133,24 @@ export interface DataroomDetailScreenProps {
   onDocumentTagsChange?: (documentId: string, tagIds: number[]) => void | Promise<void>;
   /** Création à la volée, partagée par les deux sélecteurs. */
   onCreateTag?: (name: string, color: TagColor) => Promise<TagRef>;
+  /**
+   * Méta-données du dossier (§4.6) — champs communs de l'office et champs
+   * propres à ce dossier. Absent = l'onglet « Informations » n'apparaît pas :
+   * mieux vaut pas d'onglet qu'un onglet vide dans les aperçus du kit
+   * d'interface, qui n'ont pas de schéma d'office derrière eux.
+   */
+  metadata?: DataroomMetadataPanelProps;
+  /**
+   * Ouvre la création d'un lien temporaire de téléchargement (§3.2). Absent =
+   * le bouton reste visible mais inerte, comme avant ce lot.
+   */
+  onTemporaryLink?: () => void;
+  /** Export ZIP du dossier ou de la sélection (§4.1). */
+  onExportZip?: () => void;
 }
 
 // Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents /
-// Q&R / Membres / Historique). L'état d'onglet, de noeud d'arbre sélectionné et
+// Informations / Q&R / Droits d'accès / Historique). L'état d'onglet, de noeud d'arbre sélectionné et
 // d'ouverture du volet document est géré ici (état d'écran pur) ; les données
 // (tree, documentsByFolder, qaEntries…) viennent des props — à alimenter par
 // les vrais endpoints (GET /api/datarooms/<id>/documents/ etc., déjà en place
@@ -164,6 +180,9 @@ export function DataroomDetailScreen({
   onTagsChange,
   onDocumentTagsChange,
   onCreateTag,
+  metadata,
+  onTemporaryLink,
+  onExportZip,
 }: DataroomDetailScreenProps) {
   const slots = useTopbarSlots();
   const [activeTab, setActiveTab] = useState('sub-docs');
@@ -203,6 +222,10 @@ export function DataroomDetailScreen({
 
   const tabs: TabDef[] = [
     { key: 'sub-docs', icon: 'folder', label: 'Documents' },
+    // « Informations » se place juste après les documents et avant les
+    // échanges : c'est la carte d'identité du dossier, on la lit avant d'y
+    // travailler. L'onglet disparaît quand aucun schéma n'est fourni.
+    ...(metadata ? [{ key: 'sub-info', icon: 'list', label: 'Informations' }] : []),
     { key: 'sub-qa', icon: 'msg', label: 'Questions / Réponses', count: qaEntries.length },
     { key: 'sub-members', icon: 'lock', label: 'Droits d\'accès' },
     { key: 'sub-history', icon: 'clock', label: 'Historique' },
@@ -261,13 +284,13 @@ export function DataroomDetailScreen({
           </ButtonRow>
         </div>
         <ButtonRow>
-          <Button size="sm">
+          <Button size="sm" onClick={onTemporaryLink}>
             <svg className="icon">
               <use href="#i-link" />
             </svg>
             Lien temporaire
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={onExportZip}>
             <svg className="icon">
               <use href="#i-zip" />
             </svg>
@@ -395,6 +418,12 @@ export function DataroomDetailScreen({
           </DocPanel>
         </Explorer>
       </Subscreen>
+
+      {metadata && (
+        <Subscreen active={activeTab === 'sub-info'}>
+          <DataroomMetadataPanel {...metadata} />
+        </Subscreen>
+      )}
 
       <Subscreen active={activeTab === 'sub-qa'}>
         {qaEntries.map(qa => (

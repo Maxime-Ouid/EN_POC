@@ -83,13 +83,13 @@ export function QuickActionsModal({
                 </div>
                 <button
                   type="button"
-                  className="qa-ctl"
+                  className="qa-ctl qa-ctl-up"
                   onClick={() => move(index, -1)}
                   disabled={index === 0}
                   aria-label={`Monter ${action.label}`}
                 >
                   <svg className="icon">
-                    <use href="#i-up" />
+                    <use href="#i-chevd" />
                   </svg>
                 </button>
                 <button
@@ -100,7 +100,7 @@ export function QuickActionsModal({
                   aria-label={`Descendre ${action.label}`}
                 >
                   <svg className="icon">
-                    <use href="#i-down" />
+                    <use href="#i-chevd" />
                   </svg>
                 </button>
                 <button
