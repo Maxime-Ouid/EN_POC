@@ -46,6 +46,18 @@ export interface DataroomDocument {
   customFields?: DocumentCustomField[];
   /** Dernières actions sur la pièce (consultations, dépôts). */
   activity?: DocumentActivityEntry[];
+  /**
+   * Jamais ouverte par l'utilisateur courant — §11.1, « compteurs et mise en
+   * évidence des documents non consultés ». Propre à CHAQUE lecteur : deux
+   * personnes ne voient pas les mêmes pièces en gras.
+   */
+  unread?: boolean;
+  /**
+   * Pièce désactivée (§11.1) : elle reste au dossier et à l'historique, mais
+   * n'est plus consultable. À distinguer d'une suppression, qui efface, et de
+   * l'état « non applicable » (§4.7), qui dit qu'il n'y a jamais eu de pièce.
+   */
+  disabled?: boolean;
 }
 
 export interface QAEntry {
@@ -158,6 +170,8 @@ export interface DataroomDetailScreenProps {
   onShareWithOffice?: () => void;
   /** Ouvre le cycle de vie du dossier — clôture, archivage, conservation (§4.1). */
   onLifecycle?: () => void;
+  /** Ouvre la synthèse d'activité PDF du dossier (§11.1). */
+  onActivityReport?: () => void;
   /**
    * Commandes de l'onglet Q/R au-delà de la simple réponse (§4.3 : poser,
    * modérer, désactiver, supprimer, exporter). Absent = l'onglet garde la
@@ -210,6 +224,7 @@ export function DataroomDetailScreen({
   onExportZip,
   onShareWithOffice,
   onLifecycle,
+  onActivityReport,
   qa,
   qaModeration,
   documentActions,
@@ -224,6 +239,10 @@ export function DataroomDetailScreen({
   // puis passer à un autre sous-dossier ne doit pas y masquer silencieusement
   // des pièces.
   const [docTagFilter, setDocTagFilter] = useState<number[]>([]);
+  /* Filtre « non consultés » (§11.1). Même portée que le filtre par tag : il ne
+     survit pas au changement de rubrique, sinon on croirait un sous-dossier
+     vide alors qu'on n'en voit qu'une partie. */
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
   // Une NOUVELLE demande de ciblage (nonce différent) ouvre le dossier visé et
   // referme le volet resté ouvert sur une pièce d'un autre dossier. Dépendance
@@ -242,6 +261,7 @@ export function DataroomDetailScreen({
   function selectFolder(id: string) {
     setActiveFolderId(id);
     setOpenDoc(null);
+    setShowUnreadOnly(false);
     setDocTagFilter([]);
   }
 
@@ -269,13 +289,19 @@ export function DataroomDetailScreen({
   // Filtrage en OU, côté client : l'arborescence entière est déjà chargée (voir
   // useDataroomTree), un aller-retour serveur par case cochée n'apporterait
   // rien qu'un délai.
-  const activeDocs = useMemo(
-    () =>
-      docTagFilter.length === 0
-        ? folderDocs
-        : folderDocs.filter(doc => doc.tags?.some(t => docTagFilter.includes(t.id))),
-    [folderDocs, docTagFilter],
-  );
+  const activeDocs = useMemo(() => {
+    let docs = folderDocs;
+    if (docTagFilter.length > 0) {
+      docs = docs.filter(doc => doc.tags?.some(t => docTagFilter.includes(t.id)));
+    }
+    if (showUnreadOnly) docs = docs.filter(doc => doc.unread);
+    return docs;
+  }, [folderDocs, docTagFilter, showUnreadOnly]);
+
+  /** Compteur du dossier ouvert — le §11.1 demande le compteur ET la mise en
+      évidence : sans le premier, on ne sait pas qu'il reste à lire ; sans la
+      seconde, on ne sait pas quoi. */
+  const unreadCount = useMemo(() => folderDocs.filter(d => d.unread).length, [folderDocs]);
 
   /* Le repère d'écran remonte dans la topbar (01/09/2026) : c'est le seul
      endroit qui dit où l'on se trouve depuis le retrait des titres de page, et
@@ -334,6 +360,14 @@ export function DataroomDetailScreen({
               Partager avec un office
             </Button>
           )}
+          {onActivityReport && (
+            <Button size="sm" onClick={onActivityReport}>
+              <svg className="icon">
+                <use href="#i-file" />
+              </svg>
+              Synthèse d'activité
+            </Button>
+          )}
           {onLifecycle && (
             <Button size="sm" onClick={onLifecycle}>
               <svg className="icon">
@@ -367,6 +401,18 @@ export function DataroomDetailScreen({
             title={activeFolderLabel}
             actions={
               <>
+                {unreadCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant={showUnreadOnly ? 'accent' : 'default'}
+                    onClick={() => setShowUnreadOnly(v => !v)}
+                  >
+                    <svg className="icon">
+                      <use href="#i-eye" />
+                    </svg>
+                    {unreadCount} non consulté{unreadCount > 1 ? 's' : ''}
+                  </Button>
+                )}
                 {tagCatalog.length > 0 && (
                   <TagFilter
                     options={tagCatalog}
@@ -407,16 +453,31 @@ export function DataroomDetailScreen({
                   {activeDocs.map(doc => (
                     <tr
                       key={doc.id}
-                      className={doc.muted ? undefined : 'clickable'}
-                      onClick={doc.muted ? undefined : () => setOpenDoc(doc)}
+                      className={doc.muted || doc.disabled ? undefined : 'clickable'}
+                      onClick={doc.muted || doc.disabled ? undefined : () => setOpenDoc(doc)}
                     >
                       <RowName
                         icon="file"
-                        iconBg={doc.muted ? 'var(--surface-alt)' : 'var(--critical-bg)'}
-                        iconColor={doc.muted ? 'var(--ink-400)' : 'var(--critical)'}
-                        muted={doc.muted}
+                        iconBg={doc.muted || doc.disabled ? 'var(--surface-alt)' : 'var(--critical-bg)'}
+                        iconColor={doc.muted || doc.disabled ? 'var(--ink-400)' : 'var(--critical)'}
+                        muted={doc.muted || doc.disabled}
                       >
-                        {doc.name}
+                        {/* Non consultée : point de couleur devant le nom — la
+                            mise en évidence demandée au §11.1, portée par un
+                            signe et non par une nuance de graisse invisible
+                            dans un tableau. Désactivée : nom barré, la pièce
+                            reste au dossier mais ne s'ouvre plus. */}
+                        {doc.unread && !doc.disabled && (
+                          <span className="unread-dot" aria-label="Non consulté" />
+                        )}
+                        <span
+                          style={{
+                            fontWeight: doc.unread && !doc.disabled ? 700 : undefined,
+                            textDecoration: doc.disabled ? 'line-through' : undefined,
+                          }}
+                        >
+                          {doc.name}
+                        </span>
                       </RowName>
                       <td>
                         <Pill kind={doc.status.kind}>{doc.status.label}</Pill>
@@ -460,10 +521,12 @@ export function DataroomDetailScreen({
                       )}
                     </tr>
                   ))}
-                  {activeDocs.length === 0 && docTagFilter.length > 0 && (
+                  {activeDocs.length === 0 && (docTagFilter.length > 0 || showUnreadOnly) && (
                     <tr>
                       <td colSpan={7} className="dim tiny" style={{ textAlign: 'center', padding: 18 }}>
-                        Aucune pièce de ce dossier ne porte les tags sélectionnés.
+                        {showUnreadOnly && docTagFilter.length === 0
+                          ? 'Toutes les pièces de ce dossier ont été consultées.'
+                          : 'Aucune pièce de ce dossier ne correspond à ces filtres.'}
                       </td>
                     </tr>
                   )}

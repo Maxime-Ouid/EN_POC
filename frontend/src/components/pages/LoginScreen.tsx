@@ -8,6 +8,14 @@ export interface LoginScreenProps {
   defaultIdentifier?: string;
   onSubmit: (identifier: string, password: string) => void;
   onSsoClick?: () => void;
+  /**
+   * Réinitialisation autonome du mot de passe (§11.1). Les deux liens du pied
+   * de carte existaient depuis le prototype mais ne menaient nulle part
+   * (`e.preventDefault()` seul) : ils sont câblés ici, et restent inertes si
+   * l'appelant ne fournit rien plutôt que d'afficher un lien mort.
+   */
+  onForgotPassword?: () => void;
+  onHelp?: () => void;
   logoUrl?: string;
   error?: string;
 }
@@ -22,6 +30,8 @@ export function LoginScreen({
   defaultIdentifier,
   onSubmit,
   onSsoClick,
+  onForgotPassword,
+  onHelp,
   logoUrl = notantisLogo,
   error,
 }: LoginScreenProps) {
@@ -133,10 +143,22 @@ export function LoginScreen({
               Continuer avec Id.Not
             </button>
             <div className="login-foot">
-              <a href="#" onClick={e => e.preventDefault()}>
+              <a
+                href="#"
+                onClick={e => {
+                  e.preventDefault();
+                  onForgotPassword?.();
+                }}
+              >
                 Mot de passe oublié ?
               </a>
-              <a href="#" onClick={e => e.preventDefault()}>
+              <a
+                href="#"
+                onClick={e => {
+                  e.preventDefault();
+                  onHelp?.();
+                }}
+              >
                 Besoin d'aide ?
               </a>
             </div>

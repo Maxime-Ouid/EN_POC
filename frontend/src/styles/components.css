@@ -1777,3 +1777,14 @@ button.v1-tool-row-name:hover{color:var(--brass-700);}
 .row-actions-item.is-danger{color:var(--critical);}
 .row-actions-item.is-danger .icon{color:var(--critical);}
 .row-actions-sep{height:1px;background:var(--border);margin:4px 2px;}
+
+/* --- Pièce non consultée --------------------------------------------------- */
+/* §11.1, « mise en évidence des documents non consultés ». Le gras seul ne
+   suffisait pas : `.row-name` est déjà en 600, l'écart avec 700 ne se voit pas
+   dans un tableau (constaté à la capture du 03/09/2026). Le point le dit sans
+   ambiguïté, et il code une information que rien d'autre ne porte — la colonne
+   « Statut » dit l'état de la PIÈCE, jamais si CE lecteur-ci l'a ouverte. */
+.unread-dot{
+  display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;
+  background:var(--brass-600);margin-right:2px;
+}

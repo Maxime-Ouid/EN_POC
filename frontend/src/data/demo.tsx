@@ -258,6 +258,9 @@ export const DOCS_BY_FOLDER: Record<string, DataroomDocument[]> = {
       addedBy: 'C. Dumont',
       date: "Aujourd'hui",
       size: '4,7 Mo',
+      // Non consultée par le lecteur courant (§11.1) : nom en gras et comptée
+      // dans le compteur du dossier.
+      unread: true,
       customFields: [
         { label: 'Référence cadastrale', value: 'AB-0413', mono: true },
         { label: 'Confidentiel', value: 'Non' },
@@ -275,18 +278,25 @@ export const DOCS_BY_FOLDER: Record<string, DataroomDocument[]> = {
     {
       id: 'd3',
       name: 'Plan topographique T1.dwg',
-      status: { kind: 'neutral', label: 'Consulté' },
+      status: { kind: 'neutral', label: 'Désactivé' },
       addedBy: 'C. Dumont',
       date: '02/06/2026',
       size: '11,4 Mo',
+      // Désactivée (§11.1) : reste au dossier et à l'historique, ne s'ouvre
+      // plus. Réactivable depuis le menu de la ligne.
+      disabled: true,
     },
     {
       id: 'd4',
+      // Statut métier « Déposé » ET non consultée : les deux sont indépendants,
+      // la colonne Statut dit l'état de la pièce, le point dit si CE lecteur
+      // l'a ouverte.
       name: 'Géoportail — relevé.pdf',
-      status: { kind: 'neutral', label: 'Consulté' },
+      status: { kind: 'neutral', label: 'Déposé' },
       addedBy: 'D. Briand',
       date: '02/06/2026',
       size: '870 Ko',
+      unread: true,
     },
     {
       id: 'd5',
@@ -780,3 +790,55 @@ export const ACCOUNT_SECURITY = {
   lastPasswordChange: '28 août 2026',
   lastLogin: "Aujourd'hui, 09:22",
 };
+
+/* ---------------------------------------------------------------------------
+   Lot « unitaires §11.1 » — 03/09/2026.
+   CGU, aide, panier de téléchargement : ressources et textes de démonstration.
+   ------------------------------------------------------------------------- */
+
+export const TERMS_VERSION = 'v2.1';
+export const TERMS_UPDATED_AT = '1er juillet 2026';
+
+export const TERMS_ARTICLES = [
+  {
+    title: 'Article 1 — Objet',
+    body: "Les présentes conditions régissent l'accès à l'Espace Notarial mis à disposition par l'office et l'utilisation des dataroom qui y sont hébergées. L'accès est strictement personnel et nominatif.",
+  },
+  {
+    title: 'Article 2 — Confidentialité et secret professionnel',
+    body: "Les documents déposés sont couverts par le secret professionnel notarial. L'utilisateur s'interdit de les diffuser à des tiers non intervenants au dossier, y compris par capture d'écran ou réexpédition.",
+  },
+  {
+    title: 'Article 3 — Sécurité du compte',
+    body: "L'utilisateur est responsable de la confidentialité de ses identifiants. L'authentification forte est obligatoire sur tout accès exposé. Toute suspicion de compromission doit être signalée sans délai à l'office.",
+  },
+  {
+    title: 'Article 4 — Traçabilité',
+    body: "Les accès, consultations, dépôts et téléchargements sont journalisés et conservés. Ces journaux peuvent être produits en cas d'incident ou de contentieux.",
+  },
+  {
+    title: 'Article 5 — Disponibilité',
+    body: "Le service peut être interrompu pour maintenance. Les interruptions programmées sont annoncées dans l'application, et le cas échéant par courriel.",
+  },
+  {
+    title: 'Article 6 — Données à caractère personnel',
+    body: "L'office est responsable de traitement, Notantis agit comme sous-traitant au sens de l'article 28 du RGPD. Les droits d'accès, de rectification et d'effacement s'exercent auprès de l'office, sous réserve des obligations légales de conservation propres au notariat.",
+  },
+  {
+    title: 'Article 7 — Durée et résiliation',
+    body: "L'accès prend fin à la clôture du dossier ou sur décision de l'office. Les documents restent conservés selon la durée définie pour le dossier.",
+  },
+];
+
+export const HELP_RESOURCES = [
+  { id: 'h1', icon: 'scroll', title: 'Manuel utilisateur', description: "Prise en main complète : dataroom, dépôts, droits, questions.", meta: 'PDF · 2,4 Mo' },
+  { id: 'h2', icon: 'file', title: "Support d'utilisation", description: 'Mémo recto-verso à imprimer pour les intervenants occasionnels.', meta: 'PDF · 380 Ko' },
+  { id: 'h3', icon: 'signature', title: "Formulaire de création d'un accès administrateur", description: "À retourner signé à l'office pour ouvrir un accès superadmin.", meta: 'PDF · 120 Ko' },
+];
+
+/** Panier de démonstration — pièces sélectionnées à travers plusieurs rubriques. */
+export const CART_ITEMS = [
+  { id: 'c1', name: 'EHF réel 15.07.2026.pdf', folderPath: '4. Situation hypothécaire', size: '1,2 Mo' },
+  { id: 'c2', name: 'DPE Bâtiment Entier.pdf', folderPath: '10. Diagnostics', size: '840 Ko' },
+  { id: 'c3', name: 'Plan cadastral.pdf', folderPath: '2. Présentation de l’actif', size: '3,6 Mo' },
+];

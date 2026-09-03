@@ -110,6 +110,15 @@ export interface AppShellProps {
    */
   showNotifications?: boolean;
   /**
+   * Panier de téléchargement (§11.1) : nombre de pièces en attente. Le bouton
+   * n'apparaît que si `onOpenCart` est fourni — sur un écran sans dossier
+   * ouvert, un panier n'a rien à recevoir.
+   */
+  cartCount?: number;
+  onOpenCart?: () => void;
+  /** Ouvre l'aide en ligne et le manuel (§11.1). */
+  onOpenHelp?: () => void;
+  /**
    * Ce que la palette doit trouver en plus des résultats du serveur : écrans de
    * l'application, modules activés, données de démonstration. Construit par
    * l'appelant, qui est le seul à savoir naviguer — voir search/localEntries.ts.
@@ -144,6 +153,9 @@ export function AppShell({
   showTenantSwitcher = true,
   showSearch = true,
   showNotifications = true,
+  cartCount = 0,
+  onOpenCart,
+  onOpenHelp,
   onSearchSelect,
   searchLocalEntries,
 }: AppShellProps) {
@@ -356,6 +368,17 @@ export function AppShell({
                 currentSubdomain={officeSubdomain}
                 onSelect={onSelectOffice}
               />
+            )}
+            {onOpenCart && (
+              <IconButton
+                icon="zip"
+                aria-label={`Panier de téléchargement — ${cartCount} pièce(s)`}
+                hasDot={cartCount > 0}
+                onClick={onOpenCart}
+              />
+            )}
+            {onOpenHelp && (
+              <IconButton icon="scroll" aria-label="Aide et documentation" onClick={onOpenHelp} />
             )}
             {showNotifications && <IconButton icon="bell" hasDot={hasUnreadNotifications} />}
             {/* L'avatar a quitté la barre le 01/09/2026 : l'identité de

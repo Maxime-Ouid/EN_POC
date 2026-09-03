@@ -15,6 +15,13 @@ import {
   NewQuestionModal,
   MoveDocumentModal,
   DocumentStateModal,
+  DownloadCartSlideover,
+  ActivityReportModal,
+  HelpSlideover,
+  TermsModal,
+  ForgotPasswordModal,
+  ForcePasswordChangeModal,
+  InviteClientModal,
   type DataroomLifecycleState,
   DataroomsListScreen,
   type DataroomRow,
@@ -96,6 +103,10 @@ import {
   RECENT_ACTIVITY,
   STATEMENT_PERIODS,
   TEMPORARY_LINKS,
+  TERMS_ARTICLES,
+  TERMS_UPDATED_AT,
+  TERMS_VERSION,
+  HELP_RESOURCES,
 } from './data/demo';
 
 /* ===========================================================================
@@ -323,6 +334,25 @@ function documentName(
   return 'document';
 }
 
+/**
+ * Rubrique dans laquelle se trouve une pièce, pour le panier de téléchargement
+ * (§11.1) : le panier traverse les rubriques, un nom de fichier seul n'y suffit
+ * plus à situer la pièce. Le libellé vient de l'arbre plutôt que du document,
+ * qui ne porte pas son chemin.
+ */
+function findDocumentFolderLabel(
+  documentsByFolder: Record<string, DataroomDocument[]>,
+  tree: TreeNodeData[],
+  documentId: string,
+): string {
+  for (const [folderId, docs] of Object.entries(documentsByFolder)) {
+    if (docs.some(d => d.id === documentId)) {
+      return findFolderLabel(tree, folderId) ?? 'Racine du dossier';
+    }
+  }
+  return 'Racine du dossier';
+}
+
 function initialsOf(name: string): string {
   const parts = name.replace(/[@.].*$/, '').split(/[\s._-]+/).filter(Boolean);
   if (!parts.length) return '?';
@@ -374,6 +404,24 @@ export default function App() {
   const [docMenuId, setDocMenuId] = useState<string | null>(null);
   const [docAction, setDocAction] = useState<'renommer' | 'deplacer' | 'etat' | null>(null);
   const [dataroomGroups, setDataroomGroups] = useState(DATAROOM_GROUPS);
+  /* Lot « unitaires §11.1 » du 03/09/2026. Le panier porte des ids de pièces
+     et non les pièces elles-mêmes : l'arborescence est déjà en mémoire, la
+     dupliquer ferait diverger le nom affiché après un renommage. */
+  const [cartIds, setCartIds] = useState<string[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [activityReportOpen, setActivityReportOpen] = useState(false);
+  const [inviteClientOpen, setInviteClientOpen] = useState(false);
+  /* Changement de mot de passe imposé à la première connexion (§11.1). Le
+     serveur n'expose aucun drapeau `must_change_password` : plutôt que d'en
+     inventer un, la maquette se déclenche par `?force-password`, sur le modèle
+     de `?view=prototype-preview`. Le jour où le drapeau existe, cette ligne
+     devient `session.user?.must_change_password`. */
+  const [mustChangePassword, setMustChangePassword] = useState(
+    () => new URLSearchParams(window.location.search).has('force-password'),
+  );
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
   const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
@@ -803,6 +851,8 @@ export default function App() {
     // de ce qui s'affiche (voir le rendu plus bas).
     if (!slug) setScreen(key as ScreenKey);
     setOpenDataroomId(null);
+    // Le panier ne traverse pas les dossiers — voir DownloadCartSlideover.
+    setCartIds([]);
     setFocusFolder(null);
     setSettingsTab(settingsLanding);
   }
@@ -905,15 +955,19 @@ export default function App() {
 
   if (!authenticated) {
     return (
-      <LoginScreen
-        officeName={session.tenant?.name ?? 'Espace Notarial'}
-        officeDomain={window.location.host}
-        error={loginError}
-        onSubmit={(identifier, password) => {
-          setLoginError(undefined);
-          session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
-        }}
-      />
+      <>
+        <LoginScreen
+          officeName={session.tenant?.name ?? 'Espace Notarial'}
+          officeDomain={window.location.host}
+          error={loginError}
+          onSubmit={(identifier, password) => {
+            setLoginError(undefined);
+            session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
+          }}
+          onForgotPassword={() => setForgotOpen(true)}
+        />
+        <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
+      </>
     );
   }
 
@@ -1113,6 +1167,11 @@ export default function App() {
       logoUrl={session.tenant?.logo_url || undefined}
       navSections={navSections}
       onOpenAccount={() => navigate('account')}
+      /* Le panier n'a de sens qu'un dossier ouvert : ailleurs, il n'aurait rien
+         à recevoir et son icône promettrait une action impossible. */
+      onOpenCart={openDataroom ? () => setCartOpen(true) : undefined}
+      cartCount={cartIds.length}
+      onOpenHelp={() => setHelpOpen(true)}
       activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
       onNavigate={navigate}
       offices={session.offices}
@@ -1437,6 +1496,7 @@ export default function App() {
             onExportZip={() => setExportZipOpen(true)}
             onShareWithOffice={() => setShareOfficeOpen(true)}
             onLifecycle={() => setLifecycleOpen(true)}
+            onActivityReport={() => setActivityReportOpen(true)}
             qaModeration={QA_MODERATION}
             qa={{
               canModerate: canManageOffice,
@@ -1485,6 +1545,25 @@ export default function App() {
                     Number(doc.id),
                     documentName(documentsByFolder, doc.id),
                   ),
+              },
+              {
+                key: 'panier',
+                label: cartIds.includes(doc.id) ? 'Retirer du panier' : 'Ajouter au panier',
+                icon: 'zip',
+                disabled: doc.muted,
+                onSelect: () =>
+                  setCartIds(prev =>
+                    prev.includes(doc.id) ? prev.filter(x => x !== doc.id) : [...prev, doc.id],
+                  ),
+              },
+              {
+                key: 'desactiver',
+                label: doc.disabled ? 'Réactiver' : 'Désactiver',
+                icon: 'eye',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction(null);
+                },
               },
               {
                 key: 'supprimer',
@@ -1649,6 +1728,26 @@ export default function App() {
             onClose={() => setDocAction(null)}
             onSubmit={() => setDocAction(null)}
           />
+          <DownloadCartSlideover
+            open={cartOpen}
+            onClose={() => setCartOpen(false)}
+            dataroomName={openDataroom.name}
+            items={allDocuments
+              .filter(d => cartIds.includes(d.id))
+              .map(d => ({
+                id: d.id,
+                name: d.name,
+                folderPath: findDocumentFolderLabel(documentsByFolder, tree, d.id),
+                size: d.size,
+              }))}
+            onRemove={id => setCartIds(prev => prev.filter(x => x !== id))}
+            onClear={() => setCartIds([])}
+          />
+          <ActivityReportModal
+            open={activityReportOpen}
+            onClose={() => setActivityReportOpen(false)}
+            dataroomName={openDataroom.name}
+          />
           {docMenuTarget && (
             <DocumentStateModal
               open={docAction === 'etat'}
@@ -1668,6 +1767,7 @@ export default function App() {
       {!openModuleEntry && screen === 'users' && (
         <>
           <OfficeUsersScreen
+            onInviteClient={canManageOffice ? () => setInviteClientOpen(true) : undefined}
             rows={officeUsers.items.map(u => ({
               membershipId: u.membership_id,
               userId: u.user_id,
@@ -1792,6 +1892,41 @@ export default function App() {
       {!openModuleEntry && screen === 'audit' && (
         <AuditTrailScreen events={AUDIT_EVENTS} retention={AUDIT_RETENTION} />
       )}
+
+      <ForcePasswordChangeModal
+        open={mustChangePassword}
+        onLogout={() => void session.logout()}
+        onSubmit={() => setMustChangePassword(false)}
+      />
+
+      <HelpSlideover
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        officeName={session.tenant?.name ?? 'votre étude'}
+        resources={HELP_RESOURCES}
+        supportEmail="support@espacenotarial.fr"
+        onOpenTerms={() => {
+          setHelpOpen(false);
+          setTermsOpen(true);
+        }}
+      />
+
+      <TermsModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        mode="consultation"
+        version={TERMS_VERSION}
+        updatedAt={TERMS_UPDATED_AT}
+        articles={TERMS_ARTICLES}
+      />
+
+      <InviteClientModal
+        open={inviteClientOpen}
+        onClose={() => setInviteClientOpen(false)}
+        dataroomOptions={datarooms.items.map(d => ({ id: String(d.id), label: d.name }))}
+        groupOptions={dataroomGroups.map(g => ({ id: g.id, label: g.name }))}
+        onInvite={() => setInviteClientOpen(false)}
+      />
 
       {!openModuleEntry && screen === 'account' && (
         <AccountScreen
