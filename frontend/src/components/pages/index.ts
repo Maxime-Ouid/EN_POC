@@ -1,3 +1,4 @@
+export * from './AccountScreen';
 export * from './AuditTrailScreen';
 export * from './DataroomDetailScreen';
 export * from './DataroomsListScreen';

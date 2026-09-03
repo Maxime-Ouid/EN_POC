@@ -1752,3 +1752,28 @@ button.v1-tool-row-name:hover{color:var(--brass-700);}
 /* Emporte sur .tpl-option .row-icon, qui teinte la pastille des lignes de modèle. */
 .tpl-option .row-icon.icon-chip-3d{background:transparent;}
 .tree-row .icon-3d.fic{width:17px;height:17px;}
+
+/* --- Menu d'actions de ligne ---------------------------------------------- */
+/* Le « ⋮ » de fin de ligne (atoms/RowMenu) n'était qu'un glyphe : il ouvrait
+   au mieux une action unique décidée par l'appelant. molecules/RowActions lui
+   donne le menu que sa forme promet — renommer, déplacer, changer l'état,
+   supprimer (§4.2). Le menu est positionné par rapport à la cellule et non
+   par rapport à la page : dans un tableau qui défile horizontalement, un
+   panneau ancré au document se détache de sa ligne. */
+.row-actions{position:relative;display:inline-flex;}
+.row-actions-menu{
+  position:absolute;top:calc(100% + 4px);right:0;z-index:40;min-width:186px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  box-shadow:var(--shadow-md);
+  padding:4px;display:flex;flex-direction:column;
+}
+.row-actions-item{
+  display:flex;align-items:center;gap:8px;width:100%;
+  background:none;border:0;border-radius:8px;padding:7px 9px;
+  font:inherit;font-size:13px;color:var(--ink-800);text-align:left;cursor:pointer;
+}
+.row-actions-item:hover{background:var(--surface-alt);}
+.row-actions-item .icon{width:15px;height:15px;color:var(--ink-500);}
+.row-actions-item.is-danger{color:var(--critical);}
+.row-actions-item.is-danger .icon{color:var(--critical);}
+.row-actions-sep{height:1px;background:var(--border);margin:4px 2px;}

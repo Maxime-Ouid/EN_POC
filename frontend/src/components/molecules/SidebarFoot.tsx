@@ -5,6 +5,13 @@ export interface SidebarFootProps {
   name: string;
   role: string;
   onLogout?: () => void;
+  /**
+   * Ouvre « Mon compte » (§4.5). Quand elle est fournie, le bloc utilisateur
+   * mène au compte et la déconnexion passe par sa seule icône : cliquer son
+   * propre nom pour se déconnecter était un piège, et il n'existait aucun
+   * chemin vers les réglages personnels.
+   */
+  onOpenAccount?: () => void;
   poweredByLogoUrl?: string;
   /**
    * Retire la mention « propulsé par Notantis ». C'est un réglage de marque
@@ -24,18 +31,36 @@ export function SidebarFoot({
   name,
   role,
   onLogout,
+  onOpenAccount,
   poweredByLogoUrl = notantisLogo,
   showPoweredBy = true,
 }: SidebarFootProps) {
   return (
     <div className="sidebar-foot">
-      <div className="foot-user clickable" onClick={onLogout} title={`${name} — ${role}`}>
+      <div
+        className="foot-user clickable"
+        onClick={onOpenAccount ?? onLogout}
+        title={onOpenAccount ? `${name} — ${role} · mon compte` : `${name} — ${role}`}
+      >
         <div className="avatar">{initials}</div>
         <div className="foot-text">
           <div className="foot-name">{name}</div>
           <div className="foot-role">{role}</div>
         </div>
-        <svg className="icon">
+        <svg
+          className="icon"
+          aria-label="Se déconnecter"
+          onClick={
+            onOpenAccount
+              ? e => {
+                  // Le bloc entier mène au compte : sans cet arrêt, l'icône de
+                  // déconnexion ouvrirait le compte au lieu de déconnecter.
+                  e.stopPropagation();
+                  onLogout?.();
+                }
+              : undefined
+          }
+        >
           <use href="#i-logout" />
         </svg>
       </div>

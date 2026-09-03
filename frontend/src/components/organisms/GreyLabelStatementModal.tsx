@@ -137,7 +137,7 @@ export function GreyLabelStatementModal({
           alignItems: 'center',
           gap: 12,
           padding: '10px 0',
-          borderBottom: '1px solid var(--line)',
+          borderBottom: '1px solid var(--border)',
           marginBottom: 14,
         }}
       >

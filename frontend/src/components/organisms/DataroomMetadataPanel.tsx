@@ -192,7 +192,7 @@ export function DataroomMetadataPanel({
         )}
 
         {!readOnly && (
-          <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14, marginTop: 4 }}>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
             <FieldRow>
               <Field label="Nouveau champ">
                 <input

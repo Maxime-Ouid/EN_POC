@@ -14,8 +14,11 @@
 
 import type { ReactNode } from 'react';
 import type {
+  AccountNotificationPrefs,
   AuditEvent,
   ClientUsageRow,
+  DataroomGroup,
+  DataroomShare,
   ConnectedUserRow,
   DataroomDocument,
   DataroomRow,
@@ -29,6 +32,7 @@ import type {
   Portfolio,
   PortfolioDataroomRow,
   QAEntry,
+  QAModerationState,
   TemporaryLink,
   TreeNodeData,
 } from '../components';
@@ -303,6 +307,7 @@ export const QA_ENTRIES: QAEntry[] = [
     object: 'Question sur : EHF réel 15.07.2026',
     meta: "Réf. #Q104 · Sandrine ACQUÉREUR · aujourd'hui 09:15",
     body: 'La fiche réelle mentionne une inscription de 1994 — est-elle toujours valable ou faut-il une mise à jour avant la signature ?',
+    document: 'EHF réel 15.07.2026.pdf',
   },
   {
     id: 'q101',
@@ -326,6 +331,27 @@ export const QA_ENTRIES: QAEntry[] = [
       author: 'Cyril Dumont',
       text: "Il couvre l'intégralité de la parcelle, bâtiment et abords compris.",
       time: '18/07 14:40',
+    },
+    document: 'Rapport Géorisques du 09.07.2026.pdf',
+  },
+  {
+    id: 'q105',
+    status: { kind: 'warning', label: 'À modérer' },
+    object: 'Question sur : Bail commercial — lot 3',
+    meta: "Réf. #Q105 · Banque prêteuse · aujourd'hui 11:40",
+    body: "Pouvez-vous confirmer le montant du dépôt de garantie et l'identité exacte du preneur ?",
+    document: 'Bail commercial lot 3.pdf',
+  },
+  {
+    id: 'q092',
+    status: { kind: 'neutral', label: 'Désactivée' },
+    object: 'Question sur : Plan cadastral',
+    meta: 'Réf. #Q092 · Marc VENDEUR · 02/07 10:12',
+    body: 'Le plan fourni est-il à jour du remaniement de 1988 ?',
+    answer: {
+      author: 'Hélène Hamon',
+      text: 'Oui, la version déposée intègre le remaniement.',
+      time: '02/07 15:31',
     },
   },
 ];
@@ -702,3 +728,55 @@ export const PORTFOLIO_ACTIVITY = [
   { id: 'pa3', icon: 'users', iconBg: 'var(--success-bg)', iconColor: 'var(--success)', text: <><b>Étude Vasseur</b> a rejoint le portefeuille comme participant APUI</>, time: '28 août 2026' },
   { id: 'pa4', icon: 'zip', iconBg: 'var(--brass-100)', iconColor: 'var(--brass-700)', text: <><b>Le Monde Commerce</b> a exporté l'ensemble du portefeuille</>, time: '24 août 2026' },
 ];
+
+/* ---------------------------------------------------------------------------
+   Lot « reprise de l'existant » (§4) — 03/09/2026.
+   Q/R modérées, groupes de dataroom, partages inter-offices et préférences de
+   compte. Même statut que le reste du fichier : rien de ceci n'est en base.
+   ------------------------------------------------------------------------- */
+
+/** État de modération de chaque question de QA_ENTRIES, par id (§4.3). */
+export const QA_MODERATION: Record<string, QAModerationState> = {
+  q104: 'publiee',
+  q101: 'publiee',
+  q098: 'publiee',
+  q105: 'a_moderer',
+  q092: 'desactivee',
+};
+
+/** Groupes définis dans le paramétrage de la dataroom — §4.4. */
+export const DATAROOM_GROUPS: DataroomGroup[] = [
+  { id: 'g-etude', name: 'Étude', access: 'ecriture', memberCount: 5, predefined: true, members: [{ label: 'DB' }, { label: 'HH', gray: true }, { label: '+3', gray: true }] },
+  { id: 'g-vendeur', name: 'Vendeur et conseils', access: 'lecture', memberCount: 4, predefined: true, members: [{ label: 'PV', gray: true }, { label: '+3', gray: true }] },
+  { id: 'g-acquereur', name: 'Acquéreur et conseils', access: 'lecture', memberCount: 6, predefined: true, members: [{ label: 'SA', gray: true }, { label: '+5', gray: true }] },
+  { id: 'g-banque', name: 'Établissement prêteur', access: 'aucun', memberCount: 2, members: [{ label: 'BQ', gray: true }, { label: '+1', gray: true }] },
+];
+
+/** Partages en cours de la dataroom de démonstration — §4.1. */
+export const DATAROOM_SHARES: DataroomShare[] = [
+  { id: 'sh1', officeName: 'SCP Moreau & Associés', role: 'Office du vendeur', access: 'ecriture', realtimeSync: true, since: '19 août 2026' },
+  { id: 'sh2', officeName: 'Étude Vasseur', role: 'Office participant (APUI)', access: 'lecture', realtimeSync: false, since: '28 août 2026' },
+];
+
+/** Préférences personnelles de démonstration — §4.5. */
+export const ACCOUNT_DISPLAY = {
+  density: 'confortable' as const,
+  defaultScreen: 'dashboard',
+  dateFormat: 'jj/mm/aaaa',
+};
+
+export const ACCOUNT_NOTIFICATIONS: AccountNotificationPrefs = {
+  documentAdded: true,
+  questionPosted: true,
+  questionAnswered: true,
+  memberAdded: false,
+  dailyDigest: false,
+  digestHour: '08:00',
+};
+
+export const ACCOUNT_SECURITY = {
+  mfaEnabled: true,
+  mfaDevice: 'Authenticator — iPhone de Cyril',
+  lastPasswordChange: '28 août 2026',
+  lastLogin: "Aujourd'hui, 09:22",
+};

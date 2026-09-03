@@ -45,6 +45,8 @@ export interface AppShellProps {
   userName: string;
   userRole: string;
   onLogout?: () => void;
+  /** Ouvre « Mon compte » depuis le pied de rail ou la topbar (§4.5). */
+  onOpenAccount?: () => void;
   /**
    * PLUS AFFICHÉS depuis la refonte de la topbar (01/09/2026) : la barre porte
    * la recherche, la cloche et les commandes de l'écran courant — le fil
@@ -132,6 +134,7 @@ export function AppShell({
   userName,
   userRole,
   onLogout,
+  onOpenAccount,
   hasUnreadNotifications,
   children,
   logoUrl,
@@ -313,6 +316,7 @@ export function AppShell({
             name={userName}
             role={userRole}
             onLogout={onLogout}
+            onOpenAccount={onOpenAccount}
             showPoweredBy={layout.showPoweredBy}
           />
         </Sidebar>
@@ -358,7 +362,10 @@ export function AppShell({
                 l'utilisateur reste lisible au pied de la sidebar. En barre
                 d'onglets ce pied n'existe pas — la déconnexion reste donc ici,
                 sans quoi cette disposition n'aurait plus aucune sortie. */}
-            {horizontal && <IconButton icon="logout" onClick={onLogout} />}
+            {horizontal && onOpenAccount && (
+              <IconButton icon="users" title="Mon compte" onClick={onOpenAccount} />
+            )}
+            {horizontal && <IconButton icon="logout" title="Se déconnecter" onClick={onLogout} />}
           </TopbarRight>
         </Topbar>
 

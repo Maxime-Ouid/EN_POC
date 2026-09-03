@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AccountScreen,
   AppShell,
   AuditTrailScreen,
   LoginScreen,
@@ -7,6 +8,14 @@ import {
   PortfoliosScreen,
   PortfolioDetailScreen,
   TemporaryLinkModal,
+  ExportZipModal,
+  ShareWithOfficeModal,
+  DataroomLifecycleModal,
+  DataroomGroupsCard,
+  NewQuestionModal,
+  MoveDocumentModal,
+  DocumentStateModal,
+  type DataroomLifecycleState,
   DataroomsListScreen,
   type DataroomRow,
   DataroomDetailScreen,
@@ -58,13 +67,18 @@ import {
 import { matchesWordStart } from './search/match';
 import type { LocalEntry } from './search/localEntries';
 import {
+  ACCOUNT_DISPLAY,
+  ACCOUNT_NOTIFICATIONS,
+  ACCOUNT_SECURITY,
   AUDIT_EVENTS,
   AUDIT_RETENTION,
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
   CONNECTED_USERS,
   DATAROOM_CUSTOM_FIELDS,
+  DATAROOM_GROUPS,
   DATAROOM_METADATA_VALUES,
+  DATAROOM_SHARES,
   DEMO_HOME_STATS,
   HISTORY,
   INVOICES,
@@ -78,6 +92,7 @@ import {
   PORTFOLIO_DETAILS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
+  QA_MODERATION,
   RECENT_ACTIVITY,
   STATEMENT_PERIODS,
   TEMPORARY_LINKS,
@@ -115,7 +130,8 @@ type ScreenKey =
   | 'stats'
   | 'audit'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'account';
 
 /**
  * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
@@ -137,6 +153,7 @@ const CRUMB_LABELS: Record<ScreenKey, string> = {
   audit: 'Journal des accès',
   users: "Annuaire de l'étude",
   settings: 'Personnalisation',
+  account: 'Mon compte',
 };
 
 /**
@@ -346,6 +363,17 @@ export default function App() {
     useState<MetadataFieldDef[]>(DATAROOM_CUSTOM_FIELDS);
   const [metadataValues, setMetadataValues] =
     useState<Record<string, string>>(DATAROOM_METADATA_VALUES);
+  /* Lot « reprise de l'existant » du 03/09/2026 — §4. Mêmes réserves que
+     ci-dessus : aucun endpoint derrière, l'état vit ici. */
+  const [exportZipOpen, setExportZipOpen] = useState(false);
+  const [shareOfficeOpen, setShareOfficeOpen] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  const [lifecycleState, setLifecycleState] = useState<DataroomLifecycleState>('active');
+  const [retentionYears, setRetentionYears] = useState(10);
+  const [askQuestionOpen, setAskQuestionOpen] = useState(false);
+  const [docMenuId, setDocMenuId] = useState<string | null>(null);
+  const [docAction, setDocAction] = useState<'renommer' | 'deplacer' | 'etat' | null>(null);
+  const [dataroomGroups, setDataroomGroups] = useState(DATAROOM_GROUPS);
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
   const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
@@ -583,6 +611,7 @@ export default function App() {
      PORTFOLIO_DETAILS la consolidation. Elles fusionneront le jour où un
      endpoint les servira ensemble. */
   const openPortfolio = PORTFOLIOS.find(p => p.id === openPortfolioId) ?? null;
+
   const portfolioDetail = openPortfolioId ? (PORTFOLIO_DETAILS[openPortfolioId] ?? null) : null;
 
   /**
@@ -747,6 +776,19 @@ export default function App() {
   }
 
   const totalDocumentCount = dataroomTree.rootDocuments.length + countAllDocuments(dataroomTree.tree);
+  /* Pièce visée par le menu « ⋮ », et liste plate de toutes les pièces du
+     dossier pour la modale « poser une question sur un document ». Les deux
+     traversent `documentsByFolder`, qui est déjà l'arborescence chargée — pas
+     d'aller-retour serveur pour une information déjà en mémoire. */
+  const allDocuments = useMemo(
+    () => Object.values(documentsByFolder).flat(),
+    [documentsByFolder],
+  );
+  const docMenuTarget = docMenuId ? (allDocuments.find(d => d.id === docMenuId) ?? null) : null;
+  const allDocumentOptions = useMemo(
+    () => allDocuments.map(d => ({ id: d.id, label: d.name })),
+    [allDocuments],
+  );
 
   async function switchOffice(subdomain: string) {
     const { ticket } = await api.issueSsoTicket(subdomain);
@@ -1070,6 +1112,7 @@ export default function App() {
       officeRole={currentOffice?.role ?? '—'}
       logoUrl={session.tenant?.logo_url || undefined}
       navSections={navSections}
+      onOpenAccount={() => navigate('account')}
       activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
       onNavigate={navigate}
       offices={session.offices}
@@ -1391,6 +1434,69 @@ export default function App() {
               },
             }}
             onTemporaryLink={() => setTemporaryLinkOpen(true)}
+            onExportZip={() => setExportZipOpen(true)}
+            onShareWithOffice={() => setShareOfficeOpen(true)}
+            onLifecycle={() => setLifecycleOpen(true)}
+            qaModeration={QA_MODERATION}
+            qa={{
+              canModerate: canManageOffice,
+              onAsk: () => setAskQuestionOpen(true),
+            }}
+            /* §4.2 — les quatre gestes attendus sur une pièce. Aucun n'a
+               d'endpoint : `documents_view` n'expose que GET et POST. Ils sont
+               donc maquettés, et le resteront jusqu'à ce que le back ouvre
+               PATCH et DELETE sur un document. */
+            documentActions={doc => [
+              {
+                key: 'etat',
+                label: "Changer l'état",
+                icon: 'seal',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('etat');
+                },
+              },
+              {
+                key: 'renommer',
+                label: 'Renommer',
+                icon: 'clip',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('renommer');
+                },
+              },
+              {
+                key: 'deplacer',
+                label: 'Déplacer',
+                icon: 'folder',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('deplacer');
+                },
+              },
+              {
+                key: 'telecharger',
+                label: 'Télécharger',
+                icon: 'down',
+                disabled: doc.muted,
+                onSelect: () =>
+                  void downloadDocument(
+                    openDataroom.id,
+                    Number(doc.id),
+                    documentName(documentsByFolder, doc.id),
+                  ),
+              },
+              {
+                key: 'supprimer',
+                label: 'Supprimer',
+                icon: 'x',
+                danger: true,
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction(null);
+                },
+              },
+            ]}
             onBackToList={() => navigate('datarooms')}
             onAddDocuments={(activeFolderId, files) => {
               const parentId = toParentId(activeFolderId);
@@ -1415,6 +1521,28 @@ export default function App() {
             }}
             accessRightsTab={
               <div>
+                {/* Les groupes de dataroom (§4.4) précèdent le tableau des
+                    droits réels : on constitue les groupes, puis on leur pose
+                    des droits. Maquette — le tableau qui suit, lui, est branché
+                    sur de vraies AccessRestriction. */}
+                <DataroomGroupsCard
+                  groups={dataroomGroups}
+                  readOnly={!canManageOffice}
+                  onCreate={(name, access) =>
+                    setDataroomGroups(prev => [
+                      ...prev,
+                      { id: `g-${Date.now()}`, name, access, memberCount: 0, members: [] },
+                    ])
+                  }
+                  onAccessChange={(groupId, access) =>
+                    setDataroomGroups(prev =>
+                      prev.map(g => (g.id === groupId ? { ...g, access } : g)),
+                    )
+                  }
+                  onRemove={groupId =>
+                    setDataroomGroups(prev => prev.filter(g => g.id !== groupId))
+                  }
+                />
                 <AccessRightsPanel
                   dirtyCount={dataroomAccessDraft.dirtyRowIds.length}
                   saving={savingDataroomAccess}
@@ -1474,6 +1602,66 @@ export default function App() {
             target={openDataroom.name}
             links={TEMPORARY_LINKS}
           />
+          <ExportZipModal
+            open={exportZipOpen}
+            onClose={() => setExportZipOpen(false)}
+            dataroomName={openDataroom.name}
+            estimatedSize={`${totalDocumentCount} fichier(s)`}
+            onExport={() => setExportZipOpen(false)}
+          />
+          <ShareWithOfficeModal
+            open={shareOfficeOpen}
+            onClose={() => setShareOfficeOpen(false)}
+            dataroomName={openDataroom.name}
+            shares={DATAROOM_SHARES}
+          />
+          <DataroomLifecycleModal
+            open={lifecycleOpen}
+            onClose={() => setLifecycleOpen(false)}
+            dataroomName={openDataroom.name}
+            state={lifecycleState}
+            retentionYears={retentionYears}
+            onRetentionChange={setRetentionYears}
+            onCloture={() => setLifecycleState('cloturee')}
+            onReopen={() => setLifecycleState('active')}
+            onArchive={() => setLifecycleState('archivee')}
+            onDelete={() => setLifecycleOpen(false)}
+          />
+          <NewQuestionModal
+            open={askQuestionOpen}
+            onClose={() => setAskQuestionOpen(false)}
+            dataroomName={openDataroom.name}
+            documentOptions={allDocumentOptions}
+            onSubmit={() => setAskQuestionOpen(false)}
+          />
+          <MoveDocumentModal
+            open={docAction === 'deplacer' && docMenuTarget !== null}
+            onClose={() => setDocAction(null)}
+            documentName={docMenuTarget?.name ?? ''}
+            tree={tree}
+            onMove={() => setDocAction(null)}
+          />
+          <RenameFolderModal
+            open={docAction === 'renommer' && docMenuTarget !== null}
+            title="Renommer le document"
+            label="Nom du document"
+            currentName={docMenuTarget?.name ?? ''}
+            onClose={() => setDocAction(null)}
+            onSubmit={() => setDocAction(null)}
+          />
+          {docMenuTarget && (
+            <DocumentStateModal
+              open={docAction === 'etat'}
+              onClose={() => setDocAction(null)}
+              documentName={docMenuTarget.name}
+              /* Une pièce annoncée mais non déposée (`muted`) est exactement ce
+                 que le §4.7 appelle « en attente » : l'écran ouvre donc sur cet
+                 état plutôt que sur « déposé », qu'il faudrait corriger à la
+                 main à chaque fois. */
+              state={docMenuTarget.muted ? 'en-attente' : 'depose'}
+              onSubmit={() => setDocAction(null)}
+            />
+          )}
         </>
       )}
 
@@ -1603,6 +1791,28 @@ export default function App() {
 
       {!openModuleEntry && screen === 'audit' && (
         <AuditTrailScreen events={AUDIT_EVENTS} retention={AUDIT_RETENTION} />
+      )}
+
+      {!openModuleEntry && screen === 'account' && (
+        <AccountScreen
+          identity={{
+            displayName: session.user?.username ?? '',
+            email: `${session.user?.username ?? 'compte'}@exemple.fr`,
+            initials: (session.user?.username ?? '?').slice(0, 2).toUpperCase(),
+            /* Les études viennent, elles, du serveur : c'est la preuve du
+               compte unique multi-tenant (§5.3), pas une donnée de démo. */
+            offices: (session.offices ?? []).map(o => ({
+              name: o.name,
+              role: o.role,
+            })),
+          }}
+          security={ACCOUNT_SECURITY}
+          display={ACCOUNT_DISPLAY}
+          notifications={ACCOUNT_NOTIFICATIONS}
+          screenOptions={navSections.flatMap(section =>
+            section.items.map(item => ({ key: item.key, label: item.label })),
+          )}
+        />
       )}
 
       {!openModuleEntry && screen === 'settings' && (

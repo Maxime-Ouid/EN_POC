@@ -16,12 +16,16 @@ import { TagFilter } from '../molecules/TagFilter';
 import { DocumentSlideover } from '../organisms/DocumentSlideover';
 import { Explorer } from '../organisms/Explorer';
 import { DataroomMetadataPanel } from '../organisms/DataroomMetadataPanel';
+import { RowActions } from '../molecules/RowActions';
+import type { RowAction } from '../molecules/RowActions';
 import { QACard } from '../organisms/QACard';
+import { QAPanel } from '../organisms/QAPanel';
 import { TagPicker } from '../organisms/TagPicker';
 import { useTopbarSlots } from '../templates/topbarSlots';
 import type { PillKind } from '../atoms/Pill';
 import type { TabDef } from '../molecules/TabStrip';
 import type { DataroomMetadataPanelProps } from '../organisms/DataroomMetadataPanel';
+import type { QAPanelProps } from '../organisms/QAPanel';
 import type { DocumentActivityEntry, DocumentCustomField } from '../organisms/DocumentSlideover';
 import type { TreeNodeData } from '../organisms/Explorer';
 import type { TagColor } from '../atoms/Tag';
@@ -51,6 +55,9 @@ export interface QAEntry {
   meta: string;
   body: string;
   answer?: { author: string; text: string; time: string };
+  /** Pièce sur laquelle la question porte — §4.3, « ou sur un document en
+      particulier ». Absent = la question porte sur toute la dataroom. */
+  document?: string;
 }
 
 export interface MemberRow {
@@ -147,6 +154,24 @@ export interface DataroomDetailScreenProps {
   onTemporaryLink?: () => void;
   /** Export ZIP du dossier ou de la sélection (§4.1). */
   onExportZip?: () => void;
+  /** Ouvre le partage avec un autre office (§4.1). */
+  onShareWithOffice?: () => void;
+  /** Ouvre le cycle de vie du dossier — clôture, archivage, conservation (§4.1). */
+  onLifecycle?: () => void;
+  /**
+   * Commandes de l'onglet Q/R au-delà de la simple réponse (§4.3 : poser,
+   * modérer, désactiver, supprimer, exporter). Absent = l'onglet garde la
+   * liste simple d'avant ce lot, ce qui laisse valides les aperçus du kit.
+   */
+  qa?: Omit<QAPanelProps, 'entries' | 'onReply'>;
+  /** État de chaque question, indexé par id — complète `qaEntries`. */
+  qaModeration?: Record<string, QAPanelProps['entries'][number]['moderation']>;
+  /**
+   * Actions du menu « ⋮ » d'une pièce (§4.2). L'appelant les compose parce que
+   * lui seul sait lesquelles sont permises et ce qu'elles déclenchent ; absent,
+   * la colonne garde l'icône d'ouverture d'avant ce lot.
+   */
+  documentActions?: (doc: DataroomDocument) => RowAction[];
 }
 
 // Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents /
@@ -183,6 +208,11 @@ export function DataroomDetailScreen({
   metadata,
   onTemporaryLink,
   onExportZip,
+  onShareWithOffice,
+  onLifecycle,
+  qa,
+  qaModeration,
+  documentActions,
 }: DataroomDetailScreenProps) {
   const slots = useTopbarSlots();
   const [activeTab, setActiveTab] = useState('sub-docs');
@@ -296,6 +326,22 @@ export function DataroomDetailScreen({
             </svg>
             Export ZIP
           </Button>
+          {onShareWithOffice && (
+            <Button size="sm" onClick={onShareWithOffice}>
+              <svg className="icon">
+                <use href="#i-building" />
+              </svg>
+              Partager avec un office
+            </Button>
+          )}
+          {onLifecycle && (
+            <Button size="sm" onClick={onLifecycle}>
+              <svg className="icon">
+                <use href="#i-clock" />
+              </svg>
+              Cycle de vie
+            </Button>
+          )}
           <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
             <svg className="icon">
               <use href="#i-plus" />
@@ -392,7 +438,20 @@ export function DataroomDetailScreen({
                       <td className={doc.muted ? 'dim' : undefined}>{doc.addedBy}</td>
                       <td className="dim">{doc.date}</td>
                       <td className="mono dim">{doc.size}</td>
-                      {doc.muted ? <td /> : (
+                      {/* L'icône « œil » n'était qu'un rappel que la ligne
+                          s'ouvre — elle ne cliquait rien. Remplacée par le vrai
+                          menu de pièce (§4.2 : renommer, déplacer, supprimer,
+                          changer l'état) quand l'appelant en fournit un. Une
+                          pièce annoncée mais non déposée garde son menu : c'est
+                          justement là qu'on change son état. */}
+                      {documentActions ? (
+                        <RowActions
+                          label={`Actions sur ${doc.name}`}
+                          actions={documentActions(doc)}
+                        />
+                      ) : doc.muted ? (
+                        <td />
+                      ) : (
                         <td>
                           <svg className="icon" style={{ color: 'var(--ink-400)' }}>
                             <use href="#i-eye" />
@@ -426,17 +485,30 @@ export function DataroomDetailScreen({
       )}
 
       <Subscreen active={activeTab === 'sub-qa'}>
-        {qaEntries.map(qa => (
-          <QACard
-            key={qa.id}
-            status={qa.status}
-            object={qa.object}
-            meta={qa.meta}
-            body={qa.body}
-            answer={qa.answer}
-            onReply={qa.answer ? undefined : text => onReply?.(qa.id, text)}
+        {qa ? (
+          <QAPanel
+            {...qa}
+            entries={qaEntries.map(entry => ({
+              ...entry,
+              // Sans état de modération connu, une question affichée est une
+              // question publiée : c'est l'état de toutes celles d'avant ce lot.
+              moderation: qaModeration?.[entry.id] ?? 'publiee',
+            }))}
+            onReply={(id, text) => onReply?.(id, text)}
           />
-        ))}
+        ) : (
+          qaEntries.map(entry => (
+            <QACard
+              key={entry.id}
+              status={entry.status}
+              object={entry.object}
+              meta={entry.meta}
+              body={entry.body}
+              answer={entry.answer}
+              onReply={entry.answer ? undefined : text => onReply?.(entry.id, text)}
+            />
+          ))
+        )}
       </Subscreen>
 
       <Subscreen active={activeTab === 'sub-members'}>

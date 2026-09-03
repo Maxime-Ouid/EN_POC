@@ -102,7 +102,7 @@ export function NewPortfolioModal({
           alignItems: 'center',
           gap: 12,
           padding: '12px 0',
-          borderBottom: '1px solid var(--line)',
+          borderBottom: '1px solid var(--border)',
           marginBottom: 14,
         }}
       >

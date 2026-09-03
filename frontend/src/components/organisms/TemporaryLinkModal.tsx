@@ -155,7 +155,7 @@ export function TemporaryLinkModal({
           alignItems: 'center',
           gap: 12,
           padding: '12px 0',
-          borderTop: '1px solid var(--line)',
+          borderTop: '1px solid var(--border)',
           marginTop: 6,
         }}
       >
@@ -173,47 +173,49 @@ export function TemporaryLinkModal({
           <div className="section-title" style={{ marginTop: 16, marginBottom: 8 }}>
             Liens actifs sur cette dataroom
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Pièce</th>
-                  <th>Destinataire</th>
-                  <th>Échéance</th>
-                  <th>Téléchargements</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {links.map(l => (
-                  <tr key={l.id}>
-                    <td className="row-name">
-                      {l.passwordProtected && <Icon id="lock" />}
-                      {l.target}
-                    </td>
-                    <td className="dim">{l.recipient}</td>
-                    <td>
-                      {l.expired ? (
-                        <Pill kind="neutral">Expiré</Pill>
-                      ) : (
-                        <span className="tiny dim">{l.expiresAt}</span>
-                      )}
-                    </td>
-                    <td className="mono">
-                      {l.downloads}
-                      {l.maxDownloads === null ? '' : ` / ${l.maxDownloads}`}
-                    </td>
-                    <td>
-                      {!l.expired && (
-                        <Button size="sm" onClick={() => onRevoke?.(l.id)}>
-                          Révoquer
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Liste empilée et non tableau : la modale fait 560 px, un tableau
+              à cinq colonnes y coupe la dernière — constaté à la capture. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {links.map(l => (
+              <div
+                key={l.id}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  opacity: l.expired ? 0.65 : 1,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {l.passwordProtected && <Icon id="lock" />}
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{l.target}</span>
+                  {l.expired && <Pill kind="neutral">Expiré</Pill>}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span className="tiny dim">
+                    {l.recipient} · {l.expired ? 'échu' : `jusqu'au ${l.expiresAt}`} ·{' '}
+                    {l.downloads}
+                    {l.maxDownloads === null ? ' téléchargement(s)' : ` / ${l.maxDownloads}`}
+                  </span>
+                  {!l.expired && (
+                    <Button size="sm" onClick={() => onRevoke?.(l.id)}>
+                      Révoquer
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </>
       )}
