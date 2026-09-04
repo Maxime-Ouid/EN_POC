@@ -49,8 +49,10 @@ export function useGroups(enabled: boolean) {
   }, [load]);
 
   const create = useCallback(
-    async (name: string, category: GroupCategory, userIds?: number[]): Promise<GroupSummary> => {
-      const group = await api.createGroup(name, category, userIds);
+    async (
+      name: string, category: GroupCategory, userIds?: number[], pageKeys?: string[],
+    ): Promise<GroupSummary> => {
+      const group = await api.createGroup(name, category, userIds, pageKeys);
       await refresh();
       return group;
     },
@@ -58,7 +60,10 @@ export function useGroups(enabled: boolean) {
   );
 
   const update = useCallback(
-    async (groupId: number, patch: { name?: string; category?: GroupCategory; user_ids?: number[] }) => {
+    async (
+      groupId: number,
+      patch: { name?: string; category?: GroupCategory; user_ids?: number[]; page_keys?: string[] },
+    ) => {
       await api.updateGroup(groupId, patch);
       await refresh();
     },

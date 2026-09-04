@@ -202,7 +202,20 @@ class Group(models.Model):
     mécanisme, même contrainte que Dataroom -> Office). Filtrés contre les
     OfficeMembership réels de l'office à chaque écriture
     (views._clean_group_member_ids), même défense en profondeur que
-    _set_restriction pour user_ids."""
+    _set_restriction pour user_ids.
+
+    `page_keys` (JSONField, liste de chaînes, ajouté le 04/09/2026 — chantier
+    "les groupes remplacent les rôles pour le contenu") : quelles entrées de
+    navigation (frontend/src/data/demo.tsx, NAV_SECTIONS) ce groupe rend
+    visibles pour ses membres — deuxième volet des droits GLOBAUX du groupe, à
+    côté des datarooms accessibles (voir group_datarooms_view, qui réutilise
+    AccessRestriction plutôt que d'ajouter un champ ici : la donnée n'a pas sa
+    place sur Group puisqu'elle est par DATAROOM). Ne s'applique qu'aux membres
+    et clients — admin/superadmin/hyperadmin gardent toute la navigation quel
+    que soit leur groupe (même bypass que pour l'accès au contenu). Liste vide
+    = comportement actuel inchangé (toute la nav visible), pas "aucune page" :
+    un groupe créé avant l'existence de ce champ, ou dont on n'a jamais
+    restreint les pages, ne doit rien perdre."""
     CATEGORY_CHOICES = [
         ("admin", "Admin"),
         ("membre", "Membre"),
@@ -212,6 +225,7 @@ class Group(models.Model):
     slug = models.SlugField(max_length=80, unique=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="membre")
     user_ids = models.JSONField(default=list, blank=True)
+    page_keys = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

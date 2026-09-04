@@ -71,7 +71,7 @@ import { useModule } from './hooks/useModule';
 import { useTemplates } from './hooks/useTemplates';
 import { useTemplateTree, type TemplateFolderTreeNode } from './hooks/useTemplateTree';
 import { useGroups } from './hooks/useGroups';
-import { templateEffectiveRoles, dataroomEffectiveRoles as computeDataroomEffectiveRoles } from './access/effectiveRoles';
+import { templateEffectiveGroups, dataroomEffectiveGroups as computeDataroomEffectiveGroups } from './access/effectiveRoles';
 import {
   api, type AccessRestrictionSummary, type DocumentSummary, type TagColor, type TagSummary,
 } from './api/endpoints';
@@ -439,6 +439,9 @@ export default function App() {
   const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
   const [groupModal, setGroupModal] = useState<{ mode: 'create' | 'edit'; target?: GroupRowData } | null>(null);
   const [groupModalError, setGroupModalError] = useState<string | null>(null);
+  /** Datarooms déjà accordées au groupe en cours d'édition (undefined tant
+      qu'elles chargent, ou en mode création — voir group_datarooms_view). */
+  const [groupModalDataroomIds, setGroupModalDataroomIds] = useState<number[] | undefined>(undefined);
   const [groupToDelete, setGroupToDelete] = useState<GroupRowData | null>(null);
   const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null);
   const [deleteFolderError, setDeleteFolderError] = useState<string | null>(null);
@@ -507,10 +510,12 @@ export default function App() {
 
   // Catalogue de groupes de l'office — alimente le tableau de droits d'une
   // dataroom ET d'un Template (troisième critère d'accès, voir
-  // AccessRightsTable), ainsi que l'onglet « Groupes » de Personnalisation
-  // où il se gère. Même granularité que officeUsers/templates : chargé pour
-  // tout l'écran Personnalisation, pas juste son sous-onglet Groupes.
-  const groups = useGroups(authenticated && (screen === 'dataroom' || screen === 'settings'));
+  // AccessRightsTable), l'onglet « Groupes » de Personnalisation où il se
+  // gère, ET (04/09/2026, "les groupes remplacent les rôles") le filtrage de
+  // navSections ci-dessous — qui a besoin des groupes de l'utilisateur
+  // COURANT sur N'IMPORTE QUEL écran, pas seulement dataroom/settings.
+  // Chargé dès la connexion plutôt que par écran, comme useTags.
+  const groups = useGroups(authenticated);
 
   // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
   // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
@@ -519,6 +524,28 @@ export default function App() {
   useEffect(() => {
     if (authenticated) void syncFromServer();
   }, [authenticated, syncFromServer]);
+
+  // Datarooms déjà accordées au groupe ouvert dans GroupModal (mode edit
+  // uniquement — voir groupModalDataroomIds) : chargées à l'ouverture, pas au
+  // clic sur un onglet interne à la modale, qui n'existe pas ici.
+  useEffect(() => {
+    if (groupModal?.mode !== 'edit' || !groupModal.target) {
+      setGroupModalDataroomIds(undefined);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getGroupDataroomIds(groupModal.target.id)
+      .then(res => {
+        if (!cancelled) setGroupModalDataroomIds(res.dataroom_ids);
+      })
+      .catch(() => {
+        if (!cancelled) setGroupModalDataroomIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupModal]);
 
   const openDataroom = datarooms.items.find(d => d.id === openDataroomId) ?? null;
   const openTemplate = templates.items.find(t => t.id === openTemplateId) ?? null;
@@ -565,31 +592,38 @@ export default function App() {
     userIds: templateAccessDraft.draft[row.id]?.userIds ?? [],
     groupIds: templateAccessDraft.draft[row.id]?.groupIds ?? [],
   }));
-  // Rôles effectivement accordés à chaque ligne (directement, ou via un
+  // Groupes effectivement accordés à chaque ligne (directement, ou via un
   // sous-dossier qui les coche déjà) — calculés en direct depuis le
   // brouillon courant, indexés par id de LIGNE du tableau ("folder:<id>"),
   // comme `templateAccessTableRows` (voir access/effectiveRoles.ts). Pur
-  // affichage (grise la case), aucune écriture n'en découle.
-  const templateEffectiveRolesByRowId = useMemo(
+  // affichage (grise la puce), aucune écriture n'en découle. Remplace
+  // templateEffectiveRolesByRowId/dataroomEffectiveRolesByRowId (rôles) —
+  // retirés le 04/09/2026, AccessRightsTable n'affiche plus de colonnes de
+  // rôle (voir CLAUDE.md, "les groupes remplacent les rôles").
+  const allGroupIds = useMemo(() => groups.items.map(g => g.id), [groups.items]);
+
+  const templateEffectiveGroupsByRowId = useMemo(
     () =>
-      templateEffectiveRoles(
+      templateEffectiveGroups(
         templateTree.tree,
-        folderId => templateAccessDraft.draft[`folder:${folderId}`]?.allowedRoles ?? [],
+        folderId => templateAccessDraft.draft[`folder:${folderId}`]?.groupIds ?? [],
+        allGroupIds,
       ),
-    [templateTree.tree, templateAccessDraft.draft],
+    [templateTree.tree, templateAccessDraft.draft, allGroupIds],
   );
   // Même calcul pour une vraie dataroom — la racine ("dataroom") et chaque
   // dossier/pièce du brouillon courant, même sémantique "explicite quelque
   // part dans le sous-arbre" qu'un Template.
-  const dataroomEffectiveRolesByRowId = useMemo(
+  const dataroomEffectiveGroupsByRowId = useMemo(
     () =>
-      computeDataroomEffectiveRoles(
+      computeDataroomEffectiveGroups(
         dataroomTree.tree,
         dataroomTree.rootDocuments,
         dataroomTree.documentsByFolderId,
-        rowId => dataroomAccessDraft.draft[rowId]?.allowedRoles ?? [],
+        rowId => dataroomAccessDraft.draft[rowId]?.groupIds ?? [],
+        allGroupIds,
       ),
-    [dataroomTree.tree, dataroomTree.rootDocuments, dataroomTree.documentsByFolderId, dataroomAccessDraft.draft],
+    [dataroomTree.tree, dataroomTree.rootDocuments, dataroomTree.documentsByFolderId, dataroomAccessDraft.draft, allGroupIds],
   );
 
   const officeUsersForAccess = officeUsers.items.map(u => ({ userId: u.user_id, username: u.username, role: u.role }));
@@ -659,19 +693,43 @@ export default function App() {
     }));
 
     const active = modulesWithServerState.filter(m => m.enabled && !m.comingSoon);
-    if (!active.length) return withRealCounts;
-    return [
-      ...withRealCounts,
-      {
-        label: 'Modules',
-        items: active.map(m => ({
-          key: `${MODULE_PREFIX}${m.slug}`,
-          icon: m.icon,
-          label: m.name,
-        })),
-      },
-    ];
-  }, [modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error]);
+    const withModules = !active.length
+      ? withRealCounts
+      : [
+          ...withRealCounts,
+          {
+            label: 'Modules',
+            items: active.map(m => ({
+              key: `${MODULE_PREFIX}${m.slug}`,
+              icon: m.icon,
+              label: m.name,
+            })),
+          },
+        ];
+
+    // Pages visibles par groupe (04/09/2026, "les groupes remplacent les
+    // rôles") : un admin/superadmin/hyperadmin garde TOUJOURS toute la nav —
+    // même bypass que pour l'accès au contenu (_user_can_access côté
+    // serveur). Pour membre/client, un utilisateur qui n'appartient à AUCUN
+    // groupe garde aussi tout (rien n'a été configuré pour lui) ; s'il
+    // appartient à au moins un groupe dont AU MOINS UN a `page_keys` vide
+    // (droit le plus permissif), la nav reste entière aussi — sinon elle se
+    // limite à l'union des pages listées par ses groupes.
+    const currentRole = session.offices.find(o => o.name === session.tenant?.name)?.role;
+    const bypassPageFilter = session.user?.is_hyperadmin || currentRole === 'admin' || currentRole === 'superadmin';
+    if (bypassPageFilter || session.user?.user_id == null) return withModules;
+
+    const myGroups = groups.items.filter(g => g.user_ids.includes(session.user!.user_id));
+    if (!myGroups.length || myGroups.some(g => g.page_keys.length === 0)) return withModules;
+
+    const allowedKeys = new Set(myGroups.flatMap(g => g.page_keys));
+    return withModules
+      .map(section => ({ ...section, items: section.items.filter(item => allowedKeys.has(item.key)) }))
+      .filter(section => section.items.length > 0);
+  }, [
+    modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error,
+    session.offices, session.tenant, session.user, groups.items,
+  ]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
 
@@ -1102,7 +1160,7 @@ export default function App() {
             officeUsers={officeUsersForAccess}
             groups={groupsForAccess}
             onChangeRow={(rowId, next) => templateAccessDraft.setRow(rowId, next)}
-            effectiveRoles={templateEffectiveRolesByRowId}
+            effectiveGroups={templateEffectiveGroupsByRowId}
             loading={templateTree.loading || officeUsers.loading}
             error={templateAccessSaveError ?? officeUsers.error ?? templateTree.error}
             canManage={canManageOffice}
@@ -1211,8 +1269,17 @@ export default function App() {
       />
       <GroupModal
         // Même convention que NewTemplateModal : remonter mode + cible remet
-        // les champs à zéro en passant d'un groupe à l'autre.
-        key={groupModal ? `${groupModal.mode}-${groupModal.target?.id ?? 'new'}` : 'closed'}
+        // les champs à zéro en passant d'un groupe à l'autre. Le suffixe
+        // loading/loaded force un second remontage quand les datarooms déjà
+        // accordées (groupModalDataroomIds, chargées de façon asynchrone)
+        // arrivent après le premier — la modale lit ses props UNE SEULE FOIS
+        // au montage (voir son docstring), donc un prop qui change après coup
+        // sans remonter resterait invisible.
+        key={
+          groupModal
+            ? `${groupModal.mode}-${groupModal.target?.id ?? 'new'}-${groupModalDataroomIds ? 'loaded' : 'loading'}`
+            : 'closed'
+        }
         open={groupModal !== null}
         mode={groupModal?.mode ?? 'create'}
         initial={
@@ -1221,22 +1288,30 @@ export default function App() {
                 name: groupModal.target.name,
                 category: groupModal.target.category,
                 userIds: groups.items.find(g => g.id === groupModal.target?.id)?.user_ids ?? [],
+                pageKeys: groups.items.find(g => g.id === groupModal.target?.id)?.page_keys ?? [],
               }
             : undefined
         }
         officeUsers={officeUsersForAccess}
+        datarooms={datarooms.items.map(d => ({ id: d.id, name: d.name }))}
+        initialDataroomIds={groupModalDataroomIds}
         error={groupModalError}
         onClose={() => {
           setGroupModal(null);
           setGroupModalError(null);
         }}
-        onSubmit={({ name, category, userIds }) => {
+        onSubmit={({ name, category, userIds, pageKeys, dataroomIds }) => {
           setGroupModalError(null);
-          const done =
+          const savedGroup =
             groupModal?.mode === 'edit' && groupModal.target
-              ? groups.update(groupModal.target.id, { name, category, user_ids: userIds })
-              : groups.create(name, category, userIds);
-          done.then(() => setGroupModal(null)).catch((err: Error) => setGroupModalError(err.message));
+              ? groups
+                  .update(groupModal.target.id, { name, category, user_ids: userIds, page_keys: pageKeys })
+                  .then(() => groupModal.target!.id)
+              : groups.create(name, category, userIds, pageKeys).then(g => g.id);
+          savedGroup
+            .then(groupId => api.setGroupDataroomIds(groupId, dataroomIds))
+            .then(() => setGroupModal(null))
+            .catch((err: Error) => setGroupModalError(err.message));
         }}
       />
       <ConfirmModal
@@ -1757,7 +1832,7 @@ export default function App() {
                   onChangeRow={(rowId, next) => dataroomAccessDraft.setRow(rowId, next)}
                   loading={accessRestrictionsList.loading || officeUsers.loading}
                   error={dataroomAccessSaveError ?? accessRestrictionsList.error ?? officeUsers.error}
-                  effectiveRoles={row => dataroomEffectiveRolesByRowId[row.id] ?? []}
+                  effectiveGroups={row => dataroomEffectiveGroupsByRowId[row.id] ?? []}
                 />
               </div>
             }

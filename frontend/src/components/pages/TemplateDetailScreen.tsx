@@ -15,12 +15,12 @@ export interface TemplateDetailScreenProps {
   officeUsers: AccessEditorUser[];
   groups: AccessEditorGroup[];
   onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[]; groupIds: number[] }) => void;
-  /** Rôles EFFECTIVEMENT accordés à chaque ligne (id "folder:<id>") via un
+  /** Groupes EFFECTIVEMENT accordés à chaque ligne (id "folder:<id>") via un
       sous-dossier qui les coche explicitement, calculés en direct depuis le
-      brouillon — voir `access/effectiveRoles.ts::templateEffectiveRoles`.
-      Grise la case correspondante dans `AccessRightsTable`, sans jamais
+      brouillon — voir `access/effectiveRoles.ts::templateEffectiveGroups`.
+      Grise la puce correspondante dans `AccessRightsTable`, sans jamais
       l'écrire sur la ligne elle-même. */
-  effectiveRoles: Record<string, string[]>;
+  effectiveGroups: Record<string, number[]>;
   loading?: boolean;
   error?: string | null;
   canManage: boolean;
@@ -52,7 +52,7 @@ export function TemplateDetailScreen({
   officeUsers,
   groups,
   onChangeRow,
-  effectiveRoles,
+  effectiveGroups,
   loading,
   error,
   canManage,
@@ -94,9 +94,9 @@ export function TemplateDetailScreen({
         <>
           {!loading && rows.length > 0 && (
             <div className="tiny dim" style={{ marginTop: 16 }}>
-              Une case de rôle grisée signifie que ce rôle a déjà accès via un
-              sous-dossier — la retirer se fait là où elle est réellement
-              accordée.
+              Une puce de groupe grisée signifie que ce groupe a déjà accès
+              via un sous-dossier — la retirer se fait là où elle est
+              réellement accordée.
             </div>
           )}
           <div style={{ marginTop: 12 }}>
@@ -107,7 +107,7 @@ export function TemplateDetailScreen({
               onChangeRow={onChangeRow}
               loading={loading}
               error={error}
-              effectiveRoles={row => effectiveRoles[row.id] ?? []}
+              effectiveGroups={row => effectiveGroups[row.id] ?? []}
               renderRowActions={
                 canManage
                   ? row => (

@@ -121,3 +121,91 @@ export function dataroomEffectiveRoles(
   };
   return computeEffectiveRolesByRowId([root]);
 }
+
+/* ===========================================================================
+   Groupes EFFECTIVEMENT accordés à chaque ligne (04/09/2026, "les groupes
+   remplacent les rôles") — même algorithme que ci-dessus (subtreeGrants/
+   effectiveRolesFor/computeEffectiveRolesByRowId), mais paramétré par
+   `allGroupIds` plutôt qu'un ensemble fermé comme ACCESS_ROLES : le
+   catalogue de groupes est propre à chaque office et change au fil du
+   temps, contrairement aux trois rôles fixes.
+   =========================================================================== */
+
+export interface GroupTreeNode {
+  id: string;
+  groupIds: number[];
+  children?: GroupTreeNode[];
+}
+
+function subtreeGrantsGroup(groupId: number, node: GroupTreeNode): boolean {
+  if (node.groupIds.includes(groupId)) return true;
+  return (node.children ?? []).some(child => subtreeGrantsGroup(groupId, child));
+}
+
+function effectiveGroupsFor(node: GroupTreeNode, allGroupIds: number[]): number[] {
+  return allGroupIds.filter(id => subtreeGrantsGroup(id, node));
+}
+
+function computeEffectiveGroupsByRowId(nodes: GroupTreeNode[], allGroupIds: number[]): Record<string, number[]> {
+  const map: Record<string, number[]> = {};
+  function walk(list: GroupTreeNode[]) {
+    for (const node of list) {
+      map[node.id] = effectiveGroupsFor(node, allGroupIds);
+      walk(node.children ?? []);
+    }
+  }
+  walk(nodes);
+  return map;
+}
+
+/** Groupes effectifs de chaque TemplateFolder — miroir de templateEffectiveRoles. */
+export function templateEffectiveGroups(
+  tree: TemplateFolderTreeNode[],
+  groupIdsFor: (folderId: number) => number[],
+  allGroupIds: number[],
+): Record<string, number[]> {
+  function toGroupTree(nodes: TemplateFolderTreeNode[]): GroupTreeNode[] {
+    return nodes.map(node => ({
+      id: `folder:${node.id}`,
+      groupIds: groupIdsFor(node.id),
+      children: node.children.length ? toGroupTree(node.children) : undefined,
+    }));
+  }
+  return computeEffectiveGroupsByRowId(toGroupTree(tree), allGroupIds);
+}
+
+/** Groupes effectifs de la dataroom, de chaque dossier et de chaque pièce —
+    miroir de dataroomEffectiveRoles. */
+export function dataroomEffectiveGroups(
+  tree: FolderTreeNode[],
+  rootDocuments: { id: number }[],
+  documentsByFolderId: Record<number, { id: number }[]>,
+  groupIdsFor: (rowId: string) => number[],
+  allGroupIds: number[],
+): Record<string, number[]> {
+  function folderNode(node: FolderTreeNode): GroupTreeNode {
+    const children: GroupTreeNode[] = [
+      ...(documentsByFolderId[node.id] ?? []).map(doc => ({
+        id: `document:${doc.id}`,
+        groupIds: groupIdsFor(`document:${doc.id}`),
+      })),
+      ...node.children.map(folderNode),
+    ];
+    return {
+      id: `folder:${node.id}`,
+      groupIds: groupIdsFor(`folder:${node.id}`),
+      children: children.length ? children : undefined,
+    };
+  }
+
+  const rootChildren: GroupTreeNode[] = [
+    ...rootDocuments.map(doc => ({ id: `document:${doc.id}`, groupIds: groupIdsFor(`document:${doc.id}`) })),
+    ...tree.map(folderNode),
+  ];
+  const root: GroupTreeNode = {
+    id: 'dataroom',
+    groupIds: groupIdsFor('dataroom'),
+    children: rootChildren.length ? rootChildren : undefined,
+  };
+  return computeEffectiveGroupsByRowId([root], allGroupIds);
+}

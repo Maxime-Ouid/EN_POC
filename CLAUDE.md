@@ -362,17 +362,45 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
     personnalise sa palette voit ses tags suivre — ce qu'un `#7c3aed` figé en base
     empêcherait. Même parti pris que `Office.theme` : le catalogue vit côté front, le
     backend stocke et borne.
-- `Group` : modèle métier tenant (fait le 04/09/2026) — même patron que `Tag`
-  (catalogue par office, `slug` dédupliqué via `group_slug`). C'est un
-  **groupe de droits transverse aux rôles** : `AccessRestriction`/
-  `TemplateFolder` gagnent un `ManyToManyField(Group)`, troisième critère
-  d'accès OU-logique à côté de `allowed_roles`/`user_ids` — un utilisateur
-  membre de plusieurs groupes garde le droit le plus permissif parmi eux
-  (voir `views._user_can_access`). `category` (admin/membre/client) n'est
-  qu'un classement d'affichage de l'écran de gestion, elle ne restreint pas
-  qui peut rejoindre le groupe. `OfficeMembership.role` reste inchangé et
-  seul déterminant du rang de gestion — les groupes n'y touchent pas, voir
-  `docs/journal.md` (04/09/2026) pour le détail.
+- `Group` : modèle métier tenant (fait le 04/09/2026, étendu le même jour —
+  « les groupes remplacent les rôles pour le contenu ») — même patron que
+  `Tag` (catalogue par office, `slug` dédupliqué via `group_slug`). C'est
+  désormais LE mécanisme principal de droits sur le contenu, sur le modèle
+  des rôles Discord, à deux niveaux :
+  - **Droits globaux** : quelles datarooms (parmi celles existantes) et
+    quelles pages/écrans (`page_keys`, `JSONField` de chaînes lues depuis
+    `NAV_SECTIONS` côté front — vide = navigation complète, pas "aucune
+    page") ce groupe rend accessibles. Les datarooms accessibles ne sont PAS
+    un champ séparé : `group_datarooms_view` (`GET`/`PUT
+    /api/groups/<id>/datarooms/`) réutilise `AccessRestriction.groups` posé
+    sur la restriction RACINE de chaque dataroom — vue en coupe par groupe
+    de la même donnée qu'au niveau fin ci-dessous.
+  - **Affinage par dossier/fichier** (Template ET Dataroom, fichier
+    Dataroom seulement) : `AccessRestriction`/`TemplateFolder` portent un
+    `ManyToManyField(Group)`, critère d'accès OU-logique à côté de
+    `allowed_roles`/`user_ids` — un utilisateur membre de plusieurs groupes
+    garde le droit le plus permissif parmi eux (voir
+    `views._user_can_access`). **`AccessRightsTable` (Template ET Dataroom,
+    composant partagé) n'affiche plus les colonnes Admin/Membre/Client** —
+    seulement "Utilisateurs nommés" et "Groupes" ; `allowed_roles` reste un
+    champ backend valide (restrictions déjà configurées avant ce chantier
+    continuent de fonctionner), simplement plus éditable depuis cet écran.
+  `category` (admin/membre/client) n'est qu'un classement d'affichage de
+  l'écran de gestion, elle ne restreint pas qui peut rejoindre le groupe.
+  `OfficeMembership.role` reste inchangé et seul déterminant du rang de
+  GESTION (qui peut gérer qui, bypass superadmin, seuil de création de
+  dataroom) — les groupes ne touchent qu'à l'accès au CONTENU. Un
+  admin/superadmin/hyperadmin garde toujours toute la navigation (bypass,
+  même principe que pour le contenu) ; un membre/client qui n'appartient à
+  aucun groupe, ou dont au moins un groupe a `page_keys` vide, garde aussi
+  toute la navigation (droit le plus permissif). **Point explicitement pas
+  tranché** : le défaut d'accès sans restriction reste basé sur le RÔLE
+  (`_user_can_access`, ouvert pour admin/membre, fermé pour client) — voir
+  `docs/journal.md` (04/09/2026) pour la recommandation. **Point non
+  résolu** : `DataroomGroupsCard.tsx` (repris de la fusion
+  `front/maquettes-mvp`) porte un concept concurrent de groupes PAR
+  DATAROOM (§4.4), affiché au-dessus de ce tableau sans lien avec lui — voir
+  `docs/journal.md` (04/09/2026).
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -629,20 +657,34 @@ dispositif préconfiguré : leur premier login demande un enrôlement (QR code).
       ci-dessous — la fonctionnalité, elle, n'a pas changé, déjà entièrement
       livrée. Seul point encore ouvert : non vérifié en navigateur (voir
       `docs/journal.md`) — à couvrir avant de le considérer clos pour de bon.
-- [x] **Groupes de droits par office** (catégories admin/membre/client,
-      cumul du droit le plus permissif en cas d'appartenances multiples) —
-      fait le 04/09/2026 : modèle `Group`, troisième critère OU-logique sur
-      `AccessRestriction`/`TemplateFolder` (à côté du rôle et de
-      l'utilisateur nommé), sans toucher à `OfficeMembership.role` (rang de
-      gestion inchangé). Écran de gestion sous Personnalisation → onglet
-      « Groupes » (liste + création/édition avec sélecteur de membres),
-      colonne « Groupes » ajoutée à `AccessRightsTable` (dataroom ET
-      Template). 18/18 tests dédiés + 49 tests de non-régression sur les
-      zones touchées, vérifié en Chrome réel (persistance confirmée après
-      rechargement complet). Capacités par groupe (ex. droit de création de
-      dataroom porté par le groupe plutôt que par le rôle) explicitement
-      différées — voir `docs/journal.md` pour le détail complet et la
-      discussion de conception qui a précédé l'implémentation.
+- [x] **Groupes de droits par office, mécanisme principal pour le contenu**
+      (catégories admin/membre/client à l'affichage seulement, cumul du
+      droit le plus permissif en cas d'appartenances multiples) — modèle
+      `Group` fait le 04/09/2026 (matin), étendu le même jour (« les groupes
+      remplacent les rôles ») : droits GLOBAUX par groupe (datarooms
+      accessibles via `group_datarooms_view`, pages visibles via
+      `Group.page_keys` + filtrage de `navSections`) ET affinage par
+      dossier/fichier (`AccessRestriction`/`TemplateFolder.groups`, OU-logique
+      à côté du rôle et de l'utilisateur nommé) — `AccessRightsTable`
+      (dataroom ET Template) n'a plus que les colonnes « Utilisateurs nommés »
+      et « Groupes », les cases Admin/Membre/Client ayant disparu de cet
+      écran (voir « Modèle de données clé » ci-dessus pour le détail complet).
+      `OfficeMembership.role` inchangé pour la GESTION (rang, bypass
+      superadmin, seuil de création de dataroom). Écran de gestion sous
+      Personnalisation → onglet « Groupes » (liste + création/édition avec
+      sélecteur de membres, datarooms accessibles, pages visibles). 24/24
+      tests dédiés (18 du matin + 6 pour `page_keys`/`group_datarooms_view`)
+      + suite complète verte (213/213), vérifié en Chrome réel y compris une
+      connexion réelle en tant que membre filtré par groupe (nav réduite aux
+      pages accordées). **Deux points explicitement pas tranchés** — défaut
+      d'accès sans restriction resté basé sur le rôle (rend le point
+      "datarooms accessibles par groupe" sans effet pour un membre, voir
+      `docs/journal.md`), et le concept concurrent `DataroomGroupsCard.tsx`
+      (groupes PAR DATAROOM, §4.4, repris de `front/maquettes-mvp`) laissé
+      tel quel, non réconcilié avec ce mécanisme. Capacités par groupe (ex.
+      droit de création de dataroom porté par le groupe plutôt que par le
+      rôle) explicitement différées — voir `docs/journal.md` pour le détail
+      complet et la discussion de conception qui a précédé l'implémentation.
 - [x] **Fiche de résultat enrichie dans la palette de recherche** (contenu,
       dates, type, tags) — fusionné le 04/09/2026 depuis `front/maquettes-mvp`
       (déjà du vrai backend, pas une maquette : `_accessible_stats`/

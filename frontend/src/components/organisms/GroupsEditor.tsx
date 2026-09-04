@@ -13,6 +13,14 @@ export interface GroupsEditorProps {
   onRemove: (groupId: number) => void;
   /** Nom de l'élément édité — sert aux aria-label de la croix de retrait. */
   targetLabel: string;
+  /**
+   * Groupes EFFECTIVEMENT accordés via un descendant (dossier ou pièce),
+   * ajouté le 04/09/2026 (voir access/effectiveRoles.ts::dataroomEffectiveGroups/
+   * templateEffectiveGroups) — affichés en puce grisée, sans croix de
+   * retrait : pur affichage, jamais une écriture sur cette ligne. Un groupe
+   * déjà direct sur cette ligne n'est jamais dupliqué ici.
+   */
+  inheritedGroupIds?: number[];
 }
 
 /**
@@ -24,13 +32,16 @@ export interface GroupsEditorProps {
  * autres…" pour ce premier jet. À ajouter si l'usage réel montre le
  * contraire (voir CLAUDE.md).
  */
-export function GroupsEditor({ groupIds, groups, onAdd, onRemove, targetLabel }: GroupsEditorProps) {
+export function GroupsEditor({
+  groupIds, groups, onAdd, onRemove, targetLabel, inheritedGroupIds,
+}: GroupsEditorProps) {
   const groupsById = new Map(groups.map(g => [g.groupId, g]));
   const availableGroups = groups.filter(g => !groupIds.includes(g.groupId));
+  const inherited = (inheritedGroupIds ?? []).filter(id => !groupIds.includes(id));
 
   return (
     <div style={{ width: '100%' }}>
-      {groupIds.length > 0 && (
+      {(groupIds.length > 0 || inherited.length > 0) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
           {groupIds.map(id => {
             const label = groupsById.get(id)?.name ?? `#${id}`;
@@ -38,6 +49,21 @@ export function GroupsEditor({ groupIds, groups, onAdd, onRemove, targetLabel }:
               <Tag key={id} plain onRemove={() => onRemove(id)} removeLabel={`Retirer ${label} de ${targetLabel}`}>
                 {label}
               </Tag>
+            );
+          })}
+          {inherited.map(id => {
+            const label = groupsById.get(id)?.name ?? `#${id}`;
+            return (
+              <span
+                key={`inherited-${id}`}
+                className="tiny dim"
+                title="Accordé par un sous-dossier ou une pièce — modifiable là où il est réellement accordé"
+                style={{
+                  padding: '2px 8px', borderRadius: 999, border: '1px dashed var(--border)',
+                }}
+              >
+                {label}
+              </span>
             );
           })}
         </div>

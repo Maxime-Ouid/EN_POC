@@ -30,7 +30,7 @@ from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
     DASHBOARD_MAX_PAGES, DASHBOARD_MAX_PAGE_NAME, DASHBOARD_MAX_WIDGETS, LOGO_MAX_BYTES,
     DashboardValidationError, GroupValidationError, TagValidationError, ThemeValidationError,
-    clean_dashboard_payload, clean_group_payload, clean_tag_payload, clean_theme_payload,
+    clean_dashboard_payload, clean_group_page_keys, clean_group_payload, clean_tag_payload, clean_theme_payload,
     group_slug, is_accepted_extension, tag_slug,
 )
 
@@ -1038,7 +1038,10 @@ class MfaLoginFlowTests(TestCase):
         # La session est déjà pleinement ouverte, sans étape MFA intermédiaire.
         whoami = self.client.get("/api/whoami/", HTTP_HOST="officex.localhost:8000")
         self.assertEqual(whoami.status_code, 200)
-        self.assertEqual(whoami.json(), {"username": "enrollee", "is_hyperadmin": False})
+        self.assertEqual(
+            whoami.json(),
+            {"username": "enrollee", "user_id": self.user.id, "is_hyperadmin": False},
+        )
 
     def test_logout_invalidates_sessions_on_all_offices(self):
         # Changement de comportement du 02/09/2026 (voir CLAUDE.md, "État réel
@@ -3452,6 +3455,15 @@ class GroupValidatorTests(TestCase):
     def test_clean_group_payload_partial_ignores_missing_keys(self):
         self.assertEqual(clean_group_payload({"category": "admin"}, partial=True), {"category": "admin"})
 
+    def test_clean_group_page_keys_deduplicates_and_bounds(self):
+        self.assertEqual(clean_group_page_keys(["dashboard", "audit", "dashboard"]), ["dashboard", "audit"])
+        with self.assertRaises(GroupValidationError):
+            clean_group_page_keys(["x" * 81])
+        with self.assertRaises(GroupValidationError):
+            clean_group_page_keys("dashboard")
+        with self.assertRaises(GroupValidationError):
+            clean_group_page_keys([1, 2])
+
 
 class GroupApiTests(unittest.TestCase):
     """Catalogue de groupes (/api/groups/...) et leur rôle de troisième critère
@@ -3673,3 +3685,107 @@ class GroupApiTests(unittest.TestCase):
         # son groupe, sans jamais avoir été nommé individuellement.
         self.assertEqual(len(level["folders"]), 1)
         self.assertEqual(level["folders"][0]["name"], "Confidentiel")
+
+    # --- droits globaux du groupe (page_keys, group_datarooms_view) -------
+    # Ajouté le 04/09/2026, chantier "les groupes remplacent les rôles" :
+    # group_datarooms_view réutilise AccessRestriction (voir son docstring),
+    # page_keys est un champ direct de Group — les deux sont testés ici plutôt
+    # que dans un fichier séparé, même regroupement que le reste des tests
+    # Group.
+
+    def test_page_keys_round_trip_on_create_and_patch(self):
+        self.client.force_login(self.admin)
+        res = self._post("/api/groups/", {
+            "name": "Notaires", "category": "membre", "page_keys": ["dashboard", "audit"],
+        })
+        self.assertEqual(res.status_code, 201, res.content)
+        group = res.json()
+        self.assertEqual(group["page_keys"], ["dashboard", "audit"])
+
+        res = self._patch(f"/api/groups/{group['id']}/", {"page_keys": ["dashboard"]})
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["page_keys"], ["dashboard"])
+
+    def test_page_keys_invalid_payload_is_rejected(self):
+        self.client.force_login(self.admin)
+        res = self._post("/api/groups/", {"name": "Notaires", "page_keys": "dashboard"})
+        self.assertEqual(res.status_code, 400, res.content)
+
+    def test_group_datarooms_view_reuses_root_access_restriction(self):
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            second_dataroom = Dataroom.objects.create(name="Vente Dupont")
+        finally:
+            reset_current_tenant(token)
+
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client", user_ids=[self.piece_rapportee.id])
+
+        # GET sans rien de coché encore.
+        res = self.client.get(f"/api/groups/{group['id']}/datarooms/", HTTP_HOST=self._host())
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["dataroom_ids"], [])
+
+        # PUT : coche les deux datarooms pour ce groupe.
+        res = self.client.put(
+            f"/api/groups/{group['id']}/datarooms/",
+            data=json.dumps({"dataroom_ids": [self.dataroom.id, second_dataroom.id]}),
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(sorted(res.json()["dataroom_ids"]), sorted([self.dataroom.id, second_dataroom.id]))
+
+        # Réutilise bien AccessRestriction : la restriction racine de la
+        # dataroom coche désormais ce groupe (visible depuis dataroom_access_view).
+        state = self.client.get(
+            f"/api/datarooms/{self.dataroom.id}/access/", HTTP_HOST=self._host()
+        ).json()
+        self.assertIn(group["id"], state["group_ids"])
+
+        # Le client, membre de ce groupe, voit maintenant les deux datarooms.
+        self.client.force_login(self.piece_rapportee)
+        listing = {d["id"] for d in self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()}
+        self.assertIn(self.dataroom.id, listing)
+        self.assertIn(second_dataroom.id, listing)
+
+        # PUT retire une des deux — l'autre reste, sans toucher aux autres
+        # critères déjà en place (voir test suivant pour la préservation).
+        self.client.force_login(self.admin)
+        res = self.client.put(
+            f"/api/groups/{group['id']}/datarooms/",
+            data=json.dumps({"dataroom_ids": [self.dataroom.id]}),
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.json()["dataroom_ids"], [self.dataroom.id])
+
+        self.client.force_login(self.piece_rapportee)
+        listing = {d["id"] for d in self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()}
+        self.assertIn(self.dataroom.id, listing)
+        self.assertNotIn(second_dataroom.id, listing)
+
+    def test_group_datarooms_view_preserves_other_restriction_criteria(self):
+        # Une restriction qui porte déjà un utilisateur nommé ne doit pas le
+        # perdre quand on ajoute/retire un groupe via cette vue groupe-centrée.
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client")
+        self._post(f"/api/datarooms/{self.dataroom.id}/access/", {"user_ids": [self.piece_rapportee.id]})
+
+        res = self.client.put(
+            f"/api/groups/{group['id']}/datarooms/",
+            data=json.dumps({"dataroom_ids": [self.dataroom.id]}),
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+        state = self.client.get(
+            f"/api/datarooms/{self.dataroom.id}/access/", HTTP_HOST=self._host()
+        ).json()
+        self.assertEqual(state["user_ids"], [self.piece_rapportee.id])
+        self.assertEqual(state["group_ids"], [group["id"]])
+
+    def test_group_datarooms_view_is_reserved_to_managers(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP")
+        self.client.force_login(self.membre)
+        res = self.client.get(f"/api/groups/{group['id']}/datarooms/", HTTP_HOST=self._host())
+        self.assertEqual(res.status_code, 403)

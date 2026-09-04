@@ -23,6 +23,10 @@ export type { TagColor };
 
 export interface WhoAmI {
   username: string;
+  /** Id numérique de l'utilisateur connecté (ajouté le 04/09/2026) — seul
+   * moyen de calculer côté front "à quels groupes j'appartiens" à partir de
+   * la liste déjà chargée par useGroups (chaque GroupSummary porte user_ids). */
+  user_id: number;
   is_hyperadmin: boolean;
 }
 
@@ -126,6 +130,13 @@ export interface GroupSummary {
   slug: string;
   category: GroupCategory;
   user_ids: number[];
+  /** Clés de nav (NAV_SECTIONS, data/demo.tsx) visibles pour ce groupe —
+   * deuxième volet des droits GLOBAUX du groupe, à côté des datarooms
+   * accessibles (voir getGroupDataroomIds/setGroupDataroomIds). Liste vide =
+   * comportement actuel inchangé (toute la nav visible), pas "aucune page" —
+   * ne s'applique qu'aux rôles membre/client, admin/superadmin/hyperadmin
+   * gardent toujours toute la navigation. */
+  page_keys: string[];
 }
 
 export interface DataroomSummary {
@@ -452,15 +463,17 @@ export const api = {
    * un nom déjà pris (même replié) est refusé (409), jamais fusionné en
    * silence : un groupe touche des droits d'accès.
    */
-  createGroup: (name: string, category: GroupCategory, userIds?: number[]) =>
+  createGroup: (name: string, category: GroupCategory, userIds?: number[], pageKeys?: string[]) =>
     apiFetch<GroupSummary>('/api/groups/', {
       method: 'POST',
-      body: { name, category, user_ids: userIds ?? [] },
+      body: { name, category, user_ids: userIds ?? [], page_keys: pageKeys ?? [] },
     }),
 
-  /** Partiel : n'envoyer que ce qui change (name, category et/ou user_ids). Réservé admin/superadmin. */
-  updateGroup: (groupId: number, patch: { name?: string; category?: GroupCategory; user_ids?: number[] }) =>
-    apiFetch<GroupSummary>(`/api/groups/${groupId}/`, { method: 'PATCH', body: patch }),
+  /** Partiel : n'envoyer que ce qui change (name, category, user_ids et/ou page_keys). Réservé admin/superadmin. */
+  updateGroup: (
+    groupId: number,
+    patch: { name?: string; category?: GroupCategory; user_ids?: number[]; page_keys?: string[] },
+  ) => apiFetch<GroupSummary>(`/api/groups/${groupId}/`, { method: 'PATCH', body: patch }),
 
   /**
    * Supprime le groupe ET le retire de toutes les restrictions/modèles qui le
@@ -468,6 +481,20 @@ export const api = {
    * OfficeMembership de ses membres.
    */
   deleteGroup: (groupId: number) => apiFetch<void>(`/api/groups/${groupId}/`, { method: 'DELETE' }),
+
+  /**
+   * Datarooms accessibles à un groupe (vue groupe-centrée de la même donnée
+   * que la colonne "Groupes" d'AccessRightsTable posée sur la ligne racine de
+   * chaque dataroom — voir backend group_datarooms_view). Réservé admin/superadmin.
+   */
+  getGroupDataroomIds: (groupId: number, signal?: AbortSignal) =>
+    apiFetch<{ dataroom_ids: number[] }>(`/api/groups/${groupId}/datarooms/`, { signal }),
+
+  setGroupDataroomIds: (groupId: number, dataroomIds: number[]) =>
+    apiFetch<{ dataroom_ids: number[] }>(`/api/groups/${groupId}/datarooms/`, {
+      method: 'PUT',
+      body: { dataroom_ids: dataroomIds },
+    }),
 
   /**
    * Liste des dossiers. `tagIds` non vide filtre côté serveur en OU (un dossier

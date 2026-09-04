@@ -529,3 +529,30 @@ def clean_group_payload(data, *, partial: bool = False) -> dict:
         cleaned["category"] = "membre"
 
     return cleaned
+
+
+# `page_keys` (Group, ajouté le 04/09/2026, chantier "groupes remplacent les rôles") :
+# quelles entrées de navigation ce groupe rend visibles. Volontairement TOLÉRANT,
+# contrairement à `category` — contrairement à category (trois valeurs figées), le
+# catalogue de clés de nav vit côté front (NAV_SECTIONS, frontend/src/data/demo.tsx) et
+# gagne des entrées au fil du produit (un module activé ajoute une clé "module:<slug>").
+# On borne la forme (liste de chaînes courtes), pas l'ensemble : une clé qui ne
+# correspond plus à rien de connu est simplement ignorée à la lecture par le front,
+# jamais un groupe existant invalidé par un écran retiré ou un module renommé.
+GROUP_MAX_PAGE_KEYS = 60
+GROUP_PAGE_KEY_MAX_LEN = 80
+
+
+def clean_group_page_keys(raw) -> list:
+    """Valide la liste de clés de nav reçue pour `Group.page_keys`."""
+    if not isinstance(raw, list):
+        raise GroupValidationError("« page_keys » doit être une liste")
+    if len(raw) > GROUP_MAX_PAGE_KEYS:
+        raise GroupValidationError(f"{GROUP_MAX_PAGE_KEYS} pages maximum par groupe")
+    keys = []
+    for value in raw:
+        if not isinstance(value, str) or not value or len(value) > GROUP_PAGE_KEY_MAX_LEN:
+            raise GroupValidationError("clé de page invalide")
+        if value not in keys:
+            keys.append(value)
+    return keys

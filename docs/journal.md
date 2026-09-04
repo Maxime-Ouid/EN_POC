@@ -2907,3 +2907,86 @@ couverture.
   rouvrir une session `carla` propre après être passé par `/admin/` pour continuer à
   observer le scénario avec le bon compte.
 
+## 04/09/2026 — Les groupes remplacent les rôles pour le contenu (suite du chantier Groupes)
+
+**Demande** : « je voudrais que les affichages de template et dataroom s'accordent avec
+cette vision » — le groupe doit fonctionner comme un rôle Discord : des droits GLOBAUX
+au niveau du groupe (quelles datarooms parmi les existantes, quelles pages), puis un
+affinage PAR dossier/fichier (déjà construit le 04/09/2026 matin, colonne "Groupes"
+d'`AccessRightsTable`). `OfficeMembership.role` reste inchangé pour la GESTION (qui peut
+gérer qui, bypass superadmin, seuil de création de dataroom) — seul l'accès au CONTENU
+bascule vers les groupes.
+
+**Ce qui a été construit** :
+- **"Datarooms accessibles" par groupe** (`group_datarooms_view`,
+  `GET`/`PUT /api/groups/<id>/datarooms/`) — **aucun nouveau champ de donnée** : réutilise
+  `AccessRestriction.groups` posé sur la restriction RACINE de chaque dataroom
+  (`dataroom=<Dataroom>`, jamais `folder`/`document`), simplement vu et édité depuis la
+  fiche du GROUPE plutôt que dataroom par dataroom. Réservé admin/superadmin
+  (`_manager_role`), comme le reste de la gestion des restrictions.
+- **"Pages visibles" par groupe** (`Group.page_keys`, migration
+  `0010_group_page_keys`) — liste de clés de nav (`dashboard`, `datarooms`, `audit`,
+  etc., lues depuis `NAV_SECTIONS` côté front, jamais dupliquées en dur côté serveur :
+  validation TOLÉRANTE, même parti pris que `clean_dashboard_payload`). Liste vide =
+  navigation complète (comportement actuel inchangé) — ce n'est PAS un défaut fermé.
+  `whoami` gagne `user_id` (absent jusqu'ici) : c'est ce qui permet au front de calculer
+  "à quels groupes j'appartiens" à partir de la liste déjà chargée par `useGroups`
+  (`user_ids` par groupe), sans nouvel endpoint dédié.
+- **`AccessRightsTable` perd ses colonnes Admin/Membre/Client** (et leur "Tout cocher") —
+  ne restent que "Utilisateurs nommés" et "Groupes", sur Template ET Dataroom (même
+  composant partagé). **Rien ne change côté backend** : `allowed_roles` reste un champ
+  valide, lu par `_user_can_access` exactement comme avant — une restriction déjà
+  configurée avec des rôles continue de fonctionner, simplement plus éditable depuis
+  cette table. `access/effectiveRoles.ts` gagne un pendant générique pour les groupes
+  (`templateEffectiveGroups`/`dataroomEffectiveGroups`, même algorithme de parcours
+  d'arbre que pour les rôles, paramétré par la liste des ids de groupe de l'office plutôt
+  que par un ensemble fermé) : une puce de groupe déjà accordée par un sous-dossier
+  s'affiche grisée, sans croix de retrait, dans `GroupsEditor` (nouveau prop
+  `inheritedGroupIds`) — même sémantique que l'ancien grisage de case de rôle.
+- `useGroups` passe de "chargé sur les écrans dataroom/settings" à "chargé dès la
+  connexion" (comme `useTags`) : la nav filtrée en dépend sur TOUT écran, pas seulement
+  ceux qui affichaient déjà un tableau de droits.
+- `navSections` (App.tsx) filtre chaque entrée dont la clé n'est dans AUCUN `page_keys`
+  des groupes de l'utilisateur courant — **admin/superadmin/hyperadmin gardent toujours
+  toute la navigation** (bypass, même principe que le contenu), et un membre/client qui
+  n'appartient à AUCUN groupe, ou dont au moins un groupe a `page_keys` vide (le plus
+  permissif l'emporte), garde aussi tout.
+
+**⚠️ Point explicitement PAS tranché, laissé pour une prochaine itération** : le défaut
+d'accès sans aucune restriction reste ROLE-based dans `_user_can_access` (ouvert pour
+admin/membre, fermé pour client) — tant que ce défaut ne bascule pas vers les groupes,
+"quelles datarooms ce groupe voit-il" n'a d'effet réel que pour le rang **client**
+(un **membre** voit déjà tout par défaut, quel que soit son groupe). Recommandation :
+basculer ce défaut une fois ce premier incrément vérifié en usage réel, pas dans la
+même itération — changement de comportement plus large, potentiellement impactant pour
+des offices déjà configurés.
+
+**Trouvaille non résolue, signalée pour information** : `DataroomGroupsCard.tsx`
+(récupéré de la fusion `front/maquettes-mvp` du 04/09/2026 matin) porte un concept de
+"groupes" CONCURRENT et non lié — des groupes PAR DATAROOM (§4.4 du document de vision),
+purement démo (état `dataroomGroups`/`setDataroomGroups`), rendu AU-DESSUS du vrai
+`AccessRightsTable` dans l'onglet "Droits d'accès" d'une dataroom, absent de l'écran
+Template. Vérifié en Chrome : les deux UI de "groupes" coexistent visuellement dans le
+même onglet sans lien entre elles. Laissé tel quel dans cette itération (hors du
+périmètre demandé) — à trancher (fusionner, retirer, ou assumer les deux concepts
+distincts) dans une prochaine session.
+
+**Vérifications** :
+- `python manage.py test` → **213/213** (207 avant + `test_clean_group_page_keys_*`,
+  `test_page_keys_*`, `test_group_datarooms_view_*` x4 — voir `GroupApiTests`/
+  `GroupValidatorTests`).
+- `tsc -b`, `npm run lint` (0 erreur, seuls des avertissements déjà tolérés), `npm run
+  check:ds` (237 fichiers, aucun écart nouveau), `npm run build` — tous verts.
+- **Chrome réel, officeb** : création d'un groupe "Clients VIP" (catégorie Membre,
+  membre `bob`) avec 1 dataroom cochée ("Vente Martin") et 2 pages cochées (Accueil,
+  Dossiers) — rechargement de la modale en édition confirme la persistance des deux
+  (chargement asynchrone + remontage de la modale via un suffixe `loading`/`loaded` sur
+  sa `key`, nécessaire car `GroupModal` ne lit ses props qu'une fois au montage). Colonne
+  "Groupes" vérifiée sur la dataroom réelle ET le Template "Vente immobilière — standard"
+  (plus aucune colonne de rôle), affichage hérité vérifié en direct (case cochée sur un
+  sous-dossier/document → puce grisée sans croix sur le parent). **Connexion réelle en
+  tant que `bob` (membre, TOTP déjà confirmé d'une session précédente)** : nav réduite à
+  exactement Accueil + Dossiers, conforme aux `page_keys` du groupe — preuve de bout en
+  bout du filtrage de navigation par groupe. Groupe de test supprimé après vérification,
+  aucune donnée de démo laissée modifiée.
+

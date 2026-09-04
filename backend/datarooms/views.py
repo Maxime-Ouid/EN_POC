@@ -29,8 +29,8 @@ from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
     LOGO_CONTENT_TYPES, LOGO_MAX_BYTES,
     DashboardValidationError, GroupValidationError, TagValidationError, ThemeValidationError,
-    clean_dashboard_payload, clean_group_payload, clean_tag_ids, clean_tag_payload, clean_theme_payload,
-    group_slug, is_accepted_extension, logo_extension, tag_slug,
+    clean_dashboard_payload, clean_group_page_keys, clean_group_payload, clean_tag_ids, clean_tag_payload,
+    clean_theme_payload, group_slug, is_accepted_extension, logo_extension, tag_slug,
 )
 
 User = get_user_model()
@@ -177,8 +177,17 @@ def whoami(request):
     est transverse à tous les offices (HyperadminAccess) et n'apparaissait jusqu'ici
     dans aucune réponse — un hyperadmin browsant un sous-domaine d'office (il en a
     désormais tous les droits, voir _effective_role) n'avait aucun moyen de se
-    signaler comme tel côté front sans provoquer un 403 ailleurs."""
-    return Response({"username": request.user.username, "is_hyperadmin": _is_hyperadmin(request.user)})
+    signaler comme tel côté front sans provoquer un 403 ailleurs.
+
+    `user_id` (ajouté le 04/09/2026, chantier "les groupes remplacent les
+    rôles") : le seul moyen déjà en place pour un utilisateur connecté de
+    savoir "à quels groupes j'appartiens" est de comparer son propre id aux
+    `user_ids` de chaque Group (déjà chargés par useGroups côté front) — sans
+    ça, aucune réponse n'exposait l'id numérique de l'utilisateur courant."""
+    return Response({
+        "username": request.user.username, "user_id": request.user.id,
+        "is_hyperadmin": _is_hyperadmin(request.user),
+    })
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -939,6 +948,7 @@ def _serialize_group(group):
     return {
         "id": group.id, "name": group.name, "slug": group.slug,
         "category": group.category, "user_ids": group.user_ids,
+        "page_keys": group.page_keys,
     }
 
 def _clean_group_member_ids(office, raw_ids):
@@ -977,8 +987,13 @@ def groups_view(request):
         if Group.objects.filter(slug=slug).exists():
             return Response({"error": "un groupe porte déjà ce nom"}, status=409)
         user_ids = _clean_group_member_ids(office, request.data.get('user_ids') or [])
+        try:
+            page_keys = clean_group_page_keys(request.data.get('page_keys') or [])
+        except GroupValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
         group = Group.objects.create(
             name=payload["name"], slug=slug, category=payload["category"], user_ids=user_ids,
+            page_keys=page_keys,
         )
         return Response(_serialize_group(group), status=201)
 
@@ -1022,8 +1037,75 @@ def group_detail_view(request, group_id):
         group.category = payload["category"]
     if "user_ids" in request.data:
         group.user_ids = _clean_group_member_ids(office, request.data.get('user_ids') or [])
+    if "page_keys" in request.data:
+        try:
+            group.page_keys = clean_group_page_keys(request.data.get('page_keys') or [])
+        except GroupValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
     group.save()
     return Response(_serialize_group(group))
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def group_datarooms_view(request, group_id):
+    """Vue GROUPE-CENTRÉE des datarooms accessibles à `group_id` — premier
+    volet des droits GLOBAUX du groupe (chantier "les groupes remplacent les
+    rôles", 04/09/2026), à côté de `page_keys` pour les pages. Réutilise
+    EXACTEMENT le même mécanisme que la colonne "Groupes" d'AccessRightsTable
+    (AccessRestriction.groups), posé sur la restriction RACINE de chaque
+    dataroom (`dataroom=<Dataroom>`, jamais `folder`/`document`) — pas un
+    nouveau champ de donnée sur Group, juste une vue en coupe différente (par
+    groupe plutôt que par dataroom) de la même information déjà éditable
+    dataroom par dataroom depuis dataroom_access_view. GET renvoie les ids de
+    dataroom dont la restriction racine coche ce groupe ; PUT remplace
+    l'ensemble — ajoute le groupe à la restriction racine de chaque dataroom
+    listée (la crée si besoin, via _set_restriction qui préserve les autres
+    critères déjà en place dessus) et le retire de celles qui ne le sont plus.
+    Réservé admin/superadmin (_manager_role), comme la gestion des groupes
+    elle-même et des restrictions d'accès."""
+    office = request.office
+    if office is None:
+        return Response({"error": "sous-domaine d'office non résolu"}, status=404)
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+    try:
+        group = Group.objects.get(pk=group_id)
+    except Group.DoesNotExist:
+        return Response({"error": "groupe introuvable"}, status=404)
+
+    if request.method == 'PUT':
+        raw_ids = request.data.get('dataroom_ids')
+        if not isinstance(raw_ids, list):
+            return Response({"error": "« dataroom_ids » doit être une liste"}, status=400)
+        candidate_ids = {int(v) for v in raw_ids if str(v).lstrip('-').isdigit()}
+        target_datarooms = {d.id: d for d in Dataroom.objects.filter(id__in=candidate_ids)}
+
+        currently = set(
+            AccessRestriction.objects.filter(dataroom__isnull=False, groups=group)
+            .values_list('dataroom_id', flat=True)
+        )
+        for dataroom_id in currently | set(target_datarooms):
+            dataroom = target_datarooms.get(dataroom_id) or Dataroom.objects.get(pk=dataroom_id)
+            row = _get_restriction_row(dataroom=dataroom)
+            existing_group_ids = list(row.groups.values_list('id', flat=True)) if row is not None else []
+            if dataroom_id in target_datarooms:
+                next_group_ids = existing_group_ids if group.id in existing_group_ids \
+                    else existing_group_ids + [group.id]
+            else:
+                next_group_ids = [gid for gid in existing_group_ids if gid != group.id]
+            _set_restriction(
+                office,
+                row.user_ids if row is not None else [],
+                row.allowed_roles if row is not None else [],
+                next_group_ids,
+                dataroom=dataroom,
+            )
+
+    dataroom_ids = sorted(
+        AccessRestriction.objects.filter(dataroom__isnull=False, groups=group)
+        .values_list('dataroom_id', flat=True)
+    )
+    return Response({"dataroom_ids": dataroom_ids})
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
