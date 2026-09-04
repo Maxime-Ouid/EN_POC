@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { Icon3d } from '../atoms/Icon3d';
 
 export interface TreeNodeData {
   id: string;
@@ -101,9 +102,7 @@ function TreeNode({
         <svg className="icon chev" style={hasChildren ? undefined : { visibility: 'hidden' }}>
           <use href="#i-chevr" />
         </svg>
-        <svg className="icon fic">
-          <use href="#i-folder" />
-        </svg>
+        <Icon3d icon="folder" className="fic" />
         {node.label}
         {typeof node.count === 'number' && <span className="tree-count">{node.count}</span>}
         {renderNodeExtra?.(node)}

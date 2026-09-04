@@ -92,7 +92,7 @@ export const DASHBOARD_MAX_PAGES = 8;
 export const DASHBOARD_MAX_PAGE_NAME = 32;
 
 /** Familles de widgets, pour regrouper la bibliothèque d'ajout. */
-export type WidgetCategory = 'chiffres' | 'suivi' | 'listes' | 'office';
+export type WidgetCategory = 'chiffres' | 'suivi' | 'listes' | 'office' | 'actions';
 
 export interface WidgetDefinition {
   id: string;
@@ -114,7 +114,40 @@ export interface WidgetDefinition {
   defaultSize: { w: number; h: number };
   /** En-deçà, le contenu devient illisible — la grille refuse de descendre. */
   minSize: { w: number; h: number };
-  render: (ctx: WidgetContext) => ReactNode;
+  /**
+   * Le contenu porte DÉJÀ sa propre carte : le cadre se réduit alors à la
+   * couche d'édition, sans quoi on obtiendrait deux bordures concentriques.
+   * Vrai pour les chiffres-clés (StatCard) et pour les tuiles d'action, dont
+   * la carte entière EST le bouton. Non renseigné, la famille décide — c'était
+   * la règle avant que les tuiles existent, et les widgets écrits sous cette
+   * règle continuent de valoir ce qu'ils valaient.
+   */
+  bare?: boolean;
+  /**
+   * Action rapide dont ce widget est la tuile (voir dashboard/actions.ts).
+   * C'est ce qui permet de ne PAS proposer dans la bibliothèque une tuile dont
+   * l'action est fermée au membre — un widget qu'on peut ajouter pour n'y lire
+   * qu'un refus n'a pas sa place dans un catalogue.
+   */
+  action?: string;
+  render: (ctx: WidgetContext, props: WidgetRenderProps) => ReactNode;
+}
+
+/** Ce qu'un widget sait de SON placement au moment de se dessiner. */
+export interface WidgetRenderProps {
+  /**
+   * Réglages du placement (voir `WidgetPlacement.options`) — le contenu choisi
+   * de la carte d'actions, par exemple. Absents pour un widget qui n'en a pas.
+   */
+  options?: Record<string, string | number | boolean>;
+  /**
+   * L'accueil est en mode édition. Les widgets n'ont rien à en faire pour
+   * l'instant (le CSS neutralise déjà les commandes de leur corps — voir
+   * `.widget-editing .widget-body button` dans dashboard.css) ; c'est passé
+   * pour qu'un widget dont l'état d'édition changerait le CONTENU n'ait pas à
+   * inventer son propre chemin.
+   */
+  editing: boolean;
 }
 
 /* --- Données servies aux widgets -------------------------------------------
@@ -209,4 +242,15 @@ export interface WidgetContext {
   modules: WidgetModule[];
   /** Ouvre l'écran complet correspondant — même clé que la navigation d'App. */
   navigate: (screen: string) => void;
+  /**
+   * Déclenche une action rapide (voir dashboard/actions.ts) : ouvrir la
+   * création d'un dossier, la palette de recherche… Un widget ne fait donc
+   * jamais l'action lui-même — il nomme le geste, l'application l'exécute.
+   */
+  runAction: (key: string) => void;
+  /**
+   * Actions praticables ici et maintenant : droits du membre, et commandes que
+   * la coquille sait rendre. Ce qui n'y figure pas n'est proposé nulle part.
+   */
+  allowedActions: readonly string[];
 }

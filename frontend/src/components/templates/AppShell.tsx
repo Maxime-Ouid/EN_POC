@@ -8,12 +8,14 @@ import { SidebarBrand } from '../molecules/SidebarBrand';
 import { SidebarFoot } from '../molecules/SidebarFoot';
 import { TenantSwitcher, type TenantOption } from '../molecules/TenantSwitcher';
 import { TopbarSearch } from '../molecules/TopbarSearch';
+import { SEARCH_SHORTCUT_LABEL } from '../../search/shortcut';
 import { NavBar } from '../organisms/NavBar';
 import { SearchPalette } from '../organisms/SearchPalette';
 import { Sidebar } from '../organisms/Sidebar';
 import { Topbar } from '../organisms/Topbar';
 import { positionNavTooltip } from '../atoms/navTooltip';
 import { TopbarSlotsContext } from './topbarSlots';
+import { ShellCommandsContext } from './shellCommands';
 import { isHorizontalNav } from '../../theme/schema';
 import { useTenantTheme } from '../../theme/useTenantTheme';
 import { useEffect, useMemo, useState } from 'react';
@@ -43,6 +45,8 @@ export interface AppShellProps {
   userName: string;
   userRole: string;
   onLogout?: () => void;
+  /** Ouvre « Mon compte » depuis le pied de rail ou la topbar (§4.5). */
+  onOpenAccount?: () => void;
   /**
    * PLUS AFFICHÉS depuis la refonte de la topbar (01/09/2026) : la barre porte
    * la recherche, la cloche et les commandes de l'écran courant — le fil
@@ -77,6 +81,44 @@ export interface AppShellProps {
    */
   onSearchSelect?: (hit: SearchHit) => void;
   /**
+   * Nom porté par la marque de la coquille — pied de rail (SidebarBrand) et
+   * barre d'onglets (NavBar). Par défaut le produit. La console hyperadmin
+   * n'est pas l'espace d'une étude : elle s'y annonce sous son propre nom.
+   */
+  brandName?: string;
+  /** Deuxième ligne de la marque, sous `brandName`. */
+  brandSub?: string;
+  /**
+   * Bandeau d'office du rail (et sa copie dans la topbar en barre d'onglets).
+   * La console hyperadmin le masque : elle n'administre aucune étude en
+   * particulier, la marque du rail dit déjà où l'on est, et un bandeau qui
+   * répète cette marque sans rien offrir à choisir est du mobilier.
+   */
+  showTenantSwitcher?: boolean;
+  /**
+   * Barre de recherche de la topbar. La console hyperadmin la masque : la
+   * palette interroge `/api/search/`, qui exige une session ouverte sur un
+   * office — un champ qui ne peut rien trouver n'a rien à faire dans la barre.
+   * Masquée, elle laisse sa place au conteneur de fin, où l'écran projette
+   * alors son propre filtre (voir HyperadminOfficesScreen).
+   */
+  showSearch?: boolean;
+  /**
+   * Cloche de notifications. Même raison : rien n'en émet pour un rôle
+   * transverse à tous les offices, et une cloche qui ne sonne jamais est un
+   * bouton mort.
+   */
+  showNotifications?: boolean;
+  /**
+   * Panier de téléchargement (§11.1) : nombre de pièces en attente. Le bouton
+   * n'apparaît que si `onOpenCart` est fourni — sur un écran sans dossier
+   * ouvert, un panier n'a rien à recevoir.
+   */
+  cartCount?: number;
+  onOpenCart?: () => void;
+  /** Ouvre l'aide en ligne et le manuel (§11.1). */
+  onOpenHelp?: () => void;
+  /**
    * Ce que la palette doit trouver en plus des résultats du serveur : écrans de
    * l'application, modules activés, données de démonstration. Construit par
    * l'appelant, qui est le seul à savoir naviguer — voir search/localEntries.ts.
@@ -101,10 +143,19 @@ export function AppShell({
   userName,
   userRole,
   onLogout,
+  onOpenAccount,
   hasUnreadNotifications,
   children,
   logoUrl,
   hideSectionLabels,
+  brandName = 'Espace Notarial',
+  brandSub = 'Next',
+  showTenantSwitcher = true,
+  showSearch = true,
+  showNotifications = true,
+  cartCount = 0,
+  onOpenCart,
+  onOpenHelp,
   onSearchSelect,
   searchLocalEntries,
 }: AppShellProps) {
@@ -118,6 +169,14 @@ export function AppShell({
   const [slotStart, setSlotStart] = useState<HTMLDivElement | null>(null);
   const [slotEnd, setSlotEnd] = useState<HTMLDivElement | null>(null);
   const slots = useMemo(() => ({ start: slotStart, end: slotEnd }), [slotStart, slotEnd]);
+
+  /* Ce que les écrans peuvent déclencher dans la coquille (voir
+     shellCommands.ts). `null` quand la recherche est désactivée : un écran qui
+     proposerait « Rechercher » afficherait sinon un bouton sans effet. */
+  const commands = useMemo(
+    () => ({ openSearch: searchEnabled ? () => setSearchOpen(true) : null }),
+    [searchEnabled],
+  );
 
   // ⌘K (macOS) / Ctrl+K (Windows, Linux) — écouté sur le document parce que le
   // raccourci doit marcher où que soit le focus, y compris dans un écran qui
@@ -173,7 +232,7 @@ export function AppShell({
           sections={navSections}
           activeScreen={activeScreen}
           onNavigate={onNavigate}
-          brandName="Espace Notarial"
+          brandName={brandName}
           logoUrl={logoUrl}
           showBadges={layout.showBadges}
           showSectionLabels={showSectionLabels}
@@ -186,19 +245,21 @@ export function AppShell({
               a rien à replier — voir theme/engine.ts. */}
           <SidebarBrand
             logoUrl={logoUrl}
-            name="Espace Notarial"
-            sub="Next"
+            name={brandName}
+            sub={brandSub}
             collapsed={navCollapsed}
             onToggleCollapse={navCollapsible ? toggleNavCollapsed : undefined}
             navId="app-nav"
           />
-          <TenantSwitcher
-            name={officeName}
-            role={officeRole}
-            offices={offices}
-            currentSubdomain={officeSubdomain}
-            onSelect={onSelectOffice}
-          />
+          {showTenantSwitcher && (
+            <TenantSwitcher
+              name={officeName}
+              role={officeRole}
+              offices={offices}
+              currentSubdomain={officeSubdomain}
+              onSelect={onSelectOffice}
+            />
+          )}
           <Nav id="app-nav">
             {navSections.map(section => (
               <NavGroup key={section.label} label={showSectionLabels ? section.label : undefined}>
@@ -267,6 +328,7 @@ export function AppShell({
             name={userName}
             role={userRole}
             onLogout={onLogout}
+            onOpenAccount={onOpenAccount}
             showPoweredBy={layout.showPoweredBy}
           />
         </Sidebar>
@@ -283,16 +345,22 @@ export function AppShell({
                 barre, elle coupait les onglets de l'accueil de leurs propres
                 commandes. Toutes les actions de la barre sont désormais du
                 même côté, la gauche étant réservée au repère d'écran. */}
-            <TopbarSearch
-              placeholder="Rechercher un dossier, une pièce, un tag, une personne, un écran…"
-              shortcut="⌘K"
-              onActivate={searchEnabled ? () => setSearchOpen(true) : undefined}
-            />
+            {/* Le libellé du bouton est court — la phrase complète reste dans le
+                champ de la palette, où il y a la place de la lire. Tronquée à
+                380px puis à 260px, elle ne disait de toute façon plus que
+                « Rechercher un dossier, une pièce, un t… ». */}
+            {showSearch && (
+              <TopbarSearch
+                placeholder="Rechercher dans l’étude…"
+                shortcut={SEARCH_SHORTCUT_LABEL}
+                onActivate={searchEnabled ? () => setSearchOpen(true) : undefined}
+              />
+            )}
             <div className="topbar-slot topbar-slot-end" ref={setSlotEnd} />
             {/* En barre d'onglets, le rail n'existe plus : le sélecteur d'office
                 et la déconnexion n'ont plus de pied de sidebar où vivre. Ils
                 remontent ici plutôt que de disparaître. */}
-            {horizontal && (
+            {horizontal && showTenantSwitcher && (
               <TenantSwitcher
                 name={officeName}
                 role={officeRole}
@@ -301,12 +369,26 @@ export function AppShell({
                 onSelect={onSelectOffice}
               />
             )}
-            <IconButton icon="bell" hasDot={hasUnreadNotifications} />
+            {onOpenCart && (
+              <IconButton
+                icon="zip"
+                aria-label={`Panier de téléchargement — ${cartCount} pièce(s)`}
+                hasDot={cartCount > 0}
+                onClick={onOpenCart}
+              />
+            )}
+            {onOpenHelp && (
+              <IconButton icon="scroll" aria-label="Aide et documentation" onClick={onOpenHelp} />
+            )}
+            {showNotifications && <IconButton icon="bell" hasDot={hasUnreadNotifications} />}
             {/* L'avatar a quitté la barre le 01/09/2026 : l'identité de
                 l'utilisateur reste lisible au pied de la sidebar. En barre
                 d'onglets ce pied n'existe pas — la déconnexion reste donc ici,
                 sans quoi cette disposition n'aurait plus aucune sortie. */}
-            {horizontal && <IconButton icon="logout" onClick={onLogout} />}
+            {horizontal && onOpenAccount && (
+              <IconButton icon="users" title="Mon compte" onClick={onOpenAccount} />
+            )}
+            {horizontal && <IconButton icon="logout" title="Se déconnecter" onClick={onLogout} />}
           </TopbarRight>
         </Topbar>
 
@@ -315,7 +397,11 @@ export function AppShell({
               dans la topbar, et la limiter ici évite de rerendre la coquille
               entière quand les conteneurs apparaissent. */}
           <div className="content-inner">
-            <TopbarSlotsContext.Provider value={slots}>{children}</TopbarSlotsContext.Provider>
+            <TopbarSlotsContext.Provider value={slots}>
+              <ShellCommandsContext.Provider value={commands}>
+                {children}
+              </ShellCommandsContext.Provider>
+            </TopbarSlotsContext.Provider>
           </div>
         </div>
       </div>

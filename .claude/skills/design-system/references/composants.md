@@ -20,14 +20,16 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 | `Grid` | Grille responsive — .grid-2 (1.5fr/1fr), .grid-3, .grid-4 — repasse à 1-2 colonnes sous 980px (voir components.css). |
 | `Highlight` | Souligne dans `text` les lettres trouvées par la recherche. |
 | `Icon` | Icône référençant le sprite SVG global (voir IconSprite.tsx, à monter une seule fois — main.tsx — dans l'app). |
+| `has3d`, `Icon3d` | Illustrations 3D (src/assets/icons-3d) tenant la place du glyphe du sprite pour les neuf types d'objets qui en ont une ;… |
 | `IconButton` | Bouton icône seul, rond (cloche, notifications…) — voir .icon-btn dans la topbar. |
+| `IconChip` | Pastille d'icône : carré arrondi teinté portant un glyphe du sprite, OU l'illustration 3D quand l'objet en a une (dossier,… |
 | `IconSprite` | — |
 | `Nav` | — |
 | `NavSwatch` | Miniature de la coquille de l'app : un cadre, une bande de navigation sur un bord, trois entrées dont la première est active. |
 | `NumberField` | Champ numérique à unité — §6.6. Les compteurs natifs sont masqués (non stylables sur Firefox/Safari) et remplacés par deux… |
 | `Pill` | Statut sémantique — voir DESIGN_SYSTEM.md §6.3. |
 | `ProtoPill` | Bandeau "Aperçu — maquette visuelle" affiché dans le prototype — à retirer une fois l'app connectée à de vraies données… |
-| `RowIcon` | Carré arrondi coloré associé à un type de ligne (dossier, fichier…) — §6.5. |
+| `RowIcon` | Carré arrondi coloré associé à un type de ligne (dossier, fichier…) — §6.5. Délègue à IconChip, qui bascule sur l'illustration… |
 | `RowMenu` | Icône "…" en fin de ligne, ouvre un menu contextuel (à implémenter côté appli). |
 | `Screen` | Conteneur d'un écran principal — `<section class="screen is-active">`. Un seul écran est monté à la fois côté React (le… |
 | `Select` | Select du design system — §6.6. Le style est porté par le contrôle lui-même, il ne dépend plus d'un <Field> parent. |
@@ -80,31 +82,43 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 
 | Composant | Rôle |
 |---|---|
-| `AccessRestrictionModal` | Restriction d'accès d'un objet précis — GET/POST `.../access/`. Deux règles du backend que l'écran doit rendre lisibles plutôt… |
+| `AccessRightsTable` | Tableau de droits d'accès — un composant réutilisé tel quel pour une vraie dataroom (dossiers + documents) ET pour un Template… |
 | `AppearanceTab` | Personnalisation → Apparence (index_16.html #sub3-apparence). |
 | `ConfirmModal` | Confirmation d'une action, avec son énoncé complet. |
 | `DashboardGrid` | — |
 | `DashboardTabs` | Barre d'onglets des écrans personnalisés. |
+| `DataroomMetadataPanel` | — |
 | `DocumentPreview` | Aperçu du contenu d'une pièce, affiché dans le volet document. |
 | `DocumentSlideover` | Volet latéral de fiche document — index_16.html #doc-slideover. |
 | `Explorer` | Layout deux colonnes (arbre + panneau de documents) — §6.8. L'ouverture des noeuds est gérée ici (état purement UI) ; la… |
+| `GreyLabelStatementModal` | — |
 | `IdentityTab` | Personnalisation → Identité (index_16.html #sub3-identite). |
+| `MetadataSchemaTab` | — |
 | `Modal` | Overlay + boîte modale — §6.11. `open` pilote `.overlay.is-active` (le prototype le faisait en JS via openModal()/closeModal()). |
-| `ModulesTab` | Personnalisation → Modules & modèles (index_16.html #sub3-modules). |
+| `ModulesTab` | Personnalisation → Modules (index_16.html #sub3-modules). |
+| `NamedUsersEditor` | Puces d'utilisateurs nommés, avec un champ d'ajout TOUJOURS visible en dessous. |
 | `NavBar` | Barre d'onglets horizontale — navigation « en haut » ou « en bas ». |
 | `NewDataroomModal` | Modale "Nouveau dossier" — index_16.html #modal-new. |
 | `NewFolderModal` | Modale "Nouveau dossier" — même patron que NewDataroomModal, un seul champ : le dossier parent est déjà déterminé par… |
+| `NewOfficeModal` | Création d'un office ET de son premier admin, dans le même geste que le backend (POST /api/hyperadmin/offices/ fait les deux… |
+| `NewPortfolioModal` | — |
+| `NewTemplateFolderModal` | Modale "Nouveau dossier" d'un Template — même patron exact que NewFolderModal (dataroom réelle) : le dossier parent est déjà… |
+| `NewTemplateModal` | Création ou modification d'un modèle de dataroom (Template) — juste son nom et sa description ; l'arborescence de dossiers se… |
 | `OfficeContentTab` | — |
+| `OfficeModulesModal` | Modules activés pour UN office (PATCH .../enabled_module_slugs, remplacement complet de la liste — pas d'ajout/retrait… |
 | `OfficeUserModal` | Ajout d'un utilisateur à l'étude, dans ses deux formes. |
 | `QACard` | Carte question/réponse — §6.10. |
+| `RenameFolderModal` | Popup dédié UNIQUEMENT au renommage — ouvert depuis le menu "⋮" d'un nœud de `Explorer`, dans une vraie dataroom comme dans un… |
 | `SearchPalette` | Palette de recherche globale (⌘K / Ctrl+K), ouverte depuis la barre de la topbar. |
-| `Sidebar` | Conteneur latéral fixe, 236px — §6.14. Pas de repli mobile dans le design system d'origine (dette notée en §7 point 5) : à… |
+| `Sidebar` | Conteneur latéral fixe, largeur --nav-w — §6.14. Se replie en rail d'icônes (62px) à la demande, et de lui-même sous 1024px :… |
 | `Slideover` | Panneau latéral (fiche document) — §6.12. `open` pilote `.slideover.is-active`. |
 | `TableCard` | Enveloppe une <table> dans .card > .table-wrap — §6.5. Passer les <tr> déjà composés en children (typiquement via… |
 | `TagPicker` | Sélecteur de tags d'un élément (dossier ou pièce) : les pastilles posées, une croix pour retirer, un bouton « + » qui ouvre le… |
 | `TemplateGallery` | Galerie des dispositions prêtes à l'emploi. |
+| `TemporaryLinkModal` | — |
 | `TokenEditor` | Toute la grille de couleurs, générée depuis TOKEN_SCHEMA et regroupée par TOKEN_GROUPS — équivalent React de renderGroups()… |
 | `Topbar` | — |
+| `UserRestrictionsModal` | Restrictions d'accès qui nomment (ou pourraient nommer) cet utilisateur — ouverte depuis le bouton "Restrictions" d'une ligne… |
 | `WidgetLibrary` | Bibliothèque des widgets disponibles, en panneau latéral. |
 
 ## Gabarits — structure de page
@@ -117,13 +131,18 @@ se lance avec `npm run dev` puis `?view=ui-kit`.
 
 | Composant | Rôle |
 |---|---|
-| `DataroomDetailScreen` | Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents / Q&R / Membres / Historique). |
+| `AuditTrailScreen` | — |
+| `DataroomDetailScreen` | Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents / Informations / Q&R / Droits d'accès / Historique). |
 | `DataroomsListScreen` | Écran "Dossiers" (liste) — index_16.html #screen-datarooms. |
 | `HomeScreen` | Écran d'accueil / dashboard — voir index_16.html #screen-dashboard. |
+| `HyperadminOfficesScreen` | Liste des offices — GET /api/hyperadmin/offices/. Même patron que OfficeUsersScreen (barre d'outils, « afficher N », tableau,… |
 | `LoginScreen` | Écran de connexion — §6.15. Composant pur : `onSubmit` reçoit identifiant + mot de passe, à brancher sur POST /api/login/… |
 | `MfaScreen` | Deuxième temps de la connexion (MFA, TOTP) — même structure à deux panneaux que LoginScreen (§6.15), pour rester dans la même… |
 | `ModuleScreen` | Écran d'un module activé pour l'office. |
 | `OfficeUsersScreen` | Annuaire de l'étude — utilisateurs de l'office courant (GET /api/office-users/). |
+| `PortfolioDetailScreen` | — |
 | `PortfoliosScreen` | Écran "Portefeuilles" — index_16.html #screen-portfolios. |
 | `SettingsScreen` | Écran Personnalisation — index_16.html #screen-settings. |
 | `StatsScreen` | Écran Statistiques & facturation — index_16.html #screen-stats. |
+| `TemplateDetailScreen` | Arborescence d'un modèle de dataroom (Template) — plus d'Explorer ni de toggle Arborescence/Droits d'accès (retirés le… |
+| `TemplatesListScreen` | Liste des modèles de dataroom de l'office — GET /api/templates/. Même patron que OfficeUsersScreen (barre d'outils, « afficher… |

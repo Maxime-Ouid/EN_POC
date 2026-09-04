@@ -15,11 +15,17 @@ import { TabStrip } from '../molecules/TabStrip';
 import { TagFilter } from '../molecules/TagFilter';
 import { DocumentSlideover } from '../organisms/DocumentSlideover';
 import { Explorer } from '../organisms/Explorer';
+import { DataroomMetadataPanel } from '../organisms/DataroomMetadataPanel';
+import { RowActions } from '../molecules/RowActions';
+import type { RowAction } from '../molecules/RowActions';
 import { QACard } from '../organisms/QACard';
+import { QAPanel } from '../organisms/QAPanel';
 import { TagPicker } from '../organisms/TagPicker';
 import { useTopbarSlots } from '../templates/topbarSlots';
 import type { PillKind } from '../atoms/Pill';
 import type { TabDef } from '../molecules/TabStrip';
+import type { DataroomMetadataPanelProps } from '../organisms/DataroomMetadataPanel';
+import type { QAPanelProps } from '../organisms/QAPanel';
 import type { DocumentActivityEntry, DocumentCustomField } from '../organisms/DocumentSlideover';
 import type { TreeNodeData } from '../organisms/Explorer';
 import type { TagColor } from '../atoms/Tag';
@@ -40,6 +46,18 @@ export interface DataroomDocument {
   customFields?: DocumentCustomField[];
   /** Dernières actions sur la pièce (consultations, dépôts). */
   activity?: DocumentActivityEntry[];
+  /**
+   * Jamais ouverte par l'utilisateur courant — §11.1, « compteurs et mise en
+   * évidence des documents non consultés ». Propre à CHAQUE lecteur : deux
+   * personnes ne voient pas les mêmes pièces en gras.
+   */
+  unread?: boolean;
+  /**
+   * Pièce désactivée (§11.1) : elle reste au dossier et à l'historique, mais
+   * n'est plus consultable. À distinguer d'une suppression, qui efface, et de
+   * l'état « non applicable » (§4.7), qui dit qu'il n'y a jamais eu de pièce.
+   */
+  disabled?: boolean;
 }
 
 export interface QAEntry {
@@ -49,6 +67,9 @@ export interface QAEntry {
   meta: string;
   body: string;
   answer?: { author: string; text: string; time: string };
+  /** Pièce sur laquelle la question porte — §4.3, « ou sur un document en
+      particulier ». Absent = la question porte sur toute la dataroom. */
+  document?: string;
 }
 
 export interface MemberRow {
@@ -131,10 +152,44 @@ export interface DataroomDetailScreenProps {
   onDocumentTagsChange?: (documentId: string, tagIds: number[]) => void | Promise<void>;
   /** Création à la volée, partagée par les deux sélecteurs. */
   onCreateTag?: (name: string, color: TagColor) => Promise<TagRef>;
+  /**
+   * Méta-données du dossier (§4.6) — champs communs de l'office et champs
+   * propres à ce dossier. Absent = l'onglet « Informations » n'apparaît pas :
+   * mieux vaut pas d'onglet qu'un onglet vide dans les aperçus du kit
+   * d'interface, qui n'ont pas de schéma d'office derrière eux.
+   */
+  metadata?: DataroomMetadataPanelProps;
+  /**
+   * Ouvre la création d'un lien temporaire de téléchargement (§3.2). Absent =
+   * le bouton reste visible mais inerte, comme avant ce lot.
+   */
+  onTemporaryLink?: () => void;
+  /** Export ZIP du dossier ou de la sélection (§4.1). */
+  onExportZip?: () => void;
+  /** Ouvre le partage avec un autre office (§4.1). */
+  onShareWithOffice?: () => void;
+  /** Ouvre le cycle de vie du dossier — clôture, archivage, conservation (§4.1). */
+  onLifecycle?: () => void;
+  /** Ouvre la synthèse d'activité PDF du dossier (§11.1). */
+  onActivityReport?: () => void;
+  /**
+   * Commandes de l'onglet Q/R au-delà de la simple réponse (§4.3 : poser,
+   * modérer, désactiver, supprimer, exporter). Absent = l'onglet garde la
+   * liste simple d'avant ce lot, ce qui laisse valides les aperçus du kit.
+   */
+  qa?: Omit<QAPanelProps, 'entries' | 'onReply'>;
+  /** État de chaque question, indexé par id — complète `qaEntries`. */
+  qaModeration?: Record<string, QAPanelProps['entries'][number]['moderation']>;
+  /**
+   * Actions du menu « ⋮ » d'une pièce (§4.2). L'appelant les compose parce que
+   * lui seul sait lesquelles sont permises et ce qu'elles déclenchent ; absent,
+   * la colonne garde l'icône d'ouverture d'avant ce lot.
+   */
+  documentActions?: (doc: DataroomDocument) => RowAction[];
 }
 
 // Écran détail dataroom — index_16.html #screen-dataroom (onglets Documents /
-// Q&R / Membres / Historique). L'état d'onglet, de noeud d'arbre sélectionné et
+// Informations / Q&R / Droits d'accès / Historique). L'état d'onglet, de noeud d'arbre sélectionné et
 // d'ouverture du volet document est géré ici (état d'écran pur) ; les données
 // (tree, documentsByFolder, qaEntries…) viennent des props — à alimenter par
 // les vrais endpoints (GET /api/datarooms/<id>/documents/ etc., déjà en place
@@ -164,6 +219,15 @@ export function DataroomDetailScreen({
   onTagsChange,
   onDocumentTagsChange,
   onCreateTag,
+  metadata,
+  onTemporaryLink,
+  onExportZip,
+  onShareWithOffice,
+  onLifecycle,
+  onActivityReport,
+  qa,
+  qaModeration,
+  documentActions,
 }: DataroomDetailScreenProps) {
   const slots = useTopbarSlots();
   const [activeTab, setActiveTab] = useState('sub-docs');
@@ -175,6 +239,10 @@ export function DataroomDetailScreen({
   // puis passer à un autre sous-dossier ne doit pas y masquer silencieusement
   // des pièces.
   const [docTagFilter, setDocTagFilter] = useState<number[]>([]);
+  /* Filtre « non consultés » (§11.1). Même portée que le filtre par tag : il ne
+     survit pas au changement de rubrique, sinon on croirait un sous-dossier
+     vide alors qu'on n'en voit qu'une partie. */
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
   // Une NOUVELLE demande de ciblage (nonce différent) ouvre le dossier visé et
   // referme le volet resté ouvert sur une pièce d'un autre dossier. Dépendance
@@ -193,6 +261,7 @@ export function DataroomDetailScreen({
   function selectFolder(id: string) {
     setActiveFolderId(id);
     setOpenDoc(null);
+    setShowUnreadOnly(false);
     setDocTagFilter([]);
   }
 
@@ -203,6 +272,10 @@ export function DataroomDetailScreen({
 
   const tabs: TabDef[] = [
     { key: 'sub-docs', icon: 'folder', label: 'Documents' },
+    // « Informations » se place juste après les documents et avant les
+    // échanges : c'est la carte d'identité du dossier, on la lit avant d'y
+    // travailler. L'onglet disparaît quand aucun schéma n'est fourni.
+    ...(metadata ? [{ key: 'sub-info', icon: 'list', label: 'Informations' }] : []),
     { key: 'sub-qa', icon: 'msg', label: 'Questions / Réponses', count: qaEntries.length },
     { key: 'sub-members', icon: 'lock', label: 'Droits d\'accès' },
     { key: 'sub-history', icon: 'clock', label: 'Historique' },
@@ -216,13 +289,19 @@ export function DataroomDetailScreen({
   // Filtrage en OU, côté client : l'arborescence entière est déjà chargée (voir
   // useDataroomTree), un aller-retour serveur par case cochée n'apporterait
   // rien qu'un délai.
-  const activeDocs = useMemo(
-    () =>
-      docTagFilter.length === 0
-        ? folderDocs
-        : folderDocs.filter(doc => doc.tags?.some(t => docTagFilter.includes(t.id))),
-    [folderDocs, docTagFilter],
-  );
+  const activeDocs = useMemo(() => {
+    let docs = folderDocs;
+    if (docTagFilter.length > 0) {
+      docs = docs.filter(doc => doc.tags?.some(t => docTagFilter.includes(t.id)));
+    }
+    if (showUnreadOnly) docs = docs.filter(doc => doc.unread);
+    return docs;
+  }, [folderDocs, docTagFilter, showUnreadOnly]);
+
+  /** Compteur du dossier ouvert — le §11.1 demande le compteur ET la mise en
+      évidence : sans le premier, on ne sait pas qu'il reste à lire ; sans la
+      seconde, on ne sait pas quoi. */
+  const unreadCount = useMemo(() => folderDocs.filter(d => d.unread).length, [folderDocs]);
 
   /* Le repère d'écran remonte dans la topbar (01/09/2026) : c'est le seul
      endroit qui dit où l'on se trouve depuis le retrait des titres de page, et
@@ -261,18 +340,42 @@ export function DataroomDetailScreen({
           </ButtonRow>
         </div>
         <ButtonRow>
-          <Button size="sm">
+          <Button size="sm" onClick={onTemporaryLink}>
             <svg className="icon">
               <use href="#i-link" />
             </svg>
             Lien temporaire
           </Button>
-          <Button size="sm">
+          <Button size="sm" onClick={onExportZip}>
             <svg className="icon">
               <use href="#i-zip" />
             </svg>
             Export ZIP
           </Button>
+          {onShareWithOffice && (
+            <Button size="sm" onClick={onShareWithOffice}>
+              <svg className="icon">
+                <use href="#i-building" />
+              </svg>
+              Partager avec un office
+            </Button>
+          )}
+          {onActivityReport && (
+            <Button size="sm" onClick={onActivityReport}>
+              <svg className="icon">
+                <use href="#i-file" />
+              </svg>
+              Synthèse d'activité
+            </Button>
+          )}
+          {onLifecycle && (
+            <Button size="sm" onClick={onLifecycle}>
+              <svg className="icon">
+                <use href="#i-clock" />
+              </svg>
+              Cycle de vie
+            </Button>
+          )}
           <Button variant="accent" size="sm" onClick={() => onAddDocuments?.(activeFolderId)}>
             <svg className="icon">
               <use href="#i-plus" />
@@ -298,6 +401,18 @@ export function DataroomDetailScreen({
             title={activeFolderLabel}
             actions={
               <>
+                {unreadCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant={showUnreadOnly ? 'accent' : 'default'}
+                    onClick={() => setShowUnreadOnly(v => !v)}
+                  >
+                    <svg className="icon">
+                      <use href="#i-eye" />
+                    </svg>
+                    {unreadCount} non consulté{unreadCount > 1 ? 's' : ''}
+                  </Button>
+                )}
                 {tagCatalog.length > 0 && (
                   <TagFilter
                     options={tagCatalog}
@@ -338,16 +453,31 @@ export function DataroomDetailScreen({
                   {activeDocs.map(doc => (
                     <tr
                       key={doc.id}
-                      className={doc.muted ? undefined : 'clickable'}
-                      onClick={doc.muted ? undefined : () => setOpenDoc(doc)}
+                      className={doc.muted || doc.disabled ? undefined : 'clickable'}
+                      onClick={doc.muted || doc.disabled ? undefined : () => setOpenDoc(doc)}
                     >
                       <RowName
                         icon="file"
-                        iconBg={doc.muted ? 'var(--surface-alt)' : 'var(--critical-bg)'}
-                        iconColor={doc.muted ? 'var(--ink-400)' : 'var(--critical)'}
-                        muted={doc.muted}
+                        iconBg={doc.muted || doc.disabled ? 'var(--surface-alt)' : 'var(--critical-bg)'}
+                        iconColor={doc.muted || doc.disabled ? 'var(--ink-400)' : 'var(--critical)'}
+                        muted={doc.muted || doc.disabled}
                       >
-                        {doc.name}
+                        {/* Non consultée : point de couleur devant le nom — la
+                            mise en évidence demandée au §11.1, portée par un
+                            signe et non par une nuance de graisse invisible
+                            dans un tableau. Désactivée : nom barré, la pièce
+                            reste au dossier mais ne s'ouvre plus. */}
+                        {doc.unread && !doc.disabled && (
+                          <span className="unread-dot" aria-label="Non consulté" />
+                        )}
+                        <span
+                          style={{
+                            fontWeight: doc.unread && !doc.disabled ? 700 : undefined,
+                            textDecoration: doc.disabled ? 'line-through' : undefined,
+                          }}
+                        >
+                          {doc.name}
+                        </span>
                       </RowName>
                       <td>
                         <Pill kind={doc.status.kind}>{doc.status.label}</Pill>
@@ -369,7 +499,20 @@ export function DataroomDetailScreen({
                       <td className={doc.muted ? 'dim' : undefined}>{doc.addedBy}</td>
                       <td className="dim">{doc.date}</td>
                       <td className="mono dim">{doc.size}</td>
-                      {doc.muted ? <td /> : (
+                      {/* L'icône « œil » n'était qu'un rappel que la ligne
+                          s'ouvre — elle ne cliquait rien. Remplacée par le vrai
+                          menu de pièce (§4.2 : renommer, déplacer, supprimer,
+                          changer l'état) quand l'appelant en fournit un. Une
+                          pièce annoncée mais non déposée garde son menu : c'est
+                          justement là qu'on change son état. */}
+                      {documentActions ? (
+                        <RowActions
+                          label={`Actions sur ${doc.name}`}
+                          actions={documentActions(doc)}
+                        />
+                      ) : doc.muted ? (
+                        <td />
+                      ) : (
                         <td>
                           <svg className="icon" style={{ color: 'var(--ink-400)' }}>
                             <use href="#i-eye" />
@@ -378,10 +521,12 @@ export function DataroomDetailScreen({
                       )}
                     </tr>
                   ))}
-                  {activeDocs.length === 0 && docTagFilter.length > 0 && (
+                  {activeDocs.length === 0 && (docTagFilter.length > 0 || showUnreadOnly) && (
                     <tr>
                       <td colSpan={7} className="dim tiny" style={{ textAlign: 'center', padding: 18 }}>
-                        Aucune pièce de ce dossier ne porte les tags sélectionnés.
+                        {showUnreadOnly && docTagFilter.length === 0
+                          ? 'Toutes les pièces de ce dossier ont été consultées.'
+                          : 'Aucune pièce de ce dossier ne correspond à ces filtres.'}
                       </td>
                     </tr>
                   )}
@@ -396,18 +541,37 @@ export function DataroomDetailScreen({
         </Explorer>
       </Subscreen>
 
+      {metadata && (
+        <Subscreen active={activeTab === 'sub-info'}>
+          <DataroomMetadataPanel {...metadata} />
+        </Subscreen>
+      )}
+
       <Subscreen active={activeTab === 'sub-qa'}>
-        {qaEntries.map(qa => (
-          <QACard
-            key={qa.id}
-            status={qa.status}
-            object={qa.object}
-            meta={qa.meta}
-            body={qa.body}
-            answer={qa.answer}
-            onReply={qa.answer ? undefined : text => onReply?.(qa.id, text)}
+        {qa ? (
+          <QAPanel
+            {...qa}
+            entries={qaEntries.map(entry => ({
+              ...entry,
+              // Sans état de modération connu, une question affichée est une
+              // question publiée : c'est l'état de toutes celles d'avant ce lot.
+              moderation: qaModeration?.[entry.id] ?? 'publiee',
+            }))}
+            onReply={(id, text) => onReply?.(id, text)}
           />
-        ))}
+        ) : (
+          qaEntries.map(entry => (
+            <QACard
+              key={entry.id}
+              status={entry.status}
+              object={entry.object}
+              meta={entry.meta}
+              body={entry.body}
+              answer={entry.answer}
+              onReply={entry.answer ? undefined : text => onReply?.(entry.id, text)}
+            />
+          ))
+        )}
       </Subscreen>
 
       <Subscreen active={activeTab === 'sub-members'}>

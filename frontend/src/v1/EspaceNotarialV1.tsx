@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   AppShell,
   V1AdminsParDossierScreen,
+  V1AnnuaireClientsScreen,
   V1AnnuaireEtudeScreen,
   V1DossiersScreen,
   V1DuplicationsEtudesScreen,
@@ -11,12 +12,17 @@ import {
   V1PersonnalisationScreen,
   V1PlaceholderScreen,
   V1QuiEstConnecteScreen,
+  V1StatsConnexionsScreen,
   V1StatsConsultationsScreen,
+  V1StructmakerScreen,
+  V1SupportScreen,
   V1TransfertDataScreen,
+  V1TransfertFichiersScreen,
   type ModulesTabProps,
   type OfficeContent,
   type TenantOption,
   type V1AdminDelegueRow,
+  type V1ClientRow,
   type V1ConnecteRow,
   type V1DossierRow,
   type V1EspaceClientRow,
@@ -44,6 +50,7 @@ export interface EspaceNotarialV1Props {
   espacesClientsTotal: number;
   annuaire: V1MembreRow[];
   annuaireTotal: number;
+  annuaireClients: V1ClientRow[];
   adminsParDossier: V1AdminDelegueRow[];
   adminsTotal: number;
   connectes: V1ConnecteRow[];
@@ -154,6 +161,10 @@ export function EspaceNotarialV1(props: EspaceNotarialV1Props) {
         <V1AnnuaireEtudeScreen rows={props.annuaire} total={props.annuaireTotal} />
       )}
 
+      {screen === 'annuaire-clients' && (
+        <V1AnnuaireClientsScreen rows={props.annuaireClients} />
+      )}
+
       {screen === 'admins-par-dossier' && (
         <V1AdminsParDossierScreen rows={props.adminsParDossier} total={props.adminsTotal} />
       )}
@@ -168,6 +179,16 @@ export function EspaceNotarialV1(props: EspaceNotarialV1Props) {
       )}
 
       {screen === 'stats-consultations' && <V1StatsConsultationsScreen />}
+
+      {screen === 'stats-connexions' && <V1StatsConnexionsScreen />}
+
+      {screen === 'transfert-fichiers' && <V1TransfertFichiersScreen />}
+
+      {screen === 'support' && (
+        <V1SupportScreen email={props.supportEmail} telephone={props.supportTelephone} />
+      )}
+
+      {screen === 'outils-structmaker' && <V1StructmakerScreen />}
 
       {screen === 'outils-transfert-data' && (
         <V1TransfertDataScreen

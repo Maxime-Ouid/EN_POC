@@ -363,8 +363,8 @@ export function DashboardGrid({
       // qu'en mode édition (voir WidgetFrame), donc hors édition ce sélecteur ne
       // désigne rien — ceinture et bretelles avec `isDraggable`.
       draggableHandle=".widget-editing"
-      // Ce qui doit rester cliquable malgré la saisie : le bouton de retrait.
-      draggableCancel=".widget-remove"
+      // Ce qui doit rester cliquable malgré la saisie : les boutons du cadre.
+      draggableCancel=".widget-remove,.widget-config"
       resizeHandles={['se']}
       compactType={null}
       preventCollision

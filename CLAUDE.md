@@ -643,6 +643,15 @@ dispositif préconfiguré : leur premier login demande un enrôlement (QR code).
       dataroom porté par le groupe plutôt que par le rôle) explicitement
       différées — voir `docs/journal.md` pour le détail complet et la
       discussion de conception qui a précédé l'implémentation.
+- [x] **Fiche de résultat enrichie dans la palette de recherche** (contenu,
+      dates, type, tags) — fusionné le 04/09/2026 depuis `front/maquettes-mvp`
+      (déjà du vrai backend, pas une maquette : `_accessible_stats`/
+      `_file_kind` dans `search_view`, mêmes contrôles d'accès que les
+      endpoints de lecture). **Widgets d'action rapide** de l'accueil
+      (`dashboard/actions.ts`, principe « aucune action menteuse ») et
+      **console hyperadmin réalignée sur l'AppShell** (3 sections de nav,
+      compteurs réels) fusionnés en même temps, déjà branchés sur du vrai —
+      voir `docs/journal.md` pour le détail de la fusion.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le

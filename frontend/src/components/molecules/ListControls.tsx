@@ -9,6 +9,13 @@ export interface ListControlsProps {
   search: string;
   onSearchChange?: (value: string) => void;
   perPageOptions?: number[];
+  /**
+   * `false` retire le champ de recherche et ne laisse que « afficher N » —
+   * pour les écrans dont le filtre est remonté dans la topbar (console
+   * hyperadmin). Deux champs de recherche visibles à la fois sur le même écran
+   * poseraient la question de savoir lequel filtre quoi.
+   */
+  showSearch?: boolean;
 }
 
 const DEFAULT_OPTIONS = [10, 25, 50, 100];
@@ -23,6 +30,7 @@ export function ListControls({
   search,
   onSearchChange,
   perPageOptions = DEFAULT_OPTIONS,
+  showSearch = true,
 }: ListControlsProps) {
   return (
     <div className="v1-list-controls">
@@ -44,23 +52,25 @@ export function ListControls({
         </Select>
         <span className="tiny dim">{unit}</span>
       </div>
-      <div className="field" style={{ minWidth: 240 }}>
-        {/* type="search", pas juste autoComplete="off" : Chrome ignore délibérément
-            autoComplete sur un input[type=text] qu'il classe "champ d'identifiant"
-            (heuristique interne à son gestionnaire de mots de passe, pas contournable
-            par cet attribut seul — constaté : un identifiant enregistré sur ce
-            sous-domaine se retrouvait injecté ici, filtrant le tableau à zéro
-            résultat). type="search" a un rôle sémantique distinct que Chrome exclut
-            entièrement de cette logique d'autofill. */}
-        <TextInput
-          type="search"
-          value={search}
-          placeholder="Rechercher..."
-          aria-label={`Rechercher parmi les ${unit}`}
-          autoComplete="off"
-          onChange={e => onSearchChange?.(e.target.value)}
-        />
-      </div>
+      {showSearch && (
+        <div className="field" style={{ minWidth: 240 }}>
+          {/* type="search", pas juste autoComplete="off" : Chrome ignore délibérément
+              autoComplete sur un input[type=text] qu'il classe "champ d'identifiant"
+              (heuristique interne à son gestionnaire de mots de passe, pas contournable
+              par cet attribut seul — constaté : un identifiant enregistré sur ce
+              sous-domaine se retrouvait injecté ici, filtrant le tableau à zéro
+              résultat). type="search" a un rôle sémantique distinct que Chrome exclut
+              entièrement de cette logique d'autofill. */}
+          <TextInput
+            type="search"
+            value={search}
+            placeholder="Rechercher..."
+            aria-label={`Rechercher parmi les ${unit}`}
+            autoComplete="off"
+            onChange={e => onSearchChange?.(e.target.value)}
+          />
+        </div>
+      )}
     </div>
   );
 }

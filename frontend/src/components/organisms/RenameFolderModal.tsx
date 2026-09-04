@@ -10,6 +10,10 @@ export interface RenameFolderModalProps {
   error?: string | null;
   onClose: () => void;
   onSubmit: (name: string) => void;
+  /** Titre de la fenêtre. Défaut : le renommage d'un dossier. */
+  title?: string;
+  /** Libellé du champ. Défaut : « Nom du dossier ». */
+  label?: string;
 }
 
 /**
@@ -18,7 +22,15 @@ export interface RenameFolderModalProps {
  * générique, l'appelant sait quel endpoint appeler). Les droits d'accès
  * restent dans `AccessRightsTable`, jamais ici (voir CLAUDE.md, 02/09/2026).
  */
-export function RenameFolderModal({ open, currentName, error, onClose, onSubmit }: RenameFolderModalProps) {
+export function RenameFolderModal({
+  open,
+  currentName,
+  error,
+  onClose,
+  onSubmit,
+  title = 'Renommer le dossier',
+  label = 'Nom du dossier',
+}: RenameFolderModalProps) {
   const [name, setName] = useState(currentName);
 
   // Repart du nom courant à chaque ouverture — pas de fuite d'un brouillon
@@ -37,7 +49,7 @@ export function RenameFolderModal({ open, currentName, error, onClose, onSubmit 
     <Modal
       open={open}
       onClose={onClose}
-      title="Renommer le dossier"
+      title={title}
       footer={
         <>
           <Button onClick={onClose}>Annuler</Button>
@@ -47,7 +59,7 @@ export function RenameFolderModal({ open, currentName, error, onClose, onSubmit 
         </>
       }
     >
-      <Field label="Nom du dossier">
+      <Field label={label}>
         <TextInput value={name} onChange={e => setName(e.target.value)} autoFocus />
       </Field>
       {error && (

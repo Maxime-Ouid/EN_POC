@@ -7,6 +7,11 @@
 
    Une rubrique disparaît de ce fichier le jour où son écran existe : la
    longueur de cette liste mesure exactement ce qui reste à relever côté client.
+
+   Sorties le 03/09/2026, parce qu'une matière établie ailleurs dans les
+   captures a permis de les reconstruire — chacune affichant à l'écran ce qui
+   reste supposé : Annuaire des clients, Statistiques de connexions, Transfert
+   de fichiers, Structmaker, Support.
    =========================================================================== */
 
 import type { V1PlaceholderScreenProps } from '../components';
@@ -27,15 +32,6 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
   'rapports-maj': {
     known: [{ label: 'Source', value: 'Libellé du sous-menu Dossiers uniquement' }],
   },
-  'annuaire-clients': {
-    role: "Contacts extérieurs à l'étude, ajoutables comme membres d'un dossier.",
-    known: [
-      {
-        label: 'Trace indirecte',
-        value: "Existe comme onglet dans l'écran « Membres du dossier » (capture 114216), son contenu n'y est pas visible",
-      },
-    ],
-  },
   'annuaire-societes': {
     known: [{ label: 'Source', value: 'Libellé du sous-menu Annuaires uniquement' }],
   },
@@ -46,36 +42,19 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
   telechargements: {
     known: [
       { label: 'Source', value: 'Rubrique de premier niveau, jamais dépliée sur les captures' },
-      { label: 'Inconnu', value: "On ignore si cette rubrique a un sous-menu" },
-    ],
-  },
-  'stats-connexions': {
-    known: [
       {
-        label: 'Hypothèse',
-        value: "Probablement le même formulaire période/utilisateurs que « Statistiques de consultations » — à vérifier, pas à supposer",
+        label: 'Piste',
+        value:
+          "La carte « Aide » de l'accueil (113344) distribue trois documents — manuel utilisateur, support d'utilisation, formulaire de création d'un accès administrateur : c'est le contenu le plus probable de la rubrique, sans preuve",
       },
+      { label: 'Inconnu', value: "On ignore si cette rubrique a un sous-menu" },
     ],
   },
   'suivi-exportations': {
     known: [{ label: 'Source', value: 'Libellé du sous-menu Activités uniquement' }],
   },
-  'transfert-fichiers': {
-    role: 'Envoyer ou recevoir des fichiers volumineux avec un client.',
-    known: [
-      {
-        label: 'Trace indirecte',
-        value: "Tuile « TRANSFERT de fichiers volumineux » sur l'accueil (113344) et entrée du menu client (113322)",
-      },
-      { label: 'Inconnu', value: "L'écran administrateur lui-même n'est sur aucune capture" },
-    ],
-  },
   'espace-promoteurs': {
     known: [{ label: 'Source', value: 'Rubrique de premier niveau, jamais ouverte sur les captures' }],
-  },
-  'outils-structmaker': {
-    role: "Importer l'arborescence complète d'un dossier Windows vers une dataroom.",
-    known: [{ label: 'Trace indirecte', value: "Descriptif de la tuile « Structmaker » de l'accueil (113344)" }],
   },
   'outils-controle-integrite': {
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
@@ -88,15 +67,5 @@ export const PLACEHOLDERS: Partial<Record<V1ScreenKey, V1PlaceholderScreenProps>
   },
   'outils-reader-csv': {
     known: [{ label: 'Source', value: 'Libellé du sous-menu Outils uniquement' }],
-  },
-  support: {
-    role: "Contact de l'équipe applicative et signalement d'incident.",
-    known: [
-      {
-        label: 'Trace indirecte',
-        value: "Carte « Support » de l'accueil : support.applicatif@paris.notaires.fr, 01.76.53.73.91, bouton « Envoyer un message »",
-      },
-      { label: 'Inconnu', value: "On ignore si la rubrique a un sous-menu" },
-    ],
   },
 };

@@ -11,6 +11,7 @@ import './styles/components.css'
 import './styles/dashboard.css'
 import App from './App.tsx'
 import { HyperadminApp } from './hyperadmin/HyperadminApp'
+import { applyHyperadminTheme } from './hyperadmin/nav'
 import { PrototypeDemo } from './PrototypeDemo'
 import { UiKit } from './uikit/UiKit'
 import { V1AppView } from './v1/V1AppView'
@@ -26,7 +27,17 @@ import { apiThemeTransport } from './api/theme'
 // prototype (index_16.html). La source de vérité reste le serveur : le
 // ThemeProvider recharge GET /api/tenant-theme/ juste après le montage, et
 // après chaque connexion (voir App.tsx).
-const initialTheme = applyThemeEarly();
+// hyperadmin.localhost est un hôte réservé (Office.RESERVED_SUBDOMAINS, voir
+// CLAUDE.md) : jamais un office, toujours le shell hyperadmin — prioritaire
+// sur tout `?view=`, qui n'a aucun sens ici (ni thème d'office ni maquette à
+// prévisualiser sur cet hôte).
+const isHyperadminHost = window.location.hostname === 'hyperadmin.localhost';
+
+// La console n'a pas de thème d'office à retrouver : sa disposition (barre
+// d'onglets) est imposée, et posée ici pour la même raison que le cache des
+// études — sans cela le premier rendu réserverait la largeur d'un rail vertical
+// avant de la reprendre.
+const initialTheme = isHyperadminHost ? applyHyperadminTheme() : applyThemeEarly();
 
 // Vues disponibles, en plus de l'application réelle (App.tsx) :
 //   ?view=ui-kit             la bibliothèque de composants, fiche par fiche
@@ -42,16 +53,13 @@ const view = params.get('view');
 const initialScreen = params.get('screen') as V1ScreenKey | null;
 const usesBackend = !view || view === 'v1-app';
 
-// hyperadmin.localhost est un hôte réservé (Office.RESERVED_SUBDOMAINS, voir
-// CLAUDE.md) : jamais un office, toujours le shell hyperadmin — prioritaire
-// sur tout `?view=`, qui n'a aucun sens ici (ni thème d'office ni maquette à
-// prévisualiser sur cet hôte).
-const isHyperadminHost = window.location.hostname === 'hyperadmin.localhost';
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider
       initialState={initialTheme}
+      // La console n'est pas un espace personnalisable : sa disposition ne doit
+      // ni être relue du cache du navigateur ni y être écrite.
+      persist={!isHyperadminHost}
       // Le UI kit, les maquettes et le shell hyperadmin n'ont pas de thème
       // d'office à charger/persister : ils restent en personnalisation locale,
       // sans transport.

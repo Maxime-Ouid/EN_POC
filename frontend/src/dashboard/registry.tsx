@@ -16,6 +16,8 @@
 
 import type { WidgetDefinition } from './types';
 import {
+  ActionTileWidget,
+  ActionsRapidesWidget,
   ActiviteWidget,
   AnnuaireWidget,
   DossiersActifsWidget,
@@ -27,7 +29,6 @@ import {
   QuestionsEnAttenteWidget,
   QuestionsWidget,
   QuiEstConnecteWidget,
-  RaccourcisWidget,
   StockageParEspaceWidget,
   StockageWidget,
 } from './widgets';
@@ -60,6 +61,13 @@ const PANEL = { w: 6, h: 9 };
 const PANEL_MIN = { w: 3, h: 4 };
 const SIDE = { w: 3, h: 9 };
 const SIDE_MIN = { w: 2, h: 4 };
+
+/**
+ * Identifiant de la carte multi-actions. HÉRITÉ du widget « Raccourcis » qu'elle
+ * remplace — voir son entrée plus bas. Nommé ici parce que l'écran d'accueil a
+ * besoin de le reconnaître (c'est le seul widget qui se configure).
+ */
+export const ACTIONS_CARD_ID = 'raccourcis';
 
 export const WIDGETS: WidgetDefinition[] = [
   /* --- Chiffres ----------------------------------------------------------- */
@@ -212,17 +220,72 @@ export const WIDGETS: WidgetDefinition[] = [
     minSize: SIDE_MIN,
     render: ctx => <ModulesWidget {...ctx} />,
   },
+
+  /* --- Actions -------------------------------------------------------------
+     Ces widgets n'abrègent aucun écran : ils déclenchent un geste (voir
+     actions.ts). D'où `screen: null` partout ici — le cadre n'affiche donc pas
+     de lien « Tout voir », qui n'aurait aucune destination.
+
+     POURQUOI TROIS TUILES ET PAS UNE PAR ACTION. Le catalogue compte neuf
+     actions ; en faire neuf widgets doublerait la bibliothèque pour y mettre
+     neuf fois la même chose. Les trois retenues sont celles qu'on veut sous la
+     main en permanence, à côté des chiffres-clés ; les six autres se posent
+     dans la carte, qui existe pour ça.
+     ---------------------------------------------------------------------- */
   {
-    id: 'raccourcis',
-    name: 'Raccourcis',
-    desc: 'Accès direct aux écrans les plus utilisés.',
+    // Identifiant HÉRITÉ du widget « Raccourcis », volontairement conservé :
+    // c'est lui qui est écrit dans les accueils déjà rangés et dans les
+    // templates. Le renommer aurait fait disparaître la carte de tous les
+    // accueils qui la portaient (resolveWidgets écarte les inconnus), pour ne
+    // gagner qu'un nom de variable plus joli.
+    id: ACTIONS_CARD_ID,
+    name: 'Actions rapides',
+    desc: 'Les gestes du quotidien en un clic — contenu au choix.',
     icon: 'link',
-    category: 'office',
-    // Seul widget sans écran d'origine : il en ouvre plusieurs.
+    category: 'actions',
     screen: null,
     defaultSize: SIDE,
     minSize: SIDE_MIN,
-    render: ctx => <RaccourcisWidget {...ctx} />,
+    render: (ctx, { options }) => <ActionsRapidesWidget {...ctx} options={options} />,
+  },
+  {
+    id: 'action-dossier',
+    name: 'Créer un dossier',
+    desc: 'Tuile unique : ouvre la création d’un dossier.',
+    icon: 'folder',
+    category: 'actions',
+    screen: null,
+    defaultSize: STAT,
+    minSize: STAT_MIN,
+    bare: true,
+    action: 'dossier',
+    render: ctx => <ActionTileWidget {...ctx} actionKey="dossier" />,
+  },
+  {
+    id: 'action-depot',
+    name: 'Déposer un fichier',
+    desc: 'Tuile unique : ouvre le dernier dossier créé, prêt pour un dépôt.',
+    icon: 'clip',
+    category: 'actions',
+    screen: null,
+    defaultSize: STAT,
+    minSize: STAT_MIN,
+    bare: true,
+    action: 'depot',
+    render: ctx => <ActionTileWidget {...ctx} actionKey="depot" />,
+  },
+  {
+    id: 'action-invite',
+    name: 'Inviter un utilisateur',
+    desc: 'Tuile unique : ouvre l’invitation d’un membre ou d’un client.',
+    icon: 'send',
+    category: 'actions',
+    screen: null,
+    defaultSize: STAT,
+    minSize: STAT_MIN,
+    bare: true,
+    action: 'invite',
+    render: ctx => <ActionTileWidget {...ctx} actionKey="invite" />,
   },
 ];
 
@@ -236,6 +299,7 @@ export const WIDGET_CATEGORIES: { key: WidgetDefinition['category']; label: stri
   { key: 'suivi', label: 'Suivi' },
   { key: 'listes', label: 'Listes' },
   { key: 'office', label: 'Office' },
+  { key: 'actions', label: 'Actions' },
 ];
 
 /* --- Couverture des écrans -------------------------------------------------

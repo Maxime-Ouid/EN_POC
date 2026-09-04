@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { IconChip } from '../atoms/IconChip';
 
 export interface StatCardProps {
   label: string;
@@ -18,11 +19,7 @@ export function StatCard({ label, value, icon, iconBg, iconColor, delta, sub }: 
         <span className="stat-label" style={{ margin: 0 }}>
           {label}
         </span>
-        <div className="stat-icon" style={{ background: iconBg, color: iconColor }}>
-          <svg className="icon">
-            <use href={`#i-${icon}`} />
-          </svg>
-        </div>
+        <IconChip icon={icon} bg={iconBg} color={iconColor} chip="stat-icon" />
       </div>
       <div className="stat-value mono">{value}</div>
       {delta && (

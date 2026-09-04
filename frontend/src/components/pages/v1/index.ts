@@ -5,6 +5,7 @@
    composants et les tokens du design system V2 — donc personnalisables par
    office comme le reste de l'application. */
 export * from './V1AdminsParDossierScreen';
+export * from './V1AnnuaireClientsScreen';
 export * from './V1AnnuaireEtudeScreen';
 export * from './V1DossiersScreen';
 export * from './V1DuplicationsEtudesScreen';
@@ -14,5 +15,9 @@ export * from './V1HomeScreen';
 export * from './V1PersonnalisationScreen';
 export * from './V1PlaceholderScreen';
 export * from './V1QuiEstConnecteScreen';
+export * from './V1StatsConnexionsScreen';
 export * from './V1StatsConsultationsScreen';
+export * from './V1StructmakerScreen';
+export * from './V1SupportScreen';
 export * from './V1TransfertDataScreen';
+export * from './V1TransfertFichiersScreen';

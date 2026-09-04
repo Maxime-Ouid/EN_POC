@@ -2608,6 +2608,192 @@ session si le code a bougé.
     d'accès en OU) est construit pour s'y prêter le moment venu, mais rien
     de cette évolution n'est implémenté ici.
 
+## Fusion du 04/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/maquettes-mvp`
+
+Branche livrée par un collègue (Jean-Marie Bruce), annoncée comme partant de `7f34e52`.
+Contenu : logo par office, fiche de résultat enrichie dans la palette de recherche, cinq
+écrans V1 sortis de leurs placeholders, console hyperadmin réalignée sur l'AppShell avec
+des widgets d'action rapide, et quatre lots de maquettes MVP pures (exigences AMOA encore
+absentes du backend).
+
+**⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-04-09`**
+(pointant sur `8c9f401`, commit qui rassemble le chantier Groupes de droits + le correctif
+de création de dataroom — commité en premier, voir plus bas). En cas de souci découvert
+avant vérification complète, `git reset --hard back/EN_evolution_suite-backup-04-09`.
+
+**Vérification préalable demandée par l'utilisateur : ce n'était PAS un fast-forward,
+contrairement à ce que l'annonce du collègue aurait pu laisser supposer.** `7f34e52` est
+bien le vrai merge-base (confirmé par `git merge-base`), mais `back/EN_evolution_suite`
+portait déjà 2 commits que `front/maquettes-mvp` n'avait pas : `55e396e` (éléments repris
+de `front/templates-hyperadmin-ui`, dont une AUTRE implémentation indépendante du logo et
+du TOTP préconfiguré pour hyperadmin) et `6d9db46` (correctif autofill, rôle à la création
+d'office). `front/maquettes-mvp`, elle, portait 10 commits inconnus de
+`back/EN_evolution_suite`. Un `git merge --ff-only` aurait donc échoué — traité comme une
+vraie fusion à 3 points, avec conflits à résoudre à la main, pas comme une avance rapide.
+
+**Comparaison demandée sur le logo — implémentations IDENTIQUES, celle déjà en place
+gardée telle quelle.** `_logo_key`/`_logo_public_url`/`_serialize_tenant_config`/
+`tenant_config`/`tenant_logo_view` (`backend/datarooms/views.py`), les constantes `LOGO_*`
+(`validators.py`) et `IdentityTab.tsx`/`saveTenantIdentity` (frontend) : comparaison
+directe (`git show <commit>:<fichier>` des deux côtés) — mêmes docstrings au mot près,
+mêmes variables, même logique, visiblement issues de la même source à l'origine. Seule
+différence fonctionnelle trouvée : `back/EN_evolution_suite` utilise `_effective_role`
+(bypass hyperadmin) là où `front/maquettes-mvp` utilise encore
+`request.user.memberships.filter(office=office).first()` directement — un hyperadmin sans
+`OfficeMembership` réel se serait pris un 403 sur cette version. **Décision : gardé
+intégralement la version déjà en place** sur ces fichiers/fonctions précis, en résolvant
+chaque conflit textuel en sa faveur plutôt qu'en fusionnant les deux textes.
+
+**Migration 0008 : vérifiée, pas supposée.** Déjà appliquée sur `default` et sur les 4
+bases tenant locales (officea/officeb/officec/testmax) avant même de commencer — rien à
+rattraper. Aucune migration nouvelle côté `front/maquettes-mvp` (diff vide sur
+`backend/datarooms/migrations/` entre `7f34e52` et la branche).
+
+### Déroulé de la fusion
+
+1. **Commité en premier le travail en cours** (chantier Groupes de droits + correctif
+   création de dataroom, 22 fichiers jusque-là non commités dans cette session) — commit
+   `8c9f401` — avant toute fusion : un `git merge` sur un arbre aussi chargé aurait été
+   dangereux à arbitrer en cas de conflit.
+2. `git merge origin/front/maquettes-mvp --no-commit --no-ff` : 10 fichiers en conflit
+   réel (`CLAUDE.md`, `backend/datarooms/management/commands/seed_demo.py`,
+   `backend/datarooms/{tests,urls,validators,views}.py`, `frontend/src/App.tsx`,
+   `frontend/src/components/molecules/ListControls.tsx`,
+   `frontend/src/components/organisms/index.ts`,
+   `frontend/src/components/pages/SettingsScreen.tsx`) — tous résolus à la main, aucune
+   résolution automatique globale (`--ours`/`--theirs`).
+   - `urls.py`/`validators.py`/`tests.py`/`views.py` : conflits d'imports/docstrings
+     purement additifs (Groupes d'un côté, logo/TOTP repris de l'autre) — gardé les deux
+     ensembles réunis, sauf sur les fonctions logo (voir décision ci-dessus).
+   - `seed_demo.py` : même genre de doublon que le logo — TOTP préconfiguré pour
+     hyperadmin ajouté indépendamment des deux côtés (code identique), gardé le
+     commentaire avec provenance (`back/EN_evolution_suite`).
+   - `ListControls.tsx` : conflit facile — `front/maquettes-mvp` ajoute un prop
+     `showSearch` (masque la recherche pour les écrans dont le filtre est remonté en
+     topbar, dont la console hyperadmin) autour du même bloc où `type="search"` avait été
+     ajouté le jour même (correctif autofill). Les deux gardés ensemble
+     (`showSearch` autour du `<TextInput type="search">`).
+   - `organisms/index.ts` : conflit purement additif (deux listes d'exports
+     entrelacées), fusionné sans perte.
+   - `SettingsScreen.tsx` : les deux côtés ajoutaient chacun un NOUVEL onglet (« Groupes »
+     ici, « Méta-données » côté branche) — les deux onglets coexistent désormais (six au
+     total), types/props/JSX fusionnés à la main.
+   - `App.tsx` (le plus gros conflit, 3 blocs) : imports fusionnés (additifs), déclarations
+     d'état fusionnées (les miennes + tout le lot d'états des maquettes MVP — portefeuille,
+     métadonnées, cycle de vie, panier, etc., tous documentés comme "aucun endpoint
+     derrière" par la branche elle-même). **Incohérence fonctionnelle trouvée APRÈS
+     résolution des conflits textuels, sans qu'aucun marqueur ne la signale** (piège déjà
+     rencontré à la fusion du 01/09, cherché volontairement cette fois) : un double bloc
+     `identity={{ ... onSave/saving/error/readOnly ... }}` pour `<SettingsScreen>` — les
+     deux côtés avaient chacun écrit un jeu complet de ces propriétés pour le même objet,
+     et l'auto-merge de Git les avait empilées l'une après l'autre sans conflit (clés
+     dupliquées dans un littéral objet : valide en JS, la dernière l'emporte
+     silencieusement). Gardé la version de la branche (déjà câblée sur `api.
+     saveTenantIdentity` + `session.refresh()` en ligne, utilisant `canManageOffice`) et
+     supprimé mon ancienne version (`saveIdentity`/`savingIdentity`/`identitySaveError`,
+     devenus du code mort) — trouvé en cherchant ensuite toute référence à
+     `canManageTemplates`, dont la déclaration avait disparu au même endroit sans marqueur
+     de conflit non plus : une ligne `canManage={canManageTemplates}` restait orpheline
+     dans le rendu de `GroupsScreen`, corrigée en `canManageOffice` (même prédicat,
+     `assignableRoles(currentOffice?.role).length > 0`, déjà décidé côté branche).
+   - `CLAUDE.md` : un seul conflit, mais énorme (2574 lignes) — HEAD portait `## État
+     actuel` (la structure réorganisée par la session `/init` du 03/09/2026, historique
+     déplacé dans ce journal), la branche portait encore l'ANCIENNE section `## État réel
+     du code` pré-réorganisation (elle avait divergé avant la réorg). Gardé intégralement
+     la structure réorganisée côté HEAD — reprendre la longue section de la branche
+     aurait réintroduit tout l'historique déjà déplacé ici. Le contenu réellement nouveau
+     de la branche (logo — déjà signalé identique — et les nouvelles fonctionnalités) est
+     documenté à la main dans cette entrée plutôt que ré-importé tel quel.
+3. `search_view`/`_dataroom_hit`/`_document_hit`/`_folder_hit` (fiche de résultat de
+   recherche) : **fusion automatique sans aucun conflit** — les signatures de ces fonctions
+   étaient inchangées côté `back/EN_evolution_suite` depuis le merge-base, l'ajout de la
+   branche (`_accessible_stats`, `_file_kind`, `_HIT_FIELDS`, `_folder_hit`) s'est appliqué
+   comme un pur ajout.
+
+### Ce qui était déjà « réel » côté branche (pas connecté après coup, déjà du vrai travail)
+
+- **Fiche de résultat de recherche** (`location`/`tags`/`document_count`/`folder_count`/
+  `created_at`/`last_activity`/`file_kind`/`role`/`email`) : déjà branchée sur
+  `_user_can_access`/`_level_visible` (un compteur ne révèle jamais le contenu d'une pièce
+  restreinte). Rien à connecter, juste à intégrer proprement — fait à l'étape 3 ci-dessus.
+- **Widgets d'action rapide** (`frontend/src/dashboard/actions.ts` + `QuickActionsModal.tsx`)
+  : catalogue avec principe explicite « aucune action menteuse », exécuté par
+  `runQuickAction` dans `App.tsx` — déjà branché sur mes VRAIS handlers actuels
+  (`setModalOpen(true)` pour « Créer un dossier », etc.), fusion automatique sans conflit.
+- **Console hyperadmin réalignée** (`HyperadminOfficesScreen.tsx`, compteurs
+  offices actifs/désactivés/modules activés) : calculés côté client à partir des VRAIES
+  données déjà chargées (`/api/hyperadmin/offices/`), rien à connecter. Le sélecteur de
+  comptes superadmin (mon propre travail du 04/09) et la nav à 3 sections de la branche
+  coexistent sans conflit dans `HyperadminApp.tsx`.
+
+### Les cinq écrans V1 — examinés un par un, rien à connecter
+
+`frontend/src/v1/` reste, par construction du projet, la maquette V1 branchée sur le VRAI
+backend là où un endpoint existe (`V1AppView.tsx`, accessible via `?view=v1-app` — sa
+propre docstring liste : connexion, identité de l'office, liste des dossiers, modules,
+apparence). Examiné pour chacun des 5 nouveaux écrans si un équivalent réel existait :
+- `V1AnnuaireClientsScreen` (annuaire clients, colonnes email/fonction/dernière connexion)
+  et `V1StatsConnexionsScreen` (stats de connexion) : **aucun équivalent réel** — pas de
+  modèle de contact client distinct d'`OfficeMembership`, pas de suivi de
+  session/connexion (audit trail non implémenté, item non coché de CLAUDE.md). Laissés sur
+  `V1_ANNUAIRE_CLIENTS`/données simulées de `v1/data.ts`, déjà honnêtement marqués comme
+  tels par la branche elle-même (bannière "Écran non reconstruit"/pastille "simulé").
+- `V1TransfertFichiersScreen`, `V1StructmakerScreen`, `V1SupportScreen` : idem, aucun
+  équivalent backend (transfert de fichiers volumineux hors dataroom, import d'arborescence
+  Windows, ticketing support) — laissés en l'état, déjà honnêtes sur leur propre statut
+  (bannières "Établi"/"Supposé"/"Inconnu" intégrées par la branche).
+- Les 4 lots de maquettes MVP (`161a311`/`d5c4b45`/`2fada03`/`8a9a550`) : laissés
+  INTOUCHÉS, aucun câblage tenté — conforme à l'instruction explicite de les garder comme
+  pure référence visuelle.
+
+### Vérifications
+
+- `npx tsc -b` : 0 erreur après résolution de tous les conflits.
+- `npm run lint` : 0 erreur, uniquement des avertissements déjà tolérés (même famille
+  qu'avant la fusion).
+- `npm run check:ds` : 237 fichiers vérifiés, aucun écart nouveau (53 hérités, inchangé).
+- `npm run build` : sans erreur.
+- `python manage.py test` : **207/207 tests verts** (183 avant le chantier Groupes + 18
+  tests Groupes + 6 tests search palette repris de la branche).
+- **Vérifié en Chrome réel**, poste par poste :
+  - Fiche de résultat de recherche : recherche « vente » sur officea, résultat réel
+    (« Vente Immeuble Rivoli », 2 pièces, dernière pièce le 26/08/2026) affiché à côté
+    d'un résultat simulé clairement étiqueté « SIMULÉ » / « n'existent pas en base ».
+  - Widgets d'action rapide : ajouté la carte « Actions rapides » à l'accueil d'alice,
+    clic sur « Créer un dossier » → ouvre bien la VRAIE modale de création de dataroom
+    (celle corrigée plus tôt dans la session). Widget retiré après vérification (voir
+    plus bas).
+  - Console hyperadmin : 3 sections de nav, compteurs réels (4 offices, 4 actifs, 1
+    module), écrans de mockup (Reporting consolidé) rendus sans erreur.
+  - Les 5 écrans V1 : les 5 rendus sans erreur (Annuaire clients, Transfert de fichiers,
+    Structmaker, Support, Statistiques de connexions), liste de dossiers réelle affichée
+    sur l'accueil V1 (HOLA, Other Dataroom, Folder Test Dataroom).
+  - **Scénario de démo rejoué en entier** : connexion `carla` + TOTP sur
+    `officea.localhost:5173`, bascule vers `officeb.localhost:5173` par le sélecteur
+    d'office **sans reconnexion ni MFA à ressaisir** (ticket SSO), données bien
+    distinctes entre les deux (Office A : 6 dossiers ; Office B : 1 dossier, répartition
+    par espace client République/Arsenal/Ivry) — aucune régression sur le point le plus
+    stratégique du projet.
+  - **Piège rencontré, sans lien avec la fusion** : react-grid-layout affiche un flash
+    transitoire de premier rendu (cartes en cascade, superposées) au tout premier paint
+    d'un tableau de bord — déjà documenté dans `dashboard.css`
+    ("WidthProvider rend un div VIDE au premier passage"), confirmé reproductible À
+    L'IDENTIQUE sur un compte SANS disposition personnalisée (bob, `dashboard=None`) —
+    ce n'est donc PAS une régression de cette fusion, juste plus visible qu'avant vu le
+    nombre de widgets désormais disponibles. Se corrige seul en 1-2 secondes.
+- **Nettoyage après vérification** : le widget « Actions rapides » ajouté à la disposition
+  d'accueil d'alice pour tester le clic a été retiré directement en base après coup (son
+  identifiant réel est `raccourcis`, pas `actions-rapides` — piège rencontré en le
+  cherchant pour le retirer), la disposition d'alice est revenue bit à bit à son état
+  d'avant ce test.
+
+### Documentation
+
+`CLAUDE.md` : section « Modèle de données clé » et « État actuel » à mettre à jour si de
+nouveaux champs/endpoints changent l'état de référence (aucun nouveau modèle backend
+introduit par cette fusion — uniquement du frontend et des extensions de `search_view`
+déjà couvertes ci-dessus).
+
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
 **⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**

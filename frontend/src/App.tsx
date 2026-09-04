@@ -1,9 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AccountScreen,
   AppShell,
+  AuditTrailScreen,
   LoginScreen,
   MfaScreen,
   PortfoliosScreen,
+  PortfolioDetailScreen,
+  TemporaryLinkModal,
+  ExportZipModal,
+  ShareWithOfficeModal,
+  DataroomLifecycleModal,
+  DataroomGroupsCard,
+  NewQuestionModal,
+  MoveDocumentModal,
+  DocumentStateModal,
+  DownloadCartSlideover,
+  ActivityReportModal,
+  HelpSlideover,
+  TermsModal,
+  ForgotPasswordModal,
+  ForcePasswordChangeModal,
+  InviteClientModal,
+  type DataroomLifecycleState,
   DataroomsListScreen,
   type DataroomRow,
   DataroomDetailScreen,
@@ -23,6 +42,7 @@ import {
   assignableRoles,
   StatsScreen,
   SettingsScreen,
+  type SettingsTabKey,
   ModuleScreen,
   Card,
   Button,
@@ -35,8 +55,10 @@ import {
   GroupsScreen,
   type GroupRowData,
   GroupModal,
+  NewPortfolioModal,
+  type MetadataFieldDef,
 } from './components';
-import { DashboardScreen } from './dashboard';
+import { DashboardScreen, allowedActionKeys } from './dashboard';
 import { useSession } from './hooks/useSession';
 import { useTenantTheme } from './theme/useTenantTheme';
 import { useDatarooms, useDataroomTree, type FolderTreeNode } from './hooks/useDatarooms';
@@ -56,19 +78,39 @@ import {
 import { matchesWordStart } from './search/match';
 import type { LocalEntry } from './search/localEntries';
 import {
+  ACCOUNT_DISPLAY,
+  ACCOUNT_NOTIFICATIONS,
+  ACCOUNT_SECURITY,
+  AUDIT_EVENTS,
+  AUDIT_RETENTION,
   CLIENT_SPACE_OPTIONS,
   CLIENT_USAGE,
   CONNECTED_USERS,
+  DATAROOM_CUSTOM_FIELDS,
+  DATAROOM_GROUPS,
+  DATAROOM_METADATA_VALUES,
+  DATAROOM_SHARES,
   DEMO_HOME_STATS,
   HISTORY,
   INVOICES,
   MEMBERS,
+  METADATA_FIELDS,
   MODULE_CATALOG,
   NAV_SECTIONS,
+  OFFICE_ACTIVITY,
   PORTFOLIOS,
+  PORTFOLIO_ACTIVITY,
+  PORTFOLIO_DETAILS,
   PORTFOLIO_OPTIONS,
   QA_ENTRIES,
+  QA_MODERATION,
   RECENT_ACTIVITY,
+  STATEMENT_PERIODS,
+  TEMPORARY_LINKS,
+  TERMS_ARTICLES,
+  TERMS_UPDATED_AT,
+  TERMS_VERSION,
+  HELP_RESOURCES,
 } from './data/demo';
 
 /* ===========================================================================
@@ -97,11 +139,14 @@ import {
 type ScreenKey =
   | 'dashboard'
   | 'portfolios'
+  | 'portfolio'
   | 'datarooms'
   | 'dataroom'
   | 'stats'
+  | 'audit'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'account';
 
 /**
  * Un écran de module se note `module:<slug>` dans la navigation : la clé porte
@@ -116,11 +161,14 @@ const moduleSlugOf = (key: string) =>
 const CRUMB_LABELS: Record<ScreenKey, string> = {
   dashboard: 'Accueil',
   portfolios: 'Portefeuilles',
+  portfolio: 'Portefeuilles',
   datarooms: 'Dossiers',
   dataroom: 'Dossiers',
   stats: 'Statistiques & facturation',
+  audit: 'Journal des accès',
   users: "Annuaire de l'étude",
   settings: 'Personnalisation',
+  account: 'Mon compte',
 };
 
 /**
@@ -292,6 +340,25 @@ function documentName(
   return 'document';
 }
 
+/**
+ * Rubrique dans laquelle se trouve une pièce, pour le panier de téléchargement
+ * (§11.1) : le panier traverse les rubriques, un nom de fichier seul n'y suffit
+ * plus à situer la pièce. Le libellé vient de l'arbre plutôt que du document,
+ * qui ne porte pas son chemin.
+ */
+function findDocumentFolderLabel(
+  documentsByFolder: Record<string, DataroomDocument[]>,
+  tree: TreeNodeData[],
+  documentId: string,
+): string {
+  for (const [folderId, docs] of Object.entries(documentsByFolder)) {
+    if (docs.some(d => d.id === documentId)) {
+      return findFolderLabel(tree, folderId) ?? 'Racine du dossier';
+    }
+  }
+  return 'Racine du dossier';
+}
+
 function initialsOf(name: string): string {
   const parts = name.replace(/[@.].*$/, '').split(/[\s._-]+/).filter(Boolean);
   if (!parts.length) return '?';
@@ -311,9 +378,57 @@ export default function App() {
 
   const [screen, setScreen] = useState<ScreenKey>('dashboard');
   const [moduleSlug, setModuleSlug] = useState<string | null>(null);
+  /* Onglet d'atterrissage de Personnalisation. Un seul usage : l'action rapide
+     « Créer un modèle » doit ouvrir l'écran SUR l'onglet Modèles, sinon elle
+     déposerait l'utilisateur devant Identité avec une fenêtre de création
+     par-dessus. Renseigné par `navigate`, donc remis à zéro par toute autre
+     navigation — un clic dans le menu rouvre bien Identité. */
+  const [settingsTab, setSettingsTab] = useState<SettingsTabKey | undefined>(undefined);
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [dataroomCreateError, setDataroomCreateError] = useState<string | null>(null);
+  /* Lot « valeur MVP » du 03/09/2026 — §3.2 / §4.6. Ces états portent des
+     écrans dont AUCUN endpoint n'existe encore : ils vivent donc ici, en
+     mémoire, alimentés par src/data/demo.tsx. Chacun disparaîtra au profit
+     d'un hook `use…` le jour où le serveur saura répondre, exactement comme
+     les tags et les modèles avant eux. */
+  const [openPortfolioId, setOpenPortfolioId] = useState<string | null>(null);
+  const [newPortfolioOpen, setNewPortfolioOpen] = useState(false);
+  const [temporaryLinkOpen, setTemporaryLinkOpen] = useState(false);
+  const [metadataFields, setMetadataFields] = useState<MetadataFieldDef[]>(METADATA_FIELDS);
+  const [dataroomCustomFields, setDataroomCustomFields] =
+    useState<MetadataFieldDef[]>(DATAROOM_CUSTOM_FIELDS);
+  const [metadataValues, setMetadataValues] =
+    useState<Record<string, string>>(DATAROOM_METADATA_VALUES);
+  /* Lot « reprise de l'existant » du 03/09/2026 — §4. Mêmes réserves que
+     ci-dessus : aucun endpoint derrière, l'état vit ici. */
+  const [exportZipOpen, setExportZipOpen] = useState(false);
+  const [shareOfficeOpen, setShareOfficeOpen] = useState(false);
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  const [lifecycleState, setLifecycleState] = useState<DataroomLifecycleState>('active');
+  const [retentionYears, setRetentionYears] = useState(10);
+  const [askQuestionOpen, setAskQuestionOpen] = useState(false);
+  const [docMenuId, setDocMenuId] = useState<string | null>(null);
+  const [docAction, setDocAction] = useState<'renommer' | 'deplacer' | 'etat' | null>(null);
+  const [dataroomGroups, setDataroomGroups] = useState(DATAROOM_GROUPS);
+  /* Lot « unitaires §11.1 » du 03/09/2026. Le panier porte des ids de pièces
+     et non les pièces elles-mêmes : l'arborescence est déjà en mémoire, la
+     dupliquer ferait diverger le nom affiché après un renommage. */
+  const [cartIds, setCartIds] = useState<string[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [activityReportOpen, setActivityReportOpen] = useState(false);
+  const [inviteClientOpen, setInviteClientOpen] = useState(false);
+  /* Changement de mot de passe imposé à la première connexion (§11.1). Le
+     serveur n'expose aucun drapeau `must_change_password` : plutôt que d'en
+     inventer un, la maquette se déclenche par `?force-password`, sur le modèle
+     de `?view=prototype-preview`. Le jour où le drapeau existe, cette ligne
+     devient `session.user?.must_change_password`. */
+  const [mustChangePassword, setMustChangePassword] = useState(
+    () => new URLSearchParams(window.location.search).has('force-password'),
+  );
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
   const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
@@ -340,9 +455,10 @@ export default function App() {
   const [dataroomAccessSaveError, setDataroomAccessSaveError] = useState<string | null>(null);
   const [savingTemplateAccess, setSavingTemplateAccess] = useState(false);
   const [templateAccessSaveError, setTemplateAccessSaveError] = useState<string | null>(null);
-  const [savingIdentity, setSavingIdentity] = useState(false);
-  const [identitySaveError, setIdentitySaveError] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  /** Enregistrement de l'identité de l'étude (nom + logo). */
+  const [identitySaving, setIdentitySaving] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   /** Filtre de la barre de recherche de la liste Dossiers (côté client : la
       liste est déjà entièrement chargée, un appel serveur n'apporterait rien). */
   const [dataroomFilter, setDataroomFilter] = useState('');
@@ -509,20 +625,6 @@ export default function App() {
     await templateTree.refresh();
   }
 
-  // Repris de front/templates-hyperadmin-ui (03/09/2026) : PATCH /api/tenant-config/
-  // (nom + logo) n'était jusqu'ici branché nulle part, IdentityTab affichait
-  // "L'enregistrement de l'identité n'est pas encore exposé par l'API" en dur.
-  // session.refresh() plutôt qu'une mise à jour locale de session.tenant : un
-  // renommage change aussi le `name` que `currentOffice` (ligne ~770) recherche
-  // dans session.offices (rempli par /api/my-offices/, pas reconstruit ici) — un
-  // rechargement complet évite que ce rapprochement se désynchronise après un
-  // renommage, au prix d'un bref écran de chargement (même mécanisme qu'après la
-  // MFA, jamais utilisé jusqu'ici en cours de session).
-  async function saveIdentity(next: { displayName: string; logoFile: File | null; removeLogo: boolean }) {
-    await api.saveTenantIdentity({ name: next.displayName, logoFile: next.logoFile, removeLogo: next.removeLogo });
-    await session.refresh();
-  }
-
   // Les modules réellement activés viennent de /api/tenant-config/ ; le
   // catalogue (libellés, icônes, « à venir ») reste côté front faute de
   // description exposée par l'API.
@@ -572,6 +674,14 @@ export default function App() {
   }, [modulesWithServerState, datarooms.items.length, datarooms.loading, datarooms.error]);
 
   const openModuleEntry = modulesWithServerState.find(m => m.slug === moduleSlug) ?? null;
+
+  /* Portefeuille ouvert. Deux sources parce que la liste et le détail n'ont pas
+     la même forme : PORTFOLIOS porte la carte (nom, statut, pile d'avatars) et
+     PORTFOLIO_DETAILS la consolidation. Elles fusionneront le jour où un
+     endpoint les servira ensemble. */
+  const openPortfolio = PORTFOLIOS.find(p => p.id === openPortfolioId) ?? null;
+
+  const portfolioDetail = openPortfolioId ? (PORTFOLIO_DETAILS[openPortfolioId] ?? null) : null;
 
   /**
    * Ce que la palette ⌘K trouve en plus des résultats du serveur.
@@ -735,13 +845,26 @@ export default function App() {
   }
 
   const totalDocumentCount = dataroomTree.rootDocuments.length + countAllDocuments(dataroomTree.tree);
+  /* Pièce visée par le menu « ⋮ », et liste plate de toutes les pièces du
+     dossier pour la modale « poser une question sur un document ». Les deux
+     traversent `documentsByFolder`, qui est déjà l'arborescence chargée — pas
+     d'aller-retour serveur pour une information déjà en mémoire. */
+  const allDocuments = useMemo(
+    () => Object.values(documentsByFolder).flat(),
+    [documentsByFolder],
+  );
+  const docMenuTarget = docMenuId ? (allDocuments.find(d => d.id === docMenuId) ?? null) : null;
+  const allDocumentOptions = useMemo(
+    () => allDocuments.map(d => ({ id: d.id, label: d.name })),
+    [allDocuments],
+  );
 
   async function switchOffice(subdomain: string) {
     const { ticket } = await api.issueSsoTicket(subdomain);
     window.location.href = `https://${subdomain}.localhost:8000/api/sso/consume/?ticket=${encodeURIComponent(ticket)}`;
   }
 
-  function navigate(key: string) {
+  function navigate(key: string, settingsLanding?: SettingsTabKey) {
     const slug = moduleSlugOf(key);
     setModuleSlug(slug);
     // Un écran de module n'est pas un ScreenKey : `screen` reste sur sa dernière
@@ -749,7 +872,76 @@ export default function App() {
     // de ce qui s'affiche (voir le rendu plus bas).
     if (!slug) setScreen(key as ScreenKey);
     setOpenDataroomId(null);
+    // Le panier ne traverse pas les dossiers — voir DownloadCartSlideover.
+    setCartIds([]);
     setFocusFolder(null);
+    setSettingsTab(settingsLanding);
+  }
+
+  /* ===========================================================================
+     Actions rapides de l'accueil (catalogue : src/dashboard/actions.ts).
+
+     Elles vivent ICI parce qu'une action rapide n'est pas une navigation : elle
+     ouvre une fenêtre de création, dont l'état appartient à ce composant. Un
+     widget qui voudrait le faire lui-même devrait connaître `modalOpen`,
+     `userModal`, `templateModal`… c'est-à-dire tout App.tsx.
+
+     CE QUI REND LE GESTE POSSIBLE SANS PLOMBERIE NOUVELLE : ces fenêtres sont
+     montées DANS le bloc de leur écran, et leur état est déjà ici. Naviguer et
+     ouvrir dans le même geste suffit donc — le temps que React applique les
+     deux, l'écran d'arrivée est monté avec sa fenêtre ouverte. L'action part
+     toujours de l'accueil, donc l'écran d'arrivée n'est jamais déjà monté :
+     c'est ce qui rend `defaultTab` fiable pour « Créer un modèle ».
+     ======================================================================== */
+  function runQuickAction(key: string) {
+    switch (key) {
+      case 'dossier':
+        navigate('datarooms');
+        setModalOpen(true);
+        break;
+      case 'depot': {
+        // Le dépôt exige un dossier OUVERT : il n'y a pas de zone de dépôt sur
+        // l'accueil, et en inventer une voudrait dire demander « où ? » juste
+        // après. On ouvre donc le dossier le plus récent (la liste du serveur
+        // est triée par date de création décroissante), où la commande de dépôt
+        // est à portée ; sans aucun dossier, la liste et son bouton de création.
+        const latest = datarooms.items[0];
+        if (!latest) {
+          navigate('datarooms');
+          break;
+        }
+        navigate('dataroom');
+        setOpenDataroomId(latest.id);
+        break;
+      }
+      case 'invite':
+        navigate('users');
+        setUserModalError(null);
+        setUserModal('create');
+        break;
+      case 'modele':
+        navigate('settings', 'sub3-template');
+        setTemplateModalError(null);
+        setTemplateModal({ mode: 'create' });
+        break;
+      case 'portefeuilles':
+        navigate('portfolios');
+        break;
+      case 'annuaire':
+        navigate('users');
+        break;
+      case 'stats':
+        navigate('stats');
+        break;
+      case 'apparence':
+        navigate('settings');
+        break;
+      // 'recherche' n'arrive jamais ici : la palette appartient à la coquille,
+      // et l'accueil l'ouvre par le contexte de commandes (voir
+      // components/templates/shellCommands.ts).
+      default:
+        break;
+    }
   }
 
   if (session.status === 'loading') {
@@ -784,20 +976,29 @@ export default function App() {
 
   if (!authenticated) {
     return (
-      <LoginScreen
-        officeName={session.tenant?.name ?? 'Espace Notarial'}
-        officeDomain={window.location.host}
-        error={loginError}
-        onSubmit={(identifier, password) => {
-          setLoginError(undefined);
-          session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
-        }}
-      />
+      <>
+        <LoginScreen
+          officeName={session.tenant?.name ?? 'Espace Notarial'}
+          officeDomain={window.location.host}
+          error={loginError}
+          onSubmit={(identifier, password) => {
+            setLoginError(undefined);
+            session.login(identifier, password).catch((err: Error) => setLoginError(err.message));
+          }}
+          onForgotPassword={() => setForgotOpen(true)}
+        />
+        <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
+      </>
     );
   }
 
   const currentOffice = session.offices.find(o => o.name === session.tenant?.name);
-  const canManageTemplates = assignableRoles(currentOffice?.role).length > 0;
+  /* Un seul prédicat : « l'appelant administre cette étude » (admin ou
+     superadmin — assignableRoles ne rend une liste non vide qu'à eux). Il gate
+     les modèles de dossier ET l'identité de l'étude, qui sont réservés aux
+     mêmes rôles côté serveur ; deux noms pour la même condition finiraient par
+     diverger. */
+  const canManageOffice = assignableRoles(currentOffice?.role).length > 0;
 
   // Contenu de l'onglet « Template » de Personnalisation (02/09/2026 — déplacé
   // depuis l'ancienne entrée de navigation top-level « Modèles de dossier »,
@@ -813,7 +1014,7 @@ export default function App() {
           rows={templates.items}
           loading={templates.loading}
           error={templates.error}
-          canManage={canManageTemplates}
+          canManage={canManageOffice}
           onOpen={id => setOpenTemplateId(id)}
           onCreate={() => {
             setTemplateModalError(null);
@@ -904,7 +1105,7 @@ export default function App() {
             effectiveRoles={templateEffectiveRolesByRowId}
             loading={templateTree.loading || officeUsers.loading}
             error={templateAccessSaveError ?? officeUsers.error ?? templateTree.error}
-            canManage={canManageTemplates}
+            canManage={canManageOffice}
             onBackToList={() => setOpenTemplateId(null)}
             onCreateRootFolder={() => setNewTemplateFolderModal({ parentId: undefined })}
             onCreateFolder={rowId => setNewTemplateFolderModal({ parentId: rowId.slice('folder:'.length) })}
@@ -994,7 +1195,7 @@ export default function App() {
         rows={groupRows}
         loading={groups.loading}
         error={groups.error}
-        canManage={canManageTemplates}
+        canManage={canManageOffice}
         onCreate={() => {
           setGroupModalError(null);
           setGroupModal({ mode: 'create' });
@@ -1073,6 +1274,12 @@ export default function App() {
       officeRole={currentOffice?.role ?? (session.user?.is_hyperadmin ? 'Hyperadmin' : '—')}
       logoUrl={session.tenant?.logo_url || undefined}
       navSections={navSections}
+      onOpenAccount={() => navigate('account')}
+      /* Le panier n'a de sens qu'un dossier ouvert : ailleurs, il n'aurait rien
+         à recevoir et son icône promettrait une action impossible. */
+      onOpenCart={openDataroom ? () => setCartOpen(true) : undefined}
+      cartCount={cartIds.length}
+      onOpenHelp={() => setHelpOpen(true)}
       activeScreen={moduleSlug ? `${MODULE_PREFIX}${moduleSlug}` : screen}
       onNavigate={navigate}
       offices={session.offices}
@@ -1247,15 +1454,53 @@ export default function App() {
             enabled: !!m.enabled,
           }))}
           navigate={navigate}
+          runAction={runQuickAction}
+          allowedActions={allowedActionKeys(canManageOffice)}
         />
       )}
 
       {!openModuleEntry && screen === 'portfolios' && (
-        <PortfoliosScreen
-          portfolios={PORTFOLIOS}
-          onCreate={() => {}}
-          onFilter={() => {}}
-          onOpen={() => setScreen('datarooms')}
+        <>
+          <PortfoliosScreen
+            portfolios={PORTFOLIOS}
+            onCreate={() => setNewPortfolioOpen(true)}
+            onFilter={() => {}}
+            /* Jusqu'au 03/09/2026 ce clic renvoyait vers la liste générale des
+               dossiers : on voyait le regroupement sans jamais voir l'ensemble,
+               ce qui vidait le portefeuille de sa raison d'être (§2.1). */
+            onOpen={id => {
+              setOpenPortfolioId(id);
+              setScreen('portfolio');
+            }}
+          />
+          <NewPortfolioModal
+            open={newPortfolioOpen}
+            onClose={() => setNewPortfolioOpen(false)}
+            clientSpaceOptions={CLIENT_SPACE_OPTIONS}
+            dataroomOptions={datarooms.items.map(d => ({ id: String(d.id), label: d.name }))}
+            onCreate={() => setNewPortfolioOpen(false)}
+          />
+        </>
+      )}
+
+      {!openModuleEntry && screen === 'portfolio' && openPortfolio && portfolioDetail && (
+        <PortfolioDetailScreen
+          key={openPortfolio.id}
+          name={openPortfolio.name}
+          desc={openPortfolio.desc}
+          status={openPortfolio.status}
+          apui={portfolioDetail.apui}
+          meta={portfolioDetail.meta}
+          stats={portfolioDetail.stats}
+          datarooms={portfolioDetail.datarooms}
+          activity={PORTFOLIO_ACTIVITY}
+          onBackToList={() => navigate('portfolios')}
+          /* Les datarooms du portefeuille sont des lignes de démonstration :
+             leurs identifiants ne correspondent à aucune Dataroom réelle. On
+             ouvre donc la liste des dossiers plutôt que de tenter un détail qui
+             tomberait en 404 — même honnêteté que les résultats `simulated` de
+             la palette de recherche. */
+          onOpenDataroom={() => navigate('datarooms')}
         />
       )}
 
@@ -1342,6 +1587,111 @@ export default function App() {
             qaEntries={QA_ENTRIES}
             members={MEMBERS}
             history={HISTORY}
+            metadata={{
+              officeFields: metadataFields,
+              customFields: dataroomCustomFields,
+              values: metadataValues,
+              // Même gate que les droits d'accès : renseigner les informations
+              // du dossier est un geste de gestion, pas de consultation.
+              readOnly: !canManageOffice,
+              onValueChange: (fieldId, value) =>
+                setMetadataValues(prev => ({ ...prev, [fieldId]: value })),
+              onAddCustomField: field => setDataroomCustomFields(prev => [...prev, field]),
+              onRemoveCustomField: fieldId => {
+                setDataroomCustomFields(prev => prev.filter(f => f.id !== fieldId));
+                // La valeur part avec le champ : la laisser derrière ferait
+                // réapparaître une ancienne saisie si le champ est recréé.
+                setMetadataValues(prev => {
+                  const next = { ...prev };
+                  delete next[fieldId];
+                  return next;
+                });
+              },
+            }}
+            onTemporaryLink={() => setTemporaryLinkOpen(true)}
+            onExportZip={() => setExportZipOpen(true)}
+            onShareWithOffice={() => setShareOfficeOpen(true)}
+            onLifecycle={() => setLifecycleOpen(true)}
+            onActivityReport={() => setActivityReportOpen(true)}
+            qaModeration={QA_MODERATION}
+            qa={{
+              canModerate: canManageOffice,
+              onAsk: () => setAskQuestionOpen(true),
+            }}
+            /* §4.2 — les quatre gestes attendus sur une pièce. Aucun n'a
+               d'endpoint : `documents_view` n'expose que GET et POST. Ils sont
+               donc maquettés, et le resteront jusqu'à ce que le back ouvre
+               PATCH et DELETE sur un document. */
+            documentActions={doc => [
+              {
+                key: 'etat',
+                label: "Changer l'état",
+                icon: 'seal',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('etat');
+                },
+              },
+              {
+                key: 'renommer',
+                label: 'Renommer',
+                icon: 'clip',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('renommer');
+                },
+              },
+              {
+                key: 'deplacer',
+                label: 'Déplacer',
+                icon: 'folder',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction('deplacer');
+                },
+              },
+              {
+                key: 'telecharger',
+                label: 'Télécharger',
+                icon: 'down',
+                disabled: doc.muted,
+                onSelect: () =>
+                  void downloadDocument(
+                    openDataroom.id,
+                    Number(doc.id),
+                    documentName(documentsByFolder, doc.id),
+                  ),
+              },
+              {
+                key: 'panier',
+                label: cartIds.includes(doc.id) ? 'Retirer du panier' : 'Ajouter au panier',
+                icon: 'zip',
+                disabled: doc.muted,
+                onSelect: () =>
+                  setCartIds(prev =>
+                    prev.includes(doc.id) ? prev.filter(x => x !== doc.id) : [...prev, doc.id],
+                  ),
+              },
+              {
+                key: 'desactiver',
+                label: doc.disabled ? 'Réactiver' : 'Désactiver',
+                icon: 'eye',
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction(null);
+                },
+              },
+              {
+                key: 'supprimer',
+                label: 'Supprimer',
+                icon: 'x',
+                danger: true,
+                onSelect: () => {
+                  setDocMenuId(doc.id);
+                  setDocAction(null);
+                },
+              },
+            ]}
             onBackToList={() => navigate('datarooms')}
             onAddDocuments={(activeFolderId, files) => {
               const parentId = toParentId(activeFolderId);
@@ -1366,6 +1716,28 @@ export default function App() {
             }}
             accessRightsTab={
               <div>
+                {/* Les groupes de dataroom (§4.4) précèdent le tableau des
+                    droits réels : on constitue les groupes, puis on leur pose
+                    des droits. Maquette — le tableau qui suit, lui, est branché
+                    sur de vraies AccessRestriction. */}
+                <DataroomGroupsCard
+                  groups={dataroomGroups}
+                  readOnly={!canManageOffice}
+                  onCreate={(name, access) =>
+                    setDataroomGroups(prev => [
+                      ...prev,
+                      { id: `g-${Date.now()}`, name, access, memberCount: 0, members: [] },
+                    ])
+                  }
+                  onAccessChange={(groupId, access) =>
+                    setDataroomGroups(prev =>
+                      prev.map(g => (g.id === groupId ? { ...g, access } : g)),
+                    )
+                  }
+                  onRemove={groupId =>
+                    setDataroomGroups(prev => prev.filter(g => g.id !== groupId))
+                  }
+                />
                 <AccessRightsPanel
                   dirtyCount={dataroomAccessDraft.dirtyRowIds.length}
                   saving={savingDataroomAccess}
@@ -1420,12 +1792,99 @@ export default function App() {
               void dataroomTree.createFolder(name, parentId).then(() => setNewFolderModal(null));
             }}
           />
+          <TemporaryLinkModal
+            open={temporaryLinkOpen}
+            onClose={() => setTemporaryLinkOpen(false)}
+            target={openDataroom.name}
+            links={TEMPORARY_LINKS}
+          />
+          <ExportZipModal
+            open={exportZipOpen}
+            onClose={() => setExportZipOpen(false)}
+            dataroomName={openDataroom.name}
+            estimatedSize={`${totalDocumentCount} fichier(s)`}
+            onExport={() => setExportZipOpen(false)}
+          />
+          <ShareWithOfficeModal
+            open={shareOfficeOpen}
+            onClose={() => setShareOfficeOpen(false)}
+            dataroomName={openDataroom.name}
+            shares={DATAROOM_SHARES}
+          />
+          <DataroomLifecycleModal
+            open={lifecycleOpen}
+            onClose={() => setLifecycleOpen(false)}
+            dataroomName={openDataroom.name}
+            state={lifecycleState}
+            retentionYears={retentionYears}
+            onRetentionChange={setRetentionYears}
+            onCloture={() => setLifecycleState('cloturee')}
+            onReopen={() => setLifecycleState('active')}
+            onArchive={() => setLifecycleState('archivee')}
+            onDelete={() => setLifecycleOpen(false)}
+          />
+          <NewQuestionModal
+            open={askQuestionOpen}
+            onClose={() => setAskQuestionOpen(false)}
+            dataroomName={openDataroom.name}
+            documentOptions={allDocumentOptions}
+            onSubmit={() => setAskQuestionOpen(false)}
+          />
+          <MoveDocumentModal
+            open={docAction === 'deplacer' && docMenuTarget !== null}
+            onClose={() => setDocAction(null)}
+            documentName={docMenuTarget?.name ?? ''}
+            tree={tree}
+            onMove={() => setDocAction(null)}
+          />
+          <RenameFolderModal
+            open={docAction === 'renommer' && docMenuTarget !== null}
+            title="Renommer le document"
+            label="Nom du document"
+            currentName={docMenuTarget?.name ?? ''}
+            onClose={() => setDocAction(null)}
+            onSubmit={() => setDocAction(null)}
+          />
+          <DownloadCartSlideover
+            open={cartOpen}
+            onClose={() => setCartOpen(false)}
+            dataroomName={openDataroom.name}
+            items={allDocuments
+              .filter(d => cartIds.includes(d.id))
+              .map(d => ({
+                id: d.id,
+                name: d.name,
+                folderPath: findDocumentFolderLabel(documentsByFolder, tree, d.id),
+                size: d.size,
+              }))}
+            onRemove={id => setCartIds(prev => prev.filter(x => x !== id))}
+            onClear={() => setCartIds([])}
+          />
+          <ActivityReportModal
+            open={activityReportOpen}
+            onClose={() => setActivityReportOpen(false)}
+            dataroomName={openDataroom.name}
+          />
+          {docMenuTarget && (
+            <DocumentStateModal
+              open={docAction === 'etat'}
+              onClose={() => setDocAction(null)}
+              documentName={docMenuTarget.name}
+              /* Une pièce annoncée mais non déposée (`muted`) est exactement ce
+                 que le §4.7 appelle « en attente » : l'écran ouvre donc sur cet
+                 état plutôt que sur « déposé », qu'il faudrait corriger à la
+                 main à chaque fois. */
+              state={docMenuTarget.muted ? 'en-attente' : 'depose'}
+              onSubmit={() => setDocAction(null)}
+            />
+          )}
         </>
       )}
 
       {!openModuleEntry && screen === 'users' && (
         <>
           <OfficeUsersScreen
+            onInviteClient={canManageOffice ? () => setInviteClientOpen(true) : undefined}
             rows={officeUsers.items.map(u => ({
               membershipId: u.membership_id,
               userId: u.user_id,
@@ -1537,32 +1996,121 @@ export default function App() {
       )}
 
       {!openModuleEntry && screen === 'stats' && (
-        <StatsScreen usage={CLIENT_USAGE} invoices={INVOICES} connected={CONNECTED_USERS} />
+        <StatsScreen
+          usage={CLIENT_USAGE}
+          invoices={INVOICES}
+          connected={CONNECTED_USERS}
+          activity={OFFICE_ACTIVITY}
+          officeName={session.tenant?.name ?? 'votre office'}
+          statementPeriods={STATEMENT_PERIODS}
+        />
+      )}
+
+      {!openModuleEntry && screen === 'audit' && (
+        <AuditTrailScreen events={AUDIT_EVENTS} retention={AUDIT_RETENTION} />
+      )}
+
+      <ForcePasswordChangeModal
+        open={mustChangePassword}
+        onLogout={() => void session.logout()}
+        onSubmit={() => setMustChangePassword(false)}
+      />
+
+      <HelpSlideover
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        officeName={session.tenant?.name ?? 'votre étude'}
+        resources={HELP_RESOURCES}
+        supportEmail="support@espacenotarial.fr"
+        onOpenTerms={() => {
+          setHelpOpen(false);
+          setTermsOpen(true);
+        }}
+      />
+
+      <TermsModal
+        open={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        mode="consultation"
+        version={TERMS_VERSION}
+        updatedAt={TERMS_UPDATED_AT}
+        articles={TERMS_ARTICLES}
+      />
+
+      <InviteClientModal
+        open={inviteClientOpen}
+        onClose={() => setInviteClientOpen(false)}
+        dataroomOptions={datarooms.items.map(d => ({ id: String(d.id), label: d.name }))}
+        groupOptions={dataroomGroups.map(g => ({ id: g.id, label: g.name }))}
+        onInvite={() => setInviteClientOpen(false)}
+      />
+
+      {!openModuleEntry && screen === 'account' && (
+        <AccountScreen
+          identity={{
+            displayName: session.user?.username ?? '',
+            email: `${session.user?.username ?? 'compte'}@exemple.fr`,
+            initials: (session.user?.username ?? '?').slice(0, 2).toUpperCase(),
+            /* Les études viennent, elles, du serveur : c'est la preuve du
+               compte unique multi-tenant (§5.3), pas une donnée de démo. */
+            offices: (session.offices ?? []).map(o => ({
+              name: o.name,
+              role: o.role,
+            })),
+          }}
+          security={ACCOUNT_SECURITY}
+          display={ACCOUNT_DISPLAY}
+          notifications={ACCOUNT_NOTIFICATIONS}
+          screenOptions={navSections.flatMap(section =>
+            section.items.map(item => ({ key: item.key, label: item.label })),
+          )}
+        />
       )}
 
       {!openModuleEntry && screen === 'settings' && (
         <SettingsScreen
+          defaultTab={settingsTab}
+          metadata={{
+            fields: metadataFields,
+            // Réservé aux administrateurs, comme l'identité et les modules : le
+            // schéma vaut pour TOUS les dossiers de l'étude.
+            onChange: canManageOffice ? setMetadataFields : undefined,
+          }}
           identity={{
             identity: {
               displayName: session.tenant?.name ?? '',
               subdomain: window.location.host,
-              logoUrl: session.tenant?.logo_url,
+              logoUrl: session.tenant?.logo_url || undefined,
             },
-            onSave: next => {
-              setIdentitySaveError(null);
-              setSavingIdentity(true);
-              saveIdentity(next)
-                .catch((err: Error) => setIdentitySaveError(err.message))
-                .finally(() => setSavingIdentity(false));
-            },
-            saving: savingIdentity,
-            error: identitySaveError,
-            // Même gate que la gestion des Templates (assignableRoles) : renommer
-            // l'étude ou changer son logo engage tout le monde, réservé admin/superadmin.
-            readOnly: !canManageTemplates,
-            readOnlyNote: canManageTemplates
+            saving: identitySaving,
+            error: identityError,
+            // Le serveur refuse déjà l'écriture à un non-administrateur : l'écran
+            // évite seulement de proposer un formulaire qui finirait en 403, et dit
+            // pourquoi plutôt que de masquer l'onglet.
+            readOnly: !canManageOffice,
+            readOnlyNote: canManageOffice
               ? undefined
-              : "Seul un administrateur de l'office peut modifier son identité.",
+              : "L'identité de l'étude est modifiable par ses administrateurs.",
+            onSave: async ({ displayName, logoFile, removeLogo }) => {
+              setIdentityError(null);
+              setIdentitySaving(true);
+              try {
+                await api.saveTenantIdentity({
+                  name: displayName,
+                  logoFile,
+                  removeLogo,
+                });
+                // Le nom et le logo sont lus depuis `session.tenant` par toute
+                // l'application (bandeau, fil d'Ariane, écran de connexion) :
+                // recharger la session est ce qui les fait suivre partout, sans
+                // état parallèle à tenir à jour ici.
+                await session.refresh();
+              } catch (err) {
+                setIdentityError(err instanceof Error ? err.message : 'Enregistrement impossible');
+              } finally {
+                setIdentitySaving(false);
+              }
+            },
           }}
           modules={{
             modules: modulesWithServerState,

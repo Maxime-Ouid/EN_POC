@@ -1,14 +1,23 @@
+import { SEARCH_SHORTCUT_ARIA } from '../../search/shortcut';
+
 export interface TopbarSearchProps {
   placeholder: string;
   value?: string;
   onChange?: (value: string) => void;
   shortcut?: string;
   /**
-   * Transforme le champ en simple point d'entrée : au lieu de saisir ici, un
-   * clic (ou le focus au clavier) ouvre la palette de recherche, qui a son
-   * propre champ. L'input passe alors en lecture seule — deux champs de saisie
-   * superposés, l'un derrière la palette, rendraient la frappe imprévisible.
-   * Sans cette prop, le champ reste un champ de saisie ordinaire.
+   * Transforme le champ en point d'entrée de la palette de recherche, qui a son
+   * propre champ. Le composant rend alors un BOUTON et non plus un champ :
+   * jusqu'au 02/09/2026 c'était un `<input readOnly>` qui ouvrait la palette sur
+   * son `focus`, ce qui avait trois défauts — l'élément s'annonçait « champ de
+   * saisie » aux lecteurs d'écran alors qu'on ne peut rien y saisir, le curseur
+   * de texte promettait une frappe qui n'arrivait jamais, et l'ouverture au
+   * focus déclenchait la palette au simple passage du Tab, y compris en
+   * revenant en arrière. Un bouton dit ce qu'il fait et n'a besoin d'aucune de
+   * ces ruses.
+   *
+   * Sans cette prop, le champ reste un champ de saisie ordinaire (barre de
+   * filtre de la liste des dossiers, par exemple).
    */
   onActivate?: () => void;
   /**
@@ -27,12 +36,31 @@ export function TopbarSearch({
   onActivate,
   style,
 }: TopbarSearchProps) {
+  if (onActivate) {
+    return (
+      <button
+        type="button"
+        className="topbar-search topbar-search-trigger"
+        style={style}
+        onClick={onActivate}
+        // `dialog` et non `menu` : ce qui s'ouvre est bien une boîte modale avec
+        // son propre champ, pas une liste d'options attachée à ce bouton.
+        aria-haspopup="dialog"
+        // Le raccourci est déjà écrit dans le `<kbd>` ; il doit l'être aussi
+        // pour qui ne voit pas ce `<kbd>`.
+        aria-keyshortcuts={SEARCH_SHORTCUT_ARIA}
+      >
+        <svg className="icon">
+          <use href="#i-search" />
+        </svg>
+        <span className="topbar-search-label">{placeholder}</span>
+        {shortcut && <kbd>{shortcut}</kbd>}
+      </button>
+    );
+  }
+
   return (
-    <div
-      className="topbar-search"
-      style={{ ...style, cursor: onActivate ? 'text' : undefined }}
-      onClick={onActivate}
-    >
+    <div className="topbar-search" style={style}>
       <svg className="icon">
         <use href="#i-search" />
       </svg>
@@ -40,11 +68,7 @@ export function TopbarSearch({
         type="text"
         placeholder={placeholder}
         value={value}
-        readOnly={onActivate != null}
         onChange={e => onChange?.(e.target.value)}
-        // Le focus clavier (Tab) doit ouvrir la palette comme le clic, sinon le
-        // champ est atteignable au clavier sans jamais rien pouvoir y faire.
-        onFocus={onActivate}
       />
       {shortcut && <kbd>{shortcut}</kbd>}
     </div>

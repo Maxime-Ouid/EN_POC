@@ -1,4 +1,5 @@
 import { Grid } from '../atoms/Grid';
+import { IconChip } from '../atoms/IconChip';
 import { Pill } from '../atoms/Pill';
 import { FeedItem } from '../molecules/FeedItem';
 import { StatCard } from '../molecules/StatCard';
@@ -71,11 +72,7 @@ export function HomeScreen({
             <span className="stat-label" style={{ margin: 0 }}>
               Stockage utilisé
             </span>
-            <div className="stat-icon" style={{ background: 'var(--brass-100)', color: 'var(--brass-700)' }}>
-              <svg className="icon">
-                <use href="#i-layers" />
-              </svg>
-            </div>
+            <IconChip icon="layers" bg="var(--brass-100)" color="var(--brass-700)" chip="stat-icon" />
           </div>
           <div className="stat-value mono">
             {stats.storageUsedGo}
@@ -127,11 +124,7 @@ export function HomeScreen({
                 style={{ margin: 0, cursor: 'pointer' }}
                 onClick={() => onOpenPortfolio(p.id)}
               >
-                <div className="row-icon" style={{ background: p.iconBg, color: p.iconColor }}>
-                  <svg className="icon">
-                    <use href={`#i-${p.icon}`} />
-                  </svg>
-                </div>
+                <IconChip icon={p.icon} bg={p.iconBg} color={p.iconColor} />
                 <div style={{ flex: 1 }}>
                   <div className="tpl-name">{p.name}</div>
                   <div className="tpl-desc">{p.desc}</div>

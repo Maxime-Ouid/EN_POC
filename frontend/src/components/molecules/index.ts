@@ -14,6 +14,7 @@ export * from './NavItem';
 export * from './NavSubItem';
 export * from './PresetCard';
 export * from './PresetRow';
+export * from './RowActions';
 export * from './RowName';
 export * from './SidebarBrand';
 export * from './SidebarFoot';

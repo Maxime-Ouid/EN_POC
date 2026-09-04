@@ -8,6 +8,8 @@ export * from './Decor';
 export * from './Highlight';
 export * from './Grid';
 export * from './Icon';
+export * from './Icon3d';
+export * from './IconChip';
 export * from './IconButton';
 export * from './IconSprite';
 export * from './Nav';

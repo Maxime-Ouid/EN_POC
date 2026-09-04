@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from '../../atoms/Button';
 import { Card } from '../../atoms/Card';
 import { Icon } from '../../atoms/Icon';
@@ -22,6 +23,20 @@ export interface V1StatsCriteres {
 
 export interface V1StatsConsultationsScreenProps {
   onAfficher?: (criteres: V1StatsCriteres) => void;
+  /**
+   * Bloc d'avertissement rendu au-dessus du formulaire. Sert à l'écran des
+   * statistiques de connexions, qui réutilise ce formulaire par hypothèse et
+   * doit le dire à l'endroit où il s'affiche.
+   */
+  notice?: ReactNode;
+  /**
+   * Bloc « Sélectionnez les données » (Tout / Téléchargements /
+   * Prévisualisations). Relevé sur l'écran des consultations ; les connexions
+   * n'ont rien à filtrer de tel, elles le passent à `false`.
+   */
+  avecDonnees?: boolean;
+  /** Texte du pavé de résultats, quand la raison de son absence diffère. */
+  resultatsNote?: ReactNode;
 }
 
 const MOIS = [
@@ -46,7 +61,12 @@ const DONNEES: Array<{ key: V1StatsDonnees; label: string }> = [
 // Activités > Statistiques de consultations (captures 113500 et 115702).
 // L'écran de RÉSULTATS n'apparaît sur aucune capture : seul le formulaire de
 // paramétrage est reconstruit, et le bouton « Afficher » le dit.
-export function V1StatsConsultationsScreen({ onAfficher }: V1StatsConsultationsScreenProps) {
+export function V1StatsConsultationsScreen({
+  onAfficher,
+  notice,
+  avecDonnees = true,
+  resultatsNote,
+}: V1StatsConsultationsScreenProps) {
   const [criteres, setCriteres] = useState<V1StatsCriteres>({
     mois: 'Août',
     annee: '2026',
@@ -59,6 +79,7 @@ export function V1StatsConsultationsScreen({ onAfficher }: V1StatsConsultationsS
 
   return (
     <Screen>
+      {notice}
       <Card padded style={{ marginTop: 16, maxWidth: 720 }}>
         <div className="section-title">Sélectionnez la période</div>
         <FieldRow>
@@ -109,20 +130,28 @@ export function V1StatsConsultationsScreen({ onAfficher }: V1StatsConsultationsS
           </label>
         ))}
 
-        <div className="section-title" style={{ marginTop: 20 }}>
-          Sélectionnez les données
-        </div>
-        {DONNEES.map(d => (
-          <label key={d.key} className="v1-list-controls" style={{ justifyContent: 'flex-start', gap: 10 }}>
-            <input
-              type="radio"
-              name="donnees"
-              checked={criteres.donnees === d.key}
-              onChange={() => setCriteres({ ...criteres, donnees: d.key })}
-            />
-            <span className="tiny">{d.label}</span>
-          </label>
-        ))}
+        {avecDonnees && (
+          <>
+            <div className="section-title" style={{ marginTop: 20 }}>
+              Sélectionnez les données
+            </div>
+            {DONNEES.map(d => (
+              <label
+                key={d.key}
+                className="v1-list-controls"
+                style={{ justifyContent: 'flex-start', gap: 10 }}
+              >
+                <input
+                  type="radio"
+                  name="donnees"
+                  checked={criteres.donnees === d.key}
+                  onChange={() => setCriteres({ ...criteres, donnees: d.key })}
+                />
+                <span className="tiny">{d.label}</span>
+              </label>
+            ))}
+          </>
+        )}
 
         <div style={{ marginTop: 18 }}>
           <Button
@@ -141,10 +170,10 @@ export function V1StatsConsultationsScreen({ onAfficher }: V1StatsConsultationsS
           <div className="v1-empty" style={{ marginTop: 16 }}>
             <div className="v1-empty-title">Résultats non reconstruits</div>
             <div className="v1-empty-desc">
-              Aucune capture de l'écran de résultats n'a été fournie, et le backend du POC ne
-              journalise pas encore les consultations : afficher un tableau ici reviendrait à
-              inventer des chiffres. Critères retenus : {criteres.mois} {criteres.annee}, du{' '}
-              {criteres.du} au {criteres.au}.
+              {resultatsNote ??
+                "Aucune capture de l'écran de résultats n'a été fournie, et le backend du POC ne journalise pas encore les consultations : afficher un tableau ici reviendrait à inventer des chiffres."}{' '}
+              Critères retenus : {criteres.mois} {criteres.annee}, du {criteres.du} au{' '}
+              {criteres.au}.
             </div>
           </div>
         )}

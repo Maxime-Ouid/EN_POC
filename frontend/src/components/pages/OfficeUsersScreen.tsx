@@ -39,6 +39,13 @@ export interface OfficeUsersScreenProps {
   assignableRoles: string[];
   onCreateUser?: () => void;
   onAttachUser?: () => void;
+  /**
+   * Onboarding d'un client par courriel (§11.1) : distinct de « Nouvel
+   * utilisateur », qui crée un compte pour un membre de l'étude. Ici, on invite
+   * une partie prenante externe DANS un dossier — le geste et le public ne sont
+   * pas les mêmes, les confondre ferait créer des comptes clients sans dossier.
+   */
+  onInviteClient?: () => void;
   onChangeRole?: (membershipId: number, role: string) => void;
   /** Retire l'appartenance à cet office. L'appelant confirme avant d'agir. */
   onRemoveUser?: (user: OfficeUserRowData) => void;
@@ -72,6 +79,7 @@ export function OfficeUsersScreen({
   assignableRoles,
   onCreateUser,
   onAttachUser,
+  onInviteClient,
   onChangeRole,
   onRemoveUser,
   onShowRestrictions,
@@ -110,6 +118,12 @@ export function OfficeUsersScreen({
             <Icon id="link" />
             Rattacher un compte existant
           </Button>
+          {onInviteClient && (
+            <Button size="sm" onClick={onInviteClient}>
+              <Icon id="send" />
+              Inviter un client
+            </Button>
+          )}
         </Toolbar>
       )}
 
