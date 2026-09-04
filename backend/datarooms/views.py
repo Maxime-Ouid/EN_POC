@@ -21,16 +21,16 @@ from rest_framework.response import Response
 
 from .mfa import qr_code_data_uri
 from .models import (
-    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership,
+    AccessRestriction, Dataroom, Document, Folder, Group, HyperadminAccess, Module, Office, OfficeMembership,
     Tag, Template, TemplateFolder,
 )
 from .tenancy.registry import ensure_tenant_registered
 from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
     LOGO_CONTENT_TYPES, LOGO_MAX_BYTES,
-    DashboardValidationError, TagValidationError, ThemeValidationError,
-    clean_dashboard_payload, clean_tag_ids, clean_tag_payload, clean_theme_payload,
-    is_accepted_extension, logo_extension, tag_slug,
+    DashboardValidationError, GroupValidationError, TagValidationError, ThemeValidationError,
+    clean_dashboard_payload, clean_group_payload, clean_tag_ids, clean_tag_payload, clean_theme_payload,
+    group_slug, is_accepted_extension, logo_extension, tag_slug,
 )
 
 User = get_user_model()
@@ -925,6 +925,106 @@ def document_tags_view(request, dataroom_id, document_id):
     document.tags.set(tags)
     return Response({"id": document.id, "tags": _tags_of(document)})
 
+# ---------------------------------------------------------------------------
+# Groupes de droits — catalogue de l'office (modèle Group) et appartenance.
+#
+# Contrairement à Tag, PAS de création à la volée ouverte à tout membre : un
+# groupe touche des droits d'accès (troisième critère d'AccessRestriction, voir
+# _user_can_access), sa création reste un geste volontaire d'un gestionnaire —
+# GET seul est ouvert à tout membre (un tableau de droits doit pouvoir
+# afficher les groupes existants même consulté par un simple membre).
+# ---------------------------------------------------------------------------
+
+def _serialize_group(group):
+    return {
+        "id": group.id, "name": group.name, "slug": group.slug,
+        "category": group.category, "user_ids": group.user_ids,
+    }
+
+def _clean_group_member_ids(office, raw_ids):
+    """Même filtrage que _clean_template_user_ids : seuls des ids
+    correspondant à de vrais OfficeMembership de CET office sont retenus —
+    un id arbitraire ou d'un membre d'un AUTRE office est silencieusement
+    ignoré plutôt que rejeté."""
+    if not isinstance(raw_ids, list):
+        return []
+    candidate_ids = {int(uid) for uid in raw_ids if str(uid).lstrip('-').isdigit()}
+    return sorted(
+        OfficeMembership.objects.filter(office=office, user_id__in=candidate_ids)
+        .values_list('user_id', flat=True)
+    )
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def groups_view(request):
+    """GET : catalogue de groupes de l'office, ouvert à tout membre. POST :
+    crée un groupe — réservé admin/superadmin (voir _manager_role), un nom
+    déjà pris (replié, voir group_slug) est refusé plutôt que fusionné : à la
+    différence d'un tag, un groupe engage des droits, une fusion silencieuse
+    serait surprenante."""
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+
+    if request.method == 'POST':
+        if _manager_role(request.user, office) is None:
+            return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+        try:
+            payload = clean_group_payload(request.data)
+        except GroupValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
+        slug = group_slug(payload["name"])
+        if Group.objects.filter(slug=slug).exists():
+            return Response({"error": "un groupe porte déjà ce nom"}, status=409)
+        user_ids = _clean_group_member_ids(office, request.data.get('user_ids') or [])
+        group = Group.objects.create(
+            name=payload["name"], slug=slug, category=payload["category"], user_ids=user_ids,
+        )
+        return Response(_serialize_group(group), status=201)
+
+    return Response([_serialize_group(g) for g in Group.objects.all()])
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def group_detail_view(request, group_id):
+    """Renommer/reclasser/changer les membres (PATCH) ou supprimer (DELETE) un
+    groupe — réservé admin/superadmin de CET office (même gate que Tag). La
+    suppression retire le groupe de toutes les AccessRestriction/
+    TemplateFolder qui le cochaient (cascade M2M standard), sans jamais
+    toucher aux OfficeMembership de ses membres."""
+    office, error = _office_member_guard(request)
+    if error:
+        return error
+    if _manager_role(request.user, office) is None:
+        return Response({"error": "réservé aux administrateurs de cet office"}, status=403)
+
+    try:
+        group = Group.objects.get(pk=group_id)
+    except Group.DoesNotExist:
+        return Response({"error": "groupe introuvable"}, status=404)
+
+    if request.method == 'DELETE':
+        group.delete()
+        return Response(status=204)
+
+    try:
+        payload = clean_group_payload(request.data, partial=True)
+    except GroupValidationError as exc:
+        return Response({"error": str(exc)}, status=400)
+
+    if "name" in payload:
+        new_slug = group_slug(payload["name"])
+        if Group.objects.filter(slug=new_slug).exclude(pk=group.pk).exists():
+            return Response({"error": "un groupe porte déjà ce nom"}, status=409)
+        group.name = payload["name"]
+        group.slug = new_slug
+    if "category" in payload:
+        group.category = payload["category"]
+    if "user_ids" in request.data:
+        group.user_ids = _clean_group_member_ids(office, request.data.get('user_ids') or [])
+    group.save()
+    return Response(_serialize_group(group))
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def datarooms_view(request):
@@ -1003,13 +1103,20 @@ def _apply_template(dataroom, template, office):
                     office=office, user_id__in=tf.user_ids
                 ).values_list('user_id', flat=True)
             ) if tf.user_ids else []
-            # Les deux vides après résolution => pas de restriction créée,
+            group_ids = list(tf.groups.values_list('id', flat=True))
+            # Les trois vides après résolution => pas de restriction créée,
             # même invariant que _set_restriction : une AccessRestriction
-            # "restreint à personne et à aucun rôle" n'existe jamais.
-            if tf.allowed_roles or user_ids:
-                AccessRestriction.objects.create(
+            # "restreint à personne, à aucun rôle et à aucun groupe" n'existe
+            # jamais. `groups` n'a pas besoin d'être re-résolu comme
+            # `user_ids` : Group vit dans la MÊME base tenant que
+            # TemplateFolder, un groupe référencé ici appartient donc déjà
+            # forcément à cet office.
+            if tf.allowed_roles or user_ids or group_ids:
+                restriction = AccessRestriction.objects.create(
                     folder=folder, allowed_roles=tf.allowed_roles, user_ids=user_ids
                 )
+                if group_ids:
+                    restriction.groups.set(group_ids)
             walk(tf, folder)
     walk(None, None)
 
@@ -1081,16 +1188,27 @@ def _user_can_access(user, office, dataroom, folder=None, document=None):
     du rôle de `user` pour CET office précis (changement du 01/09/2026) :
     membre/admin gardent l'accès ouvert par défaut (comportement historique,
     inchangé) ; un client, lui, n'a PAS accès par défaut — un client ne voit
-    et n'accède qu'à ce qu'une restriction l'inclut explicitement (par id ou
-    par rôle). Un utilisateur sans membership pour cet office (ne devrait pas
-    arriver : tous les appelants vérifient déjà l'appartenance en amont) est
-    traité comme un client, par défaut fermé plutôt qu'ouvert."""
+    et n'accède qu'à ce qu'une restriction l'inclut explicitement (par id, par
+    rôle ou par groupe). Un utilisateur sans membership pour cet office (ne
+    devrait pas arriver : tous les appelants vérifient déjà l'appartenance en
+    amont) est traité comme un client, par défaut fermé plutôt qu'ouvert.
+
+    `groups` (ajouté le 04/09/2026) est un TROISIÈME critère indépendant, au
+    même titre que `user_ids`/`allowed_roles` — accès si `user` appartient à
+    L'UN QUELCONQUE des groupes cochés (`Group.user_ids`, résolu en Python
+    plutôt qu'une requête JSON-contains : peu de groupes par restriction,
+    coût négligeable à l'échelle du POC, et SQLite n'offre pas un opérateur
+    fiable et portable pour ça)."""
     role = _effective_role(user, office)
     if role == "superadmin":
         return True
     restriction = _nearest_restriction(dataroom, folder=folder, document=document)
     if restriction is not None:
-        return user.id in restriction.user_ids or (role is not None and role in restriction.allowed_roles)
+        if user.id in restriction.user_ids:
+            return True
+        if role is not None and role in restriction.allowed_roles:
+            return True
+        return any(user.id in g.user_ids for g in restriction.groups.all())
     return role is not None and role != "client"
 
 def _subtree_has_accessible_content(user, office, dataroom, folder=None):
@@ -1154,44 +1272,67 @@ def _clean_access_roles(raw_roles):
             seen.append(role)
     return seen
 
+def _clean_group_ids(raw_ids):
+    """Filtre `raw_ids` aux Group EXISTANTS dans cette base tenant,
+    silencieusement — même défense en profondeur que _clean_access_roles.
+    Group vit dans la MÊME base que AccessRestriction/TemplateFolder (pas de
+    problème cross-DB ici, contrairement à user_ids), donc une simple requête
+    suffit à vérifier l'existence."""
+    if not isinstance(raw_ids, list):
+        return []
+    ids = []
+    for value in raw_ids:
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        if value not in ids:
+            ids.append(value)
+    valid = set(Group.objects.filter(id__in=ids).values_list('id', flat=True))
+    return [i for i in ids if i in valid]
+
 def _get_restriction_row(**target):
     return AccessRestriction.objects.filter(**target).first()
 
 def _current_restriction_state(**target):
     row = _get_restriction_row(**target)
     if row is None:
-        return {"user_ids": [], "allowed_roles": []}
-    return {"user_ids": row.user_ids, "allowed_roles": row.allowed_roles}
+        return {"user_ids": [], "allowed_roles": [], "group_ids": []}
+    return {
+        "user_ids": row.user_ids, "allowed_roles": row.allowed_roles,
+        "group_ids": list(row.groups.values_list('id', flat=True)),
+    }
 
-def _set_restriction(office, user_ids, allowed_roles, **target):
-    """Remplace utilisateurs nommés ET rôles autorisés pour `target`
-    (dataroom=/folder=/document=, exactement un) — accès si l'un OU l'autre
-    critère est vrai (voir _user_can_access). Ne conserve que des ids
+def _set_restriction(office, user_ids, allowed_roles, group_ids, **target):
+    """Remplace utilisateurs nommés, rôles autorisés ET groupes pour `target`
+    (dataroom=/folder=/document=, exactement un) — accès si l'un des trois
+    critères est vrai (voir _user_can_access). Ne conserve que des ids
     correspondant à de vrais OfficeMembership de cet office (défense en
     profondeur contre un id arbitraire côté client — silencieusement ignoré
     plutôt que rejeté, l'UI ne propose de toute façon que des membres réels) ;
-    `allowed_roles` passe par _clean_access_roles, même principe. Les DEUX
-    vides après filtrage => supprime la ligne plutôt que de la laisser dans
-    cet état : repasser par "aucune restriction" (accès ouvert) est plus
-    explicite qu'une ligne "restreint à personne et à aucun rôle"."""
+    `allowed_roles`/`group_ids` passent par _clean_access_roles/
+    _clean_group_ids, même principe. Les TROIS vides après filtrage =>
+    supprime la ligne plutôt que de la laisser dans cet état : repasser par
+    "aucune restriction" (accès ouvert) est plus explicite qu'une ligne
+    "restreint à personne, à aucun rôle et à aucun groupe"."""
     candidate_ids = {int(uid) for uid in user_ids if str(uid).lstrip('-').isdigit()}
     valid_ids = sorted(
         OfficeMembership.objects.filter(office=office, user_id__in=candidate_ids)
         .values_list('user_id', flat=True)
     )
     valid_roles = _clean_access_roles(allowed_roles)
+    valid_group_ids = _clean_group_ids(group_ids)
     row = _get_restriction_row(**target)
-    if not valid_ids and not valid_roles:
+    if not valid_ids and not valid_roles and not valid_group_ids:
         if row is not None:
             row.delete()
-        return {"user_ids": [], "allowed_roles": []}
+        return {"user_ids": [], "allowed_roles": [], "group_ids": []}
     if row is None:
-        AccessRestriction.objects.create(user_ids=valid_ids, allowed_roles=valid_roles, **target)
+        row = AccessRestriction.objects.create(user_ids=valid_ids, allowed_roles=valid_roles, **target)
     else:
         row.user_ids = valid_ids
         row.allowed_roles = valid_roles
         row.save()
-    return {"user_ids": valid_ids, "allowed_roles": valid_roles}
+    row.groups.set(Group.objects.filter(id__in=valid_group_ids))
+    return {"user_ids": valid_ids, "allowed_roles": valid_roles, "group_ids": valid_group_ids}
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -1214,7 +1355,7 @@ def dataroom_access_view(request, dataroom_id):
     if request.method == 'POST':
         state = _set_restriction(
             office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
-            dataroom=dataroom,
+            request.data.get('group_ids') or [], dataroom=dataroom,
         )
         return Response(state)
     return Response(_current_restriction_state(dataroom=dataroom))
@@ -1239,7 +1380,7 @@ def folder_access_view(request, dataroom_id, folder_id):
     if request.method == 'POST':
         state = _set_restriction(
             office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
-            folder=folder,
+            request.data.get('group_ids') or [], folder=folder,
         )
         return Response(state)
     return Response(_current_restriction_state(folder=folder))
@@ -1264,7 +1405,7 @@ def document_access_view(request, dataroom_id, document_id):
     if request.method == 'POST':
         state = _set_restriction(
             office, request.data.get('user_ids') or [], request.data.get('allowed_roles') or [],
-            document=document,
+            request.data.get('group_ids') or [], document=document,
         )
         return Response(state)
     return Response(_current_restriction_state(document=document))
@@ -1287,7 +1428,7 @@ def access_restrictions_view(request):
     results = []
     restrictions = AccessRestriction.objects.select_related(
         'dataroom', 'folder', 'folder__dataroom', 'document', 'document__dataroom'
-    )
+    ).prefetch_related('groups')
     for r in restrictions:
         if r.dataroom_id:
             kind, target_id, dataroom_id, label = "dataroom", r.dataroom_id, r.dataroom_id, r.dataroom.name
@@ -1305,6 +1446,7 @@ def access_restrictions_view(request):
             "label": label,
             "user_ids": r.user_ids,
             "allowed_roles": r.allowed_roles,
+            "group_ids": [g.id for g in r.groups.all()],
         })
     return Response(results)
 
@@ -1784,6 +1926,7 @@ def _serialize_template_folder(f):
     return {
         "id": f.id, "name": f.name, "parent": f.parent_id,
         "allowed_roles": f.allowed_roles, "user_ids": f.user_ids,
+        "group_ids": [g.id for g in f.groups.all()],
     }
 
 def _template_or_404(template_id):
@@ -1894,10 +2037,13 @@ def template_folders_view(request, template_id):
             return Response({"error": "dossier parent introuvable"}, status=400)
         allowed_roles = _clean_access_roles(request.data.get('allowed_roles') or [])
         user_ids = _clean_template_user_ids(office, request.data.get('user_ids') or [])
+        group_ids = _clean_group_ids(request.data.get('group_ids') or [])
         folder = TemplateFolder.objects.create(
             template=template, parent=parent, name=name,
             allowed_roles=allowed_roles, user_ids=user_ids,
         )
+        if group_ids:
+            folder.groups.set(group_ids)
         return Response(_serialize_template_folder(folder), status=201)
 
     try:
@@ -1938,6 +2084,8 @@ def template_folder_detail_view(request, template_id, folder_id):
     if 'user_ids' in request.data:
         folder.user_ids = _clean_template_user_ids(office, request.data.get('user_ids') or [])
     folder.save()
+    if 'group_ids' in request.data:
+        folder.groups.set(_clean_group_ids(request.data.get('group_ids') or []))
     return Response(_serialize_template_folder(folder))
 
 def _is_hyperadmin(user):

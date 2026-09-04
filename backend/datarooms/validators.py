@@ -400,12 +400,14 @@ class TagValidationError(ValueError):
     """Payload de tag refusé (nom vide/trop long, couleur hors palette)."""
 
 
-def tag_slug(name: str) -> str:
-    """Clé de déduplication d'un nom de tag DANS un office.
+def _fold_slug(name: str) -> str:
+    """Replie un nom en clé de comparaison insensible aux accents/casse —
+    partagé par tag_slug et group_slug (même besoin de déduplication « à
+    l'oreille » dans un catalogue par office).
 
-    Volontairement plus agressive que `slugify` : les accents sont repliés et la
+    Volontairement plus agressif que `slugify` : les accents sont repliés et la
     casse écrasée, pour que « Copropriété », « copropriete » et « COPROPRIETE »
-    soient le même tag. Sans ça, la création à la volée depuis un dossier
+    soient une seule entrée. Sans ça, la création à la volée depuis un dossier
     fabriquerait trois entrées du catalogue pour un seul concept — exactement ce
     que le catalogue est censé éviter.
     """
@@ -413,9 +415,14 @@ def tag_slug(name: str) -> str:
     folded = "".join(c for c in folded if not unicodedata.combining(c))
     slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
     # Un nom entièrement non-latin (cyrillique, idéogrammes…) se réduirait à
-    # une chaîne vide et rendrait tous ces tags identiques : on retombe alors
-    # sur le nom brut normalisé, qui reste une clé exacte.
+    # une chaîne vide et rendrait toutes ces entrées identiques : on retombe
+    # alors sur le nom brut normalisé, qui reste une clé exacte.
     return slug or unicodedata.normalize("NFKC", name).strip().lower()
+
+
+def tag_slug(name: str) -> str:
+    """Clé de déduplication d'un nom de tag DANS un office — voir _fold_slug."""
+    return _fold_slug(name)
 
 
 def clean_tag_payload(data, *, partial: bool = False) -> dict:
@@ -466,3 +473,59 @@ def clean_tag_ids(raw) -> list:
         if value not in ids:
             ids.append(value)
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Groupes de droits (catalogue de l'office — modèle Group, ajouté le 04/09/2026)
+#
+# Même parti pris que Tag : `category` EST un ensemble fermé et court (trois
+# valeurs, mêmes que views.ACCESS_ROLES) — on la vérifie ici. L'appartenance
+# (`user_ids`) n'est PAS validée dans ce fichier : elle dépend de l'office
+# courant (quels OfficeMembership existent vraiment), une information que ce
+# module ne connaît pas — c'est views._clean_group_member_ids qui s'en charge,
+# même défense en profondeur que pour AccessRestriction.user_ids.
+# ---------------------------------------------------------------------------
+
+GROUP_CATEGORIES = ("admin", "membre", "client")
+GROUP_NAME_MAX = 60
+
+
+class GroupValidationError(ValueError):
+    """Payload de groupe refusé (nom vide/trop long, catégorie hors ensemble)."""
+
+
+def group_slug(name: str) -> str:
+    """Clé de déduplication d'un nom de groupe DANS un office — voir _fold_slug."""
+    return _fold_slug(name)
+
+
+def clean_group_payload(data, *, partial: bool = False) -> dict:
+    """Valide {"name": str, "category": str} pour la création (POST) ou la
+    mise à jour (PATCH, `partial=True` — seules les clés présentes sont
+    retournées). Même forme que clean_tag_payload, "category" à la place de
+    "color"."""
+    if not isinstance(data, dict):
+        raise GroupValidationError("payload de groupe invalide")
+
+    cleaned = {}
+
+    if "name" in data or not partial:
+        raw_name = data.get("name")
+        if not isinstance(raw_name, str):
+            raise GroupValidationError("nom requis")
+        name = " ".join(raw_name.split())
+        if not name:
+            raise GroupValidationError("nom requis")
+        if len(name) > GROUP_NAME_MAX:
+            raise GroupValidationError(f"nom trop long ({GROUP_NAME_MAX} caractères maximum)")
+        cleaned["name"] = name
+
+    if "category" in data:
+        category = data.get("category")
+        if category not in GROUP_CATEGORIES:
+            raise GroupValidationError("catégorie de groupe inconnue")
+        cleaned["category"] = category
+    elif not partial:
+        cleaned["category"] = "membre"
+
+    return cleaned

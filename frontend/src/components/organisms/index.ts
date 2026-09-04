@@ -6,6 +6,8 @@ export * from './DashboardTabs';
 export * from './DocumentPreview';
 export * from './DocumentSlideover';
 export * from './Explorer';
+export * from './GroupModal';
+export * from './GroupsEditor';
 export * from './IdentityTab';
 export * from './Modal';
 export * from './ModulesTab';

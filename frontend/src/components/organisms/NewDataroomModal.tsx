@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Select } from '../atoms/Select';
 import { Field } from '../molecules/Field';
 import { FieldRow } from '../molecules/FieldRow';
@@ -14,6 +14,8 @@ export interface NewDataroomTemplateOption {
 
 export interface NewDataroomModalProps {
   open: boolean;
+  /** Erreur renvoyée par l'API à la dernière tentative (droit insuffisant, nom vide…). */
+  error?: string | null;
   onClose: () => void;
   /** `templateId` null = « Dataroom vide », toujours proposée en tête de liste. */
   onCreate: (data: { name: string; portfolioId: string; clientSpaceId: string; templateId: number | null }) => void;
@@ -30,6 +32,7 @@ export interface NewDataroomModalProps {
 // l'office (GET /api/templates/), voir CLAUDE.md.
 export function NewDataroomModal({
   open,
+  error,
   onClose,
   onCreate,
   portfolioOptions,
@@ -40,6 +43,21 @@ export function NewDataroomModal({
   const [portfolioId, setPortfolioId] = useState(portfolioOptions[0]?.id ?? '');
   const [clientSpaceId, setClientSpaceId] = useState(clientSpaceOptions[0]?.id ?? '');
   const [templateId, setTemplateId] = useState<number | null>(null);
+
+  // `Modal` ne démonte jamais ses enfants (elle bascule juste une classe CSS,
+  // voir Modal.tsx) — sans ce reset, rouvrir la modale (après annulation OU
+  // après une création réussie) réaffichait le nom et le modèle de la
+  // tentative précédente, ce qui pouvait laisser croire qu'un nouveau clic
+  // sur "Créer" n'avait rien fait.
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setPortfolioId(portfolioOptions[0]?.id ?? '');
+      setClientSpaceId(clientSpaceOptions[0]?.id ?? '');
+      setTemplateId(null);
+    }
+    // oxlint-disable-next-line exhaustive-deps
+  }, [open]);
 
   return (
     <Modal
@@ -113,6 +131,11 @@ export function NewDataroomModal({
           </div>
         )}
       </Field>
+      {error && (
+        <div className="tiny" style={{ marginTop: 10, color: 'var(--critical)' }}>
+          {error}
+        </div>
+      )}
     </Modal>
   );
 }

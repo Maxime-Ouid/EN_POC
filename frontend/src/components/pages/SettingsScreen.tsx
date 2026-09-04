@@ -13,13 +13,19 @@ import type { IdentityTabProps } from '../organisms/IdentityTab';
 import type { ModulesTabProps } from '../organisms/ModulesTab';
 import { useTopbarSlots } from '../templates/topbarSlots';
 
-export type SettingsTabKey = 'sub3-identite' | 'sub3-apparence' | 'sub3-modules' | 'sub3-template';
+export type SettingsTabKey =
+  | 'sub3-identite'
+  | 'sub3-apparence'
+  | 'sub3-modules'
+  | 'sub3-template'
+  | 'sub3-groupes';
 
 const TABS: TabDef[] = [
   { key: 'sub3-identite', icon: 'building', label: 'Identité' },
   { key: 'sub3-apparence', icon: 'layers', label: 'Apparence' },
   { key: 'sub3-modules', icon: 'grid', label: 'Modules' },
   { key: 'sub3-template', icon: 'clip', label: 'Template' },
+  { key: 'sub3-groupes', icon: 'users', label: 'Groupes' },
 ];
 
 export interface SettingsScreenProps {
@@ -35,6 +41,10 @@ export interface SettingsScreenProps {
    * montrer, l'onglet affiche alors un simple message plutôt qu'un écran vide.
    */
   templatesTab?: ReactNode;
+  /** Gestion des groupes de droits de l'office (GroupsScreen + modale) —
+      ajouté le 04/09/2026, même absence dans les maquettes hors backend
+      (UiKit, PrototypeDemo, V1) que templatesTab. */
+  groupsTab?: ReactNode;
   defaultTab?: SettingsTabKey;
 }
 
@@ -44,7 +54,9 @@ export interface SettingsScreenProps {
 // dataroom).
 // L'onglet Apparence ne prend pas de props : il lit et écrit directement le
 // moteur de thème, qui s'applique à toute l'application, pas à cet écran.
-export function SettingsScreen({ identity, modules, templatesTab, defaultTab = 'sub3-identite' }: SettingsScreenProps) {
+export function SettingsScreen({
+  identity, modules, templatesTab, groupsTab, defaultTab = 'sub3-identite',
+}: SettingsScreenProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(defaultTab);
   const slots = useTopbarSlots();
 
@@ -84,6 +96,17 @@ export function SettingsScreen({ identity, modules, templatesTab, defaultTab = '
           <Card padded style={{ maxWidth: 640 }}>
             <div className="tiny dim">
               La gestion des modèles de dataroom a besoin du backend — pas disponible dans
+              cette maquette.
+            </div>
+          </Card>
+        )}
+      </SubscreenPanel>
+
+      <SubscreenPanel level={3} active={activeTab === 'sub3-groupes'}>
+        {groupsTab ?? (
+          <Card padded style={{ maxWidth: 640 }}>
+            <div className="tiny dim">
+              La gestion des groupes de droits a besoin du backend — pas disponible dans
               cette maquette.
             </div>
           </Card>

@@ -106,6 +106,28 @@ export interface TagSummary {
   usage?: number;
 }
 
+/** Catégorie d'affichage d'un groupe — même trois valeurs que les rôles
+ * cochables d'une restriction d'accès (jamais "superadmin"). Classe
+ * uniquement l'écran de gestion (Groupes → onglet Admin/Membre/Client) : elle
+ * ne conditionne pas qui peut rejoindre le groupe, ni ce que le groupe
+ * accorde — voir backend/datarooms/models.py::Group.
+ */
+export type GroupCategory = 'admin' | 'membre' | 'client';
+
+/**
+ * Un groupe de droits de l'office — GET/POST/PATCH/DELETE /api/groups/.
+ * Troisième critère d'accès sur une restriction, à côté d'un rôle ou d'un
+ * utilisateur nommé (voir AccessRestrictionState.group_ids) : un utilisateur
+ * membre de plusieurs groupes garde le droit le plus permissif parmi eux.
+ */
+export interface GroupSummary {
+  id: number;
+  name: string;
+  slug: string;
+  category: GroupCategory;
+  user_ids: number[];
+}
+
 export interface DataroomSummary {
   id: number;
   name: string;
@@ -135,13 +157,15 @@ export interface FolderLevel {
 
 /**
  * Réponse GET/POST des endpoints d'accès (dataroom, dossier ou document).
- * Accès si l'appelant figure dans `user_ids` OU si son rôle figure dans
- * `allowed_roles` (superadmin toujours ouvert, hors de ces deux listes —
- * voir CLAUDE.md, "État réel du code", 02/09/2026).
+ * Accès si l'appelant figure dans `user_ids`, si son rôle figure dans
+ * `allowed_roles`, OU s'il appartient à l'un des groupes de `group_ids`
+ * (superadmin toujours ouvert, hors de ces trois critères — voir
+ * CLAUDE.md, "État réel du code", groupes ajoutés le 04/09/2026).
  */
 export interface AccessRestrictionState {
   user_ids: number[];
   allowed_roles: string[];
+  group_ids: number[];
 }
 
 /** Une restriction active de l'office, avec libellé résolu — GET /api/access-restrictions/. */
@@ -153,6 +177,7 @@ export interface AccessRestrictionSummary {
   label: string;
   user_ids: number[];
   allowed_roles: string[];
+  group_ids: number[];
 }
 
 /**
@@ -223,6 +248,7 @@ export interface TemplateFolderSummary {
   parent: number | null;
   allowed_roles: string[];
   user_ids: number[];
+  group_ids: number[];
 }
 
 /** Contenu d'un niveau de l'arborescence d'un Template (racine si `parent` omis). */
@@ -386,6 +412,31 @@ export const api = {
    */
   deleteTag: (tagId: number) => apiFetch<void>(`/api/tags/${tagId}/`, { method: 'DELETE' }),
 
+  /** Catalogue de groupes de droits de l'office — ouvert à tout membre (lecture seule). */
+  listGroups: (signal?: AbortSignal) => apiFetch<GroupSummary[]>('/api/groups/', { signal }),
+
+  /**
+   * Crée un groupe — réservé aux admins de l'office. Contrairement à un tag,
+   * un nom déjà pris (même replié) est refusé (409), jamais fusionné en
+   * silence : un groupe touche des droits d'accès.
+   */
+  createGroup: (name: string, category: GroupCategory, userIds?: number[]) =>
+    apiFetch<GroupSummary>('/api/groups/', {
+      method: 'POST',
+      body: { name, category, user_ids: userIds ?? [] },
+    }),
+
+  /** Partiel : n'envoyer que ce qui change (name, category et/ou user_ids). Réservé admin/superadmin. */
+  updateGroup: (groupId: number, patch: { name?: string; category?: GroupCategory; user_ids?: number[] }) =>
+    apiFetch<GroupSummary>(`/api/groups/${groupId}/`, { method: 'PATCH', body: patch }),
+
+  /**
+   * Supprime le groupe ET le retire de toutes les restrictions/modèles qui le
+   * cochaient. Réservé aux admins de l'office. Ne touche à aucun
+   * OfficeMembership de ses membres.
+   */
+  deleteGroup: (groupId: number) => apiFetch<void>(`/api/groups/${groupId}/`, { method: 'DELETE' }),
+
   /**
    * Liste des dossiers. `tagIds` non vide filtre côté serveur en OU (un dossier
    * remonte s'il porte AU MOINS UN des tags demandés) — le filtrage n'est pas
@@ -471,30 +522,33 @@ export const api = {
    * préremplit en bloc via `listAccessRestrictions` (dataroom) ou directement
    * depuis l'arbre du Template, jamais un fetch par ligne.
    */
-  setDataroomAccess: (dataroomId: number, state: { userIds: number[]; allowedRoles: string[] }) =>
+  setDataroomAccess: (
+    dataroomId: number,
+    state: { userIds: number[]; allowedRoles: string[]; groupIds: number[] },
+  ) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/access/`, {
       method: 'POST',
-      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles, group_ids: state.groupIds },
     }),
 
   setFolderAccess: (
     dataroomId: number,
     folderId: number,
-    state: { userIds: number[]; allowedRoles: string[] },
+    state: { userIds: number[]; allowedRoles: string[]; groupIds: number[] },
   ) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/folders/${folderId}/access/`, {
       method: 'POST',
-      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles, group_ids: state.groupIds },
     }),
 
   setDocumentAccess: (
     dataroomId: number,
     documentId: number,
-    state: { userIds: number[]; allowedRoles: string[] },
+    state: { userIds: number[]; allowedRoles: string[]; groupIds: number[] },
   ) =>
     apiFetch<AccessRestrictionState>(`/api/datarooms/${dataroomId}/documents/${documentId}/access/`, {
       method: 'POST',
-      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles },
+      body: { user_ids: state.userIds, allowed_roles: state.allowedRoles, group_ids: state.groupIds },
     }),
 
   /** Toutes les restrictions actives de l'office, libellé résolu — réservé admin/superadmin. */
@@ -608,20 +662,21 @@ export const api = {
     parentId?: number,
     allowedRoles?: string[],
     userIds?: number[],
+    groupIds?: number[],
   ) =>
     apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/`, {
       method: 'POST',
       body: {
         name, parent: parentId ?? null,
-        allowed_roles: allowedRoles ?? [], user_ids: userIds ?? [],
+        allowed_roles: allowedRoles ?? [], user_ids: userIds ?? [], group_ids: groupIds ?? [],
       },
     }),
 
-  /** Partiel : n'envoyer que ce qui change (name, allowed_roles et/ou user_ids). */
+  /** Partiel : n'envoyer que ce qui change (name, allowed_roles, user_ids et/ou group_ids). */
   updateTemplateFolder: (
     templateId: number,
     folderId: number,
-    patch: { name?: string; allowed_roles?: string[]; user_ids?: number[] },
+    patch: { name?: string; allowed_roles?: string[]; user_ids?: number[]; group_ids?: number[] },
   ) =>
     apiFetch<TemplateFolderSummary>(`/api/templates/${templateId}/folders/${folderId}/`, {
       method: 'PATCH',

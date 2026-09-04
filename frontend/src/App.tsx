@@ -32,6 +32,9 @@ import {
   TemplateDetailScreen,
   NewTemplateModal,
   NewTemplateFolderModal,
+  GroupsScreen,
+  type GroupRowData,
+  GroupModal,
 } from './components';
 import { DashboardScreen } from './dashboard';
 import { useSession } from './hooks/useSession';
@@ -45,6 +48,7 @@ import { useDocumentPreview } from './hooks/useDocumentPreview';
 import { useModule } from './hooks/useModule';
 import { useTemplates } from './hooks/useTemplates';
 import { useTemplateTree, type TemplateFolderTreeNode } from './hooks/useTemplateTree';
+import { useGroups } from './hooks/useGroups';
 import { templateEffectiveRoles, dataroomEffectiveRoles as computeDataroomEffectiveRoles } from './access/effectiveRoles';
 import {
   api, type AccessRestrictionSummary, type DocumentSummary, type TagColor, type TagSummary,
@@ -203,7 +207,9 @@ function buildTemplateAccessOriginal(nodes: TemplateFolderTreeNode[]): Record<st
   const map: Record<string, AccessRightsEntry> = {};
   function walk(list: TemplateFolderTreeNode[]) {
     for (const node of list) {
-      map[`folder:${node.id}`] = { allowedRoles: node.allowed_roles, userIds: node.user_ids };
+      map[`folder:${node.id}`] = {
+        allowedRoles: node.allowed_roles, userIds: node.user_ids, groupIds: node.group_ids,
+      };
       walk(node.children);
     }
   }
@@ -250,7 +256,7 @@ function buildDataroomAccessOriginal(
   for (const item of items) {
     if (item.dataroom_id !== dataroomId) continue;
     const rowId = item.kind === 'dataroom' ? 'dataroom' : `${item.kind}:${item.target_id}`;
-    map[rowId] = { allowedRoles: item.allowed_roles, userIds: item.user_ids };
+    map[rowId] = { allowedRoles: item.allowed_roles, userIds: item.user_ids, groupIds: item.group_ids };
   }
   return map;
 }
@@ -307,6 +313,7 @@ export default function App() {
   const [moduleSlug, setModuleSlug] = useState<string | null>(null);
   const [openDataroomId, setOpenDataroomId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [dataroomCreateError, setDataroomCreateError] = useState<string | null>(null);
   const [newFolderModal, setNewFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [openTemplateId, setOpenTemplateId] = useState<number | null>(null);
   const [templateModal, setTemplateModal] = useState<{ mode: 'create' | 'edit'; target?: TemplateRowData } | null>(null);
@@ -315,6 +322,10 @@ export default function App() {
   const [deleteTemplateError, setDeleteTemplateError] = useState<string | null>(null);
   const [newTemplateFolderModal, setNewTemplateFolderModal] = useState<{ parentId: string | undefined } | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [groupModal, setGroupModal] = useState<{ mode: 'create' | 'edit'; target?: GroupRowData } | null>(null);
+  const [groupModalError, setGroupModalError] = useState<string | null>(null);
+  const [groupToDelete, setGroupToDelete] = useState<GroupRowData | null>(null);
+  const [deleteGroupError, setDeleteGroupError] = useState<string | null>(null);
   const [deleteFolderError, setDeleteFolderError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | undefined>();
   const [mfaError, setMfaError] = useState<string | undefined>();
@@ -378,6 +389,13 @@ export default function App() {
   const templates = useTemplates(authenticated && (screen === 'settings' || modalOpen));
   const templateTree = useTemplateTree(screen === 'settings' && openTemplateId !== null ? openTemplateId : null);
 
+  // Catalogue de groupes de l'office — alimente le tableau de droits d'une
+  // dataroom ET d'un Template (troisième critère d'accès, voir
+  // AccessRightsTable), ainsi que l'onglet « Groupes » de Personnalisation
+  // où il se gère. Même granularité que officeUsers/templates : chargé pour
+  // tout l'écran Personnalisation, pas juste son sous-onglet Groupes.
+  const groups = useGroups(authenticated && (screen === 'dataroom' || screen === 'settings'));
+
   // Le thème de l'office est rechargé à la connexion : au montage l'utilisateur
   // est encore anonyme et /api/tenant-theme/ répond 403 (le cache local, lui,
   // est déjà appliqué depuis main.tsx).
@@ -413,6 +431,7 @@ export default function App() {
     ...row,
     allowedRoles: dataroomAccessDraft.draft[row.id]?.allowedRoles ?? [],
     userIds: dataroomAccessDraft.draft[row.id]?.userIds ?? [],
+    groupIds: dataroomAccessDraft.draft[row.id]?.groupIds ?? [],
   }));
 
   // Même patron pour un Template — mais l'état enregistré vit directement sur
@@ -428,6 +447,7 @@ export default function App() {
     ...row,
     allowedRoles: templateAccessDraft.draft[row.id]?.allowedRoles ?? [],
     userIds: templateAccessDraft.draft[row.id]?.userIds ?? [],
+    groupIds: templateAccessDraft.draft[row.id]?.groupIds ?? [],
   }));
   // Rôles effectivement accordés à chaque ligne (directement, ou via un
   // sous-dossier qui les coche déjà) — calculés en direct depuis le
@@ -457,13 +477,14 @@ export default function App() {
   );
 
   const officeUsersForAccess = officeUsers.items.map(u => ({ userId: u.user_id, username: u.username, role: u.role }));
+  const groupsForAccess = groups.items.map(g => ({ groupId: g.id, name: g.name }));
 
   async function saveDataroomAccess() {
     if (!openDataroom) return;
     await Promise.all(
       dataroomAccessDraft.dirtyRowIds.map(rowId => {
-        const entry = dataroomAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [] };
-        const state = { userIds: entry.userIds, allowedRoles: entry.allowedRoles };
+        const entry = dataroomAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [], groupIds: [] };
+        const state = { userIds: entry.userIds, allowedRoles: entry.allowedRoles, groupIds: entry.groupIds };
         if (rowId === 'dataroom') return api.setDataroomAccess(openDataroom.id, state);
         if (rowId.startsWith('folder:')) {
           return api.setFolderAccess(openDataroom.id, Number(rowId.slice('folder:'.length)), state);
@@ -478,10 +499,10 @@ export default function App() {
     if (openTemplateId === null) return;
     await Promise.all(
       templateAccessDraft.dirtyRowIds.map(rowId => {
-        const entry = templateAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [] };
+        const entry = templateAccessDraft.draft[rowId] ?? { allowedRoles: [], userIds: [], groupIds: [] };
         const folderId = Number(rowId.slice('folder:'.length));
         return api.updateTemplateFolder(openTemplateId, folderId, {
-          allowed_roles: entry.allowedRoles, user_ids: entry.userIds,
+          allowed_roles: entry.allowedRoles, user_ids: entry.userIds, group_ids: entry.groupIds,
         });
       }),
     );
@@ -878,6 +899,7 @@ export default function App() {
             templateDescription={openTemplate.description}
             rows={templateAccessTableRows}
             officeUsers={officeUsersForAccess}
+            groups={groupsForAccess}
             onChangeRow={(rowId, next) => templateAccessDraft.setRow(rowId, next)}
             effectiveRoles={templateEffectiveRolesByRowId}
             loading={templateTree.loading || officeUsers.loading}
@@ -958,6 +980,92 @@ export default function App() {
         </>
       )
     );
+
+  // Contenu de l'onglet « Groupes » de Personnalisation — même patron que
+  // templatesTabContent ci-dessus (liste + modale création/édition +
+  // confirmation de suppression), pas de sous-écran détail : un groupe n'a
+  // qu'un nom, une catégorie et des membres, rien à approfondir.
+  const groupRows: GroupRowData[] = groups.items.map(g => ({
+    id: g.id, name: g.name, category: g.category, memberCount: g.user_ids.length,
+  }));
+  const groupsTabContent = (
+    <>
+      <GroupsScreen
+        rows={groupRows}
+        loading={groups.loading}
+        error={groups.error}
+        canManage={canManageTemplates}
+        onCreate={() => {
+          setGroupModalError(null);
+          setGroupModal({ mode: 'create' });
+        }}
+        onEdit={group => {
+          setGroupModalError(null);
+          setGroupModal({ mode: 'edit', target: group });
+        }}
+        onDelete={group => {
+          setDeleteGroupError(null);
+          setGroupToDelete(group);
+        }}
+      />
+      <GroupModal
+        // Même convention que NewTemplateModal : remonter mode + cible remet
+        // les champs à zéro en passant d'un groupe à l'autre.
+        key={groupModal ? `${groupModal.mode}-${groupModal.target?.id ?? 'new'}` : 'closed'}
+        open={groupModal !== null}
+        mode={groupModal?.mode ?? 'create'}
+        initial={
+          groupModal?.target
+            ? {
+                name: groupModal.target.name,
+                category: groupModal.target.category,
+                userIds: groups.items.find(g => g.id === groupModal.target?.id)?.user_ids ?? [],
+              }
+            : undefined
+        }
+        officeUsers={officeUsersForAccess}
+        error={groupModalError}
+        onClose={() => {
+          setGroupModal(null);
+          setGroupModalError(null);
+        }}
+        onSubmit={({ name, category, userIds }) => {
+          setGroupModalError(null);
+          const done =
+            groupModal?.mode === 'edit' && groupModal.target
+              ? groups.update(groupModal.target.id, { name, category, user_ids: userIds })
+              : groups.create(name, category, userIds);
+          done.then(() => setGroupModal(null)).catch((err: Error) => setGroupModalError(err.message));
+        }}
+      />
+      <ConfirmModal
+        open={groupToDelete !== null}
+        title="Supprimer le groupe"
+        confirmLabel="Supprimer"
+        destructive
+        error={deleteGroupError}
+        onCancel={() => {
+          setGroupToDelete(null);
+          setDeleteGroupError(null);
+        }}
+        onConfirm={() => {
+          if (!groupToDelete) return;
+          setDeleteGroupError(null);
+          groups
+            .remove(groupToDelete.id)
+            .then(() => setGroupToDelete(null))
+            .catch((err: Error) => setDeleteGroupError(err.message));
+        }}
+      >
+        {groupToDelete && (
+          <>
+            <strong>{groupToDelete.name}</strong> sera retiré de toutes les restrictions d'accès et
+            modèles qui le cochaient. Les comptes de ses membres ne sont pas affectés.
+          </>
+        )}
+      </ConfirmModal>
+    </>
+  );
 
   return (
     <AppShell
@@ -1181,9 +1289,17 @@ export default function App() {
           />
           <NewDataroomModal
             open={modalOpen}
-            onClose={() => setModalOpen(false)}
+            error={dataroomCreateError}
+            onClose={() => {
+              setDataroomCreateError(null);
+              setModalOpen(false);
+            }}
             onCreate={({ name, templateId }) => {
-              void datarooms.create(name, undefined, templateId).then(() => setModalOpen(false));
+              setDataroomCreateError(null);
+              datarooms
+                .create(name, undefined, templateId)
+                .then(() => setModalOpen(false))
+                .catch((err: Error) => setDataroomCreateError(err.message));
             }}
             portfolioOptions={PORTFOLIO_OPTIONS}
             clientSpaceOptions={CLIENT_SPACE_OPTIONS}
@@ -1265,6 +1381,7 @@ export default function App() {
                 <AccessRightsTable
                   rows={dataroomAccessTableRows}
                   officeUsers={officeUsersForAccess}
+                  groups={groupsForAccess}
                   onChangeRow={(rowId, next) => dataroomAccessDraft.setRow(rowId, next)}
                   loading={accessRestrictionsList.loading || officeUsers.loading}
                   error={dataroomAccessSaveError ?? accessRestrictionsList.error ?? officeUsers.error}
@@ -1350,7 +1467,7 @@ export default function App() {
               const nextUserIds = checked
                 ? [...item.user_ids, restrictionsUser.userId]
                 : item.user_ids.filter(id => id !== restrictionsUser.userId);
-              const state = { userIds: nextUserIds, allowedRoles: item.allowed_roles };
+              const state = { userIds: nextUserIds, allowedRoles: item.allowed_roles, groupIds: item.group_ids };
               const save =
                 item.kind === 'dataroom'
                   ? api.setDataroomAccess(item.dataroom_id, state)
@@ -1458,6 +1575,7 @@ export default function App() {
               "L'activation d'un module se fait aujourd'hui côté Notantis (admin Django) : cet écran montre ce dont l'office dispose réellement, sans le modifier.",
           }}
           templatesTab={templatesTabContent}
+          groupsTab={groupsTabContent}
         />
       )}
     </AppShell>

@@ -1,0 +1,65 @@
+import { Select } from '../atoms/Select';
+import { Tag } from '../atoms/Tag';
+
+export interface AccessEditorGroup {
+  groupId: number;
+  name: string;
+}
+
+export interface GroupsEditorProps {
+  groupIds: number[];
+  groups: AccessEditorGroup[];
+  onAdd: (groupId: number) => void;
+  onRemove: (groupId: number) => void;
+  /** Nom de l'élément édité — sert aux aria-label de la croix de retrait. */
+  targetLabel: string;
+}
+
+/**
+ * Puces de groupes cochés, avec un champ d'ajout TOUJOURS visible en
+ * dessous — même visuel que `NamedUsersEditor`, mais SANS sa logique de
+ * troncature par largeur mesurée : un catalogue de groupes reste, par
+ * construction, une poignée d'entrées curatées par un admin (contrairement
+ * aux utilisateurs nommés, potentiellement nombreux) — pas besoin de "+N
+ * autres…" pour ce premier jet. À ajouter si l'usage réel montre le
+ * contraire (voir CLAUDE.md).
+ */
+export function GroupsEditor({ groupIds, groups, onAdd, onRemove, targetLabel }: GroupsEditorProps) {
+  const groupsById = new Map(groups.map(g => [g.groupId, g]));
+  const availableGroups = groups.filter(g => !groupIds.includes(g.groupId));
+
+  return (
+    <div style={{ width: '100%' }}>
+      {groupIds.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+          {groupIds.map(id => {
+            const label = groupsById.get(id)?.name ?? `#${id}`;
+            return (
+              <Tag key={id} plain onRemove={() => onRemove(id)} removeLabel={`Retirer ${label} de ${targetLabel}`}>
+                {label}
+              </Tag>
+            );
+          })}
+        </div>
+      )}
+      {availableGroups.length > 0 && (
+        <Select
+          small
+          auto
+          value=""
+          aria-label={`Ajouter un groupe à ${targetLabel}`}
+          onChange={e => {
+            if (e.target.value) onAdd(Number(e.target.value));
+          }}
+        >
+          <option value="">+ Ajouter…</option>
+          {availableGroups.map(g => (
+            <option key={g.groupId} value={g.groupId}>
+              {g.name}
+            </option>
+          ))}
+        </Select>
+      )}
+    </div>
+  );
+}

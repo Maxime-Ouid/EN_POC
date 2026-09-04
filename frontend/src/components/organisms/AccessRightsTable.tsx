@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button } from '../atoms/Button';
+import { GroupsEditor, type AccessEditorGroup } from './GroupsEditor';
 import { NamedUsersEditor, type AccessEditorUser } from './NamedUsersEditor';
 
 export type AccessRightsRowKind = 'dataroom' | 'folder' | 'document';
@@ -13,12 +14,17 @@ export interface AccessRightsRow {
   kind: AccessRightsRowKind;
   allowedRoles: string[];
   userIds: number[];
+  /** Groupes cochés (troisième critère d'accès, ajouté le 04/09/2026 — voir
+      CLAUDE.md et backend/datarooms/models.py::Group). */
+  groupIds: number[];
 }
 
 export interface AccessRightsTableProps {
   rows: AccessRightsRow[];
   officeUsers: AccessEditorUser[];
-  onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[] }) => void;
+  /** Catalogue de groupes de l'office — alimente la colonne "Groupes". */
+  groups: AccessEditorGroup[];
+  onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[]; groupIds: number[] }) => void;
   loading?: boolean;
   error?: string | null;
   /**
@@ -47,34 +53,50 @@ const ROLE_COLUMNS: { role: string; label: string }[] = [
  * Tableau de droits d'accès — un composant réutilisé tel quel pour une vraie
  * dataroom (dossiers + documents) ET pour un Template (dossiers seulement) :
  * une ligne par élément, trois cases de rôle (jamais superadmin, toujours
- * ouvert), un champ pour ajouter des utilisateurs nommés, un bouton "Tout
- * cocher" par colonne. CONTRÔLÉ — aucun état réseau ici, aucune requête par
- * case cochée : l'appelant possède le brouillon (voir useAccessRightsDraft) et
- * décide seul du moment où il l'enregistre.
+ * ouvert), un champ pour ajouter des utilisateurs nommés, une colonne
+ * "Groupes" (troisième critère indépendant, ajouté le 04/09/2026 — le droit
+ * le plus permissif entre rôle/utilisateur nommé/groupe l'emporte, voir
+ * views._user_can_access), un bouton "Tout cocher" par colonne de rôle.
+ * CONTRÔLÉ — aucun état réseau ici, aucune requête par case cochée :
+ * l'appelant possède le brouillon (voir useAccessRightsDraft) et décide seul
+ * du moment où il l'enregistre.
  */
 export function AccessRightsTable({
-  rows, officeUsers, onChangeRow, loading, error, effectiveRoles, renderRowActions,
+  rows, officeUsers, groups, onChangeRow, loading, error, effectiveRoles, renderRowActions,
 }: AccessRightsTableProps) {
   function toggleRole(row: AccessRightsRow, role: string, checked: boolean) {
     const allowedRoles = checked ? [...row.allowedRoles, role] : row.allowedRoles.filter(r => r !== role);
-    onChangeRow(row.id, { allowedRoles, userIds: row.userIds });
+    onChangeRow(row.id, { allowedRoles, userIds: row.userIds, groupIds: row.groupIds });
   }
 
   function checkAllForRole(role: string) {
     for (const row of rows) {
       if (!row.allowedRoles.includes(role)) {
-        onChangeRow(row.id, { allowedRoles: [...row.allowedRoles, role], userIds: row.userIds });
+        onChangeRow(row.id, { allowedRoles: [...row.allowedRoles, role], userIds: row.userIds, groupIds: row.groupIds });
       }
     }
   }
 
   function addUser(row: AccessRightsRow, userId: number) {
     if (row.userIds.includes(userId)) return;
-    onChangeRow(row.id, { allowedRoles: row.allowedRoles, userIds: [...row.userIds, userId] });
+    onChangeRow(row.id, { allowedRoles: row.allowedRoles, userIds: [...row.userIds, userId], groupIds: row.groupIds });
   }
 
   function removeUser(row: AccessRightsRow, userId: number) {
-    onChangeRow(row.id, { allowedRoles: row.allowedRoles, userIds: row.userIds.filter(id => id !== userId) });
+    onChangeRow(row.id, {
+      allowedRoles: row.allowedRoles, userIds: row.userIds.filter(id => id !== userId), groupIds: row.groupIds,
+    });
+  }
+
+  function addGroup(row: AccessRightsRow, groupId: number) {
+    if (row.groupIds.includes(groupId)) return;
+    onChangeRow(row.id, { allowedRoles: row.allowedRoles, userIds: row.userIds, groupIds: [...row.groupIds, groupId] });
+  }
+
+  function removeGroup(row: AccessRightsRow, groupId: number) {
+    onChangeRow(row.id, {
+      allowedRoles: row.allowedRoles, userIds: row.userIds, groupIds: row.groupIds.filter(id => id !== groupId),
+    });
   }
 
   return (
@@ -94,6 +116,7 @@ export function AccessRightsTable({
               </th>
             ))}
             <th>Utilisateurs nommés</th>
+            <th>Groupes</th>
             {renderRowActions && <th></th>}
           </tr>
         </thead>
@@ -128,13 +151,22 @@ export function AccessRightsTable({
                   targetLabel={row.label}
                 />
               </td>
+              <td>
+                <GroupsEditor
+                  groupIds={row.groupIds}
+                  groups={groups}
+                  onAdd={groupId => addGroup(row, groupId)}
+                  onRemove={groupId => removeGroup(row, groupId)}
+                  targetLabel={row.label}
+                />
+              </td>
               {renderRowActions && <td>{renderRowActions(row)}</td>}
             </tr>
             );
           })}
           {!loading && !rows.length && (
             <tr>
-              <td colSpan={2 + ROLE_COLUMNS.length + (renderRowActions ? 1 : 0)} className="dim">
+              <td colSpan={3 + ROLE_COLUMNS.length + (renderRowActions ? 1 : 0)} className="dim">
                 Rien à afficher.
               </td>
             </tr>

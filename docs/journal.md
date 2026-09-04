@@ -2447,6 +2447,167 @@ session si le code a bougé.
     symptôme AVANT le second correctif, distinct du "Failed to fetch" côté
     CORS déjà résolu à l'étape 1.
 
+- **✅ Corrigé le 04/09/2026 — création de dataroom silencieusement muette en
+  cas d'échec** : signalé par l'utilisateur — "le bouton pour créer une
+  dataroom ne semble pas l'ajouter à la liste (avec template ou à vide)".
+  **Le câblage lui-même fonctionnait déjà** — vérifié en Chrome réel avant
+  tout correctif : création à vide ET depuis le modèle "Vente immobilière —
+  standard" (14 rubriques, arborescence complète reproduite) toutes deux
+  réussies, la liste se met à jour immédiatement. Le vrai défaut trouvé en
+  lisant `App.tsx` : `onCreate={({ name, templateId }) => { void
+  datarooms.create(name, undefined, templateId).then(() =>
+  setModalOpen(false)); }}` n'avait **aucun `.catch()`** — seul endroit de
+  tout le fichier à mutualiser une mutation API sans ce filet (comparé à
+  chaque autre modale : `.then(() => setXModal(null)).catch((err: Error) =>
+  setXError(err.message))`, motif systématique ailleurs). Un rejet — nom
+  vide, droit insuffisant (rôle `client`, exclu depuis le 02/09/2026),
+  n'importe quelle erreur réseau — restait donc invisible : la modale ne se
+  fermait pas, la liste ne bougeait pas, rien à l'écran. Reproduit en
+  Chrome après correctif en soumettant un nom vide (le backend répond `400
+  "nom requis"`) : avant, silence total ; après, message affiché sous le
+  sélecteur de modèle sans fermer la modale.
+  **Second défaut trouvé en vérifiant, non signalé par l'utilisateur** :
+  `Modal` (`components/organisms/Modal.tsx`) ne démonte jamais ses enfants
+  (elle bascule juste une classe CSS `overlay is-active`) — l'état interne
+  de `NewDataroomModal` (nom, modèle choisi) survivait donc d'une ouverture
+  à l'autre. Reproduit en Chrome : créer "Test Creation Bug" puis rouvrir la
+  modale réaffichait encore "Test Creation Bug" dans le champ nom. Anodin en
+  soi, mais aggravait la perception du bug signalé (un nouveau clic sur
+  "Créer" avec un état visiblement déjà "utilisé" pouvait laisser croire
+  qu'il ne se passait rien).
+  - **Correctifs** : `App.tsx` gagne `dataroomCreateError` (état local) +
+    `.catch((err: Error) => setDataroomCreateError(err.message))`, réinitialisé
+    à l'ouverture et à la fermeture — même motif que partout ailleurs dans ce
+    fichier. `NewDataroomModal.tsx` gagne une prop `error?: string | null`
+    affichée en rouge (`var(--critical)`, même style que `NewOfficeModal`) et
+    un `useEffect` qui réinitialise `name`/`portfolioId`/`clientSpaceId`/
+    `templateId` à chaque passage de `open` à `true` (`Modal` ne se démontant
+    jamais, c'est le seul point d'accroche fiable pour "repartir à neuf" —
+    couvre aussi bien une réouverture après annulation qu'après une création
+    réussie).
+  - **Pas de changement backend** — la fonctionnalité de création existait
+    et fonctionnait déjà correctement, confirmé avant tout correctif.
+  - `tsc -b` (0 erreur), `npm run lint` (0 erreur ; 1 nouvel avertissement
+    `react/set-state-in-effect` sur `NewDataroomModal.tsx`, même famille déjà
+    tolérée ailleurs — resynchronisation d'un état local depuis une prop qui
+    change, voir `RenameFolderModal.tsx`/`DataroomDetailScreen.tsx`),
+    `npm run check:ds` (190 fichiers, aucun écart nouveau), `npm run build`
+    sans erreur. Aucun test backend à relancer (chantier frontend pur).
+  - **Vérifié en Chrome réel** (`alice`, admin, `officea.localhost`) :
+    création à vide (liste 6→7, nouvelle entrée en tête) et depuis un modèle
+    réel (6→7→8, arborescence à 14 rubriques reproduite) toutes deux
+    confirmées AVANT le correctif (le bug rapporté n'était donc pas un défaut
+    de câblage) ; après correctif, réouverture de la modale confirmée à
+    l'état neuf (champ nom vide, "Dataroom vide" resélectionnée) et
+    soumission à vide confirmée affichant "nom requis" sans fermer la
+    modale. Les deux datarooms de test créées pour la vérification initiale
+    supprimées après coup via le shell Django (aucune UI de suppression de
+    dataroom n'existe dans cette app, déjà documenté).
+
+- **✅ Fait le 04/09/2026 — groupes de droits par office (troisième critère
+  d'accès, à côté du rôle et de l'utilisateur nommé)** : demande utilisateur
+  — "je voudrais que dans les catégories admin, membre et client, il soit
+  possible de créer des groupes et de les attribuer aux users. Même si des
+  droits se croisent, on garde le droit le plus poussé." Confirmé réalisable
+  avant d'implémenter, avec un choix de conception explicite : **extension
+  purement additive** du mécanisme existant plutôt que remplacement du rôle —
+  `OfficeMembership.role` ne change pas (toujours seul déterminant du rang de
+  gestion : qui peut gérer qui, bypass superadmin, seuil de création de
+  dataroom). Le "droit le plus poussé l'emporte" est obtenu gratuitement :
+  `allowed_roles`/`user_ids` étaient déjà résolus en OU logique dans
+  `_user_can_access`, ajouter les groupes comme troisième critère OU donne
+  exactement la sémantique demandée sans toucher aux deux premiers ni migrer
+  de données existantes.
+  - **Backend** : nouveau modèle `Group` (base tenant, même patron que `Tag`
+    — catalogue par office, `slug` dédupliqué via `group_slug`, factorisé
+    avec `tag_slug` derrière un `_fold_slug` commun dans `validators.py`).
+    Champs : `name`, `slug`, `category` (admin/membre/client — mêmes valeurs
+    que `views.ACCESS_ROLES`, mais PUREMENT un classement d'affichage de
+    l'écran de gestion : n'importe quel membre peut rejoindre n'importe quel
+    groupe, `category` ne restreint rien), `user_ids` (JSONField, mêmes
+    raisons cross-DB que `AccessRestriction.user_ids` — pas de FK vers User).
+    `AccessRestriction`/`TemplateFolder` gagnent un vrai `ManyToManyField`
+    vers `Group` (pas de JSONField ici : Group vit dans la MÊME base tenant,
+    contrairement à User — une vraie FK est possible et plus naturelle).
+    `_user_can_access` : troisième branche `any(user.id in g.user_ids for g
+    in restriction.groups.all())`, résolue en Python plutôt qu'une requête
+    JSON-contains (peu de groupes par restriction, SQLite n'offre pas
+    d'opérateur fiable pour ça). `_apply_template` copie `tf.groups` tel quel
+    sur la nouvelle `AccessRestriction` (pas de re-résolution nécessaire,
+    contrairement à `user_ids` : un `Group` référencé par un `TemplateFolder`
+    appartient forcément déjà à cet office). Nouveaux endpoints
+    `GET/POST /api/groups/` et `PATCH/DELETE /api/groups/<id>/` — GET ouvert
+    à tout membre (un tableau de droits doit afficher le catalogue même
+    consulté par un simple membre), POST/PATCH/DELETE réservés admin/
+    superadmin. **Différence assumée avec `Tag`** : un nom déjà pris est
+    REFUSÉ (409), jamais fusionné en silence — un groupe touche des droits
+    d'accès, une fusion muette serait surprenante là où elle est acceptable
+    pour un tag de classement. `dataroom_access_view`/`folder_access_view`/
+    `document_access_view`/`access_restrictions_view`/
+    `template_folders_view`/`template_folder_detail_view` étendus pour
+    porter `group_ids` en plus de `user_ids`/`allowed_roles`, même patron
+    partout. Migration `0009_group_accessrestriction_groups_templatefolder_
+    groups` appliquée aux 4 tenants existants via `migrate_all_tenants`.
+  - **Tests** (`GroupApiTests` + `GroupValidatorTests`, 23 nouveaux) :
+    catalogue (création réservée admin, listage ouvert, nom dupliqué refusé
+    en 409, membres filtrés aux vrais `OfficeMembership` de l'office),
+    accès (un client SANS accès par défaut gagne l'accès via son groupe sur
+    une restriction ; un client dans un AUTRE groupe non coché reste
+    refusé ; **appartenance à deux groupes, un seul coché sur la
+    restriction → accès accordé quand même**, preuve directe du "droit le
+    plus poussé l'emporte" demandé ; suppression d'un groupe retire l'accès
+    qu'il accordait ; `group_ids` bien renvoyé par `access-restrictions/` ;
+    application d'un Template dont un `TemplateFolder` coche un groupe
+    reproduit correctement l'accès sur la vraie dataroom créée). Suite
+    complète : **18/18 tests verts** pour la nouvelle classe ; relancé aussi
+    `TagApiTests`/`DataroomTemplateTests`/`RoleBasedDefaultAccessTests`/
+    `AccessRestrictionPermissionTests`/`PathVisibilityTests`/
+    `HyperadminTests`/`SuperadminAndRoleAccessTests` (49 tests, zones
+    touchées par cette extension) — aucune régression.
+  - **Frontend** : `useGroups` (nouveau hook, même patron que `useTags`),
+    `GroupsEditor` (nouveau composant — puces + sélecteur d'ajout, SANS la
+    logique de troncature par largeur mesurée de `NamedUsersEditor` : un
+    catalogue de groupes reste une poignée d'entrées curatées par un admin,
+    pas potentiellement nombreux comme les utilisateurs nommés — à ajouter
+    si l'usage réel montre le contraire). `AccessRightsTable` gagne une
+    colonne "Groupes" (troisième dimension éditable, à côté des rôles et des
+    utilisateurs nommés), utilisée IDENTIQUEMENT par l'onglet "Droits
+    d'accès" d'une vraie dataroom ET par l'écran Template — même garantie de
+    visuel unique que pour les utilisateurs nommés.
+    `useAccessRightsDraft`/`AccessRightsEntry` gagnent `groupIds` (brouillon
+    local groupé, même mécanique que `allowedRoles`/`userIds` — un seul
+    aller-retour réseau par ligne modifiée à l'enregistrement explicite, pas
+    un par case cochée). **Nouvel onglet "Groupes" dans Personnalisation**
+    (`GroupsScreen`, liste + `GroupModal` create/edit avec sélecteur de
+    membres par cases à cocher — même patron que `TemplatesListScreen`/
+    `NewTemplateModal`), plutôt qu'une entrée de navigation top-level : même
+    raisonnement déjà appliqué aux Templates le 02/09/2026 (éviter la
+    prolifération d'entrées dans la section Office).
+  - `tsc -b` (0 erreur), `npm run lint` (0 erreur, aucun nouvel
+    avertissement), `npm run check:ds` (194 fichiers, aucun écart nouveau),
+    `npm run build` sans erreur.
+  - **Vérifié en Chrome réel** (`alice`, admin, `officea.localhost`) :
+    onglet "Groupes" de Personnalisation accessible, création d'un groupe
+    "Notaires associés" (catégorie Membre, membre "bob" coché) confirmée en
+    liste ; colonne "Groupes" présente et fonctionnelle sur le tableau de
+    droits d'une vraie dataroom (HOLA) ET sur un Template réel ("Vente
+    immobilière — standard", 14 rubriques) ; groupe assigné à la racine de
+    HOLA, enregistré, **persistance confirmée après un rechargement complet
+    de la page** (pas seulement en mémoire côté client). Groupe de test
+    supprimé après vérification (confirmation modale affichant le bon texte
+    d'avertissement). **Piège d'automatisation rencontré, déjà documenté
+    ailleurs dans ce journal** : les `<select>` natifs ne réagissent pas de
+    façon fiable à un simple `computer.left_click` dans cette session —
+    contourné cette fois par navigation clavier (clic pour ouvrir, `Down` +
+    `Return`) plutôt que `javascript_tool` (refusé par l'utilisateur au
+    moment du test).
+  - **Explicitement différé, comme convenu avec l'utilisateur avant de
+    lancer ce chantier** : capacités par groupe (ex. "peut créer une
+    dataroom", qui remplacerait à terme certains usages des catégories
+    admin/membre/client) — le socle actuel (catalogue de groupes + critère
+    d'accès en OU) est construit pour s'y prêter le moment venu, mais rien
+    de cette évolution n'est implémenté ici.
+
 ## Fusion du 01/09/2026 — `back/EN_evolution_suite` ⇄ `origin/front/design-system-suite`
 
 **⚠️ Branche de sauvegarde créée avant cette fusion : `back/EN_evolution_suite-backup-01-09`**

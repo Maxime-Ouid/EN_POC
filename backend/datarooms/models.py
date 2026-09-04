@@ -175,6 +175,51 @@ class Tag(models.Model):
     def __str__(self):
         return self.name
 
+class Group(models.Model):
+    """Groupe de droits par office — sixième modèle métier tenant, même patron
+    que Tag : catalogue propre à CET office (isolation physique, pas de
+    colonne office_id), `slug` sert de clé de déduplication dans la base
+    tenant.
+
+    Sert de TROISIÈME critère d'accès sur AccessRestriction/TemplateFolder, à
+    côté de `allowed_roles` et `user_ids` — les trois sont indépendants (accès
+    si l'un OU l'autre est vrai, voir views._user_can_access) : un utilisateur
+    membre de plusieurs groupes aux droits différents garde le droit le plus
+    permissif parmi eux, jamais le plus restrictif.
+
+    `category` (admin/membre/client, mêmes valeurs que views.ACCESS_ROLES)
+    n'est qu'un classement d'AFFICHAGE dans l'écran de gestion des groupes —
+    elle ne conditionne PAS qui peut rejoindre le groupe : un membre peut très
+    bien être ajouté à un groupe de catégorie "admin" sans que son
+    OfficeMembership.role change. Le rôle reste l'UNIQUE déterminant du rang
+    de gestion (qui peut gérer qui, bypass superadmin, seuil de création de
+    dataroom...) — les groupes ne touchent qu'à la visibilité de contenu,
+    jamais à ces permissions-là (périmètre volontairement restreint pour ce
+    premier jet, susceptible de s'étendre — voir CLAUDE.md).
+
+    `user_ids` (JSONField, liste d'entiers) porte l'appartenance — pas de FK
+    vers User/OfficeMembership (base default, cross-DB impossible avec ce
+    mécanisme, même contrainte que Dataroom -> Office). Filtrés contre les
+    OfficeMembership réels de l'office à chaque écriture
+    (views._clean_group_member_ids), même défense en profondeur que
+    _set_restriction pour user_ids."""
+    CATEGORY_CHOICES = [
+        ("admin", "Admin"),
+        ("membre", "Membre"),
+        ("client", "Client"),
+    ]
+    name = models.CharField(max_length=60)
+    slug = models.SlugField(max_length=80, unique=True)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="membre")
+    user_ids = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["category", "name"]
+
+    def __str__(self):
+        return self.name
+
 class Dataroom(models.Model):
     """Modèle métier tenant : vit dans la base de l'office (tenant_<subdomain>), pas
     dans la base default. Volontairement pas de ForeignKey vers Office — l'office est
@@ -226,8 +271,9 @@ class AccessRestriction(models.Model):
     Dataroom/Folder/Document : vit dans la base tenant, absent de SHARED_MODELS
     par conception (voir tenancy/router.py).
 
-    Deux critères d'accès, indépendants l'un de l'autre (accès si l'un OU
-    l'autre est vrai — voir views._user_can_access, changement du 02/09/2026) :
+    Trois critères d'accès, indépendants les uns des autres (accès si l'un
+    OU l'autre est vrai — voir views._user_can_access ; groupes ajoutés le
+    04/09/2026) :
     - `user_ids` (JSONField, liste d'entiers) — des utilisateurs nommés
       individuellement. Pas de ForeignKey vers User : User vit dans la base
       default, une vraie FK cross-DB n'est pas possible avec ce mécanisme —
@@ -236,6 +282,11 @@ class AccessRestriction(models.Model):
       JAMAIS "superadmin", voir plus bas) — n'importe quel membre de l'office
       ayant l'un de ces rôles pour CET office, sans avoir à être nommé
       individuellement.
+    - `groups` (ManyToManyField vers Group — FK classique valide ici, Group
+      vit dans la MÊME base tenant, contrairement à User/Office) —
+      n'importe quel membre de l'un des groupes cochés. Un utilisateur membre
+      de plusieurs groupes garde le droit le plus permissif parmi eux (OU
+      logique, jamais une intersection).
     Un superadmin a TOUJOURS accès, avant même de regarder cette ligne — pas
     une case parmi d'autres dans `allowed_roles`, un court-circuit dans
     views._user_can_access. C'est pour ça qu'"superadmin" n'apparaît jamais
@@ -266,6 +317,7 @@ class AccessRestriction(models.Model):
     )
     user_ids = models.JSONField(default=list)
     allowed_roles = models.JSONField(default=list, blank=True)
+    groups = models.ManyToManyField(Group, blank=True, related_name="access_restrictions")
 
     def __str__(self):
         target = self.dataroom or self.folder or self.document
@@ -311,7 +363,13 @@ class TemplateFolder(models.Model):
       de l'office au moment de l'application (un utilisateur nommé ici peut
       avoir quitté l'office entre-temps) — seule "résolution" encore
       nécessaire, même défense en profondeur que views._set_restriction.
-    Les deux vides = aucune AccessRestriction créée pour le Folder obtenu, qui
+    - `groups` (ManyToManyField vers Group, ajouté le 04/09/2026 — même
+      critère qu'AccessRestriction.groups) copié TEL QUEL à l'application,
+      comme `allowed_roles` : Group vit dans la MÊME base tenant que
+      TemplateFolder, un groupe référencé ici appartient donc forcément déjà
+      à cet office, pas de re-résolution nécessaire (contrairement à
+      `user_ids`).
+    Les trois vides = aucune AccessRestriction créée pour le Folder obtenu, qui
     reste alors au comportement d'accès par défaut selon le rôle (voir
     views._user_can_access : ouvert pour membre/admin/superadmin, fermé pour
     client)."""
@@ -322,6 +380,7 @@ class TemplateFolder(models.Model):
     name = models.CharField(max_length=255)
     allowed_roles = models.JSONField(default=list, blank=True)
     user_ids = models.JSONField(default=list, blank=True)
+    groups = models.ManyToManyField(Group, blank=True, related_name="template_folders")
 
     def __str__(self):
         return self.name

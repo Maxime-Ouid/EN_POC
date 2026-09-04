@@ -10,6 +10,7 @@ from .views import (
     template_folder_detail_view, hyperadmin_offices_view, hyperadmin_office_detail_view,
     hyperadmin_modules_view, hyperadmin_superadmins_view,
     search_view, tags_view, tag_detail_view, dataroom_tags_view, document_tags_view,
+    groups_view, group_detail_view,
 )
 
 urlpatterns = [
@@ -30,6 +31,8 @@ urlpatterns = [
     path('search/', search_view),
     path('tags/', tags_view),
     path('tags/<int:tag_id>/', tag_detail_view),
+    path('groups/', groups_view),
+    path('groups/<int:group_id>/', group_detail_view),
     path('datarooms/', datarooms_view),
     path('datarooms/<int:dataroom_id>/tags/', dataroom_tags_view),
     path('datarooms/<int:dataroom_id>/documents/', documents_view),

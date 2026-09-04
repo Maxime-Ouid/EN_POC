@@ -11,6 +11,7 @@ export interface TemplateFolderTreeNode {
   name: string;
   allowed_roles: string[];
   user_ids: number[];
+  group_ids: number[];
   children: TemplateFolderTreeNode[];
 }
 
@@ -49,6 +50,7 @@ export function useTemplateTree(templateId: number | null) {
             name: folder.name,
             allowed_roles: folder.allowed_roles,
             user_ids: folder.user_ids,
+            group_ids: folder.group_ids,
             children: await walk(folder.id),
           })),
         );

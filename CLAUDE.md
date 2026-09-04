@@ -362,6 +362,17 @@ prérequis machine. Le tenir à jour si les commandes ci-dessus changent.
     personnalise sa palette voit ses tags suivre — ce qu'un `#7c3aed` figé en base
     empêcherait. Même parti pris que `Office.theme` : le catalogue vit côté front, le
     backend stocke et borne.
+- `Group` : modèle métier tenant (fait le 04/09/2026) — même patron que `Tag`
+  (catalogue par office, `slug` dédupliqué via `group_slug`). C'est un
+  **groupe de droits transverse aux rôles** : `AccessRestriction`/
+  `TemplateFolder` gagnent un `ManyToManyField(Group)`, troisième critère
+  d'accès OU-logique à côté de `allowed_roles`/`user_ids` — un utilisateur
+  membre de plusieurs groupes garde le droit le plus permissif parmi eux
+  (voir `views._user_can_access`). `category` (admin/membre/client) n'est
+  qu'un classement d'affichage de l'écran de gestion, elle ne restreint pas
+  qui peut rejoindre le groupe. `OfficeMembership.role` reste inchangé et
+  seul déterminant du rang de gestion — les groupes n'y touchent pas, voir
+  `docs/journal.md` (04/09/2026) pour le détail.
 - Les futurs modèles métier propres à un office suivront le même principe que
   `Dataroom`/`Document` : vivre dans la base du tenant, pas dans la base par défaut.
 
@@ -618,6 +629,20 @@ dispositif préconfiguré : leur premier login demande un enrôlement (QR code).
       ci-dessous — la fonctionnalité, elle, n'a pas changé, déjà entièrement
       livrée. Seul point encore ouvert : non vérifié en navigateur (voir
       `docs/journal.md`) — à couvrir avant de le considérer clos pour de bon.
+- [x] **Groupes de droits par office** (catégories admin/membre/client,
+      cumul du droit le plus permissif en cas d'appartenances multiples) —
+      fait le 04/09/2026 : modèle `Group`, troisième critère OU-logique sur
+      `AccessRestriction`/`TemplateFolder` (à côté du rôle et de
+      l'utilisateur nommé), sans toucher à `OfficeMembership.role` (rang de
+      gestion inchangé). Écran de gestion sous Personnalisation → onglet
+      « Groupes » (liste + création/édition avec sélecteur de membres),
+      colonne « Groupes » ajoutée à `AccessRightsTable` (dataroom ET
+      Template). 18/18 tests dédiés + 49 tests de non-régression sur les
+      zones touchées, vérifié en Chrome réel (persistance confirmée après
+      rechargement complet). Capacités par groupe (ex. droit de création de
+      dataroom porté par le groupe plutôt que par le rôle) explicitement
+      différées — voir `docs/journal.md` pour le détail complet et la
+      discussion de conception qui a précédé l'implémentation.
 - [ ] Alignement visuel avec les captures V1 de référence (`docs/reference-v1/`) — pas
       commencé, en attente de maquettes complémentaires
 - [x] Personnalisation visuelle par office (`Office.theme`) — backend fusionné le

@@ -1,6 +1,7 @@
 import { Button } from '../atoms/Button';
 import { Icon } from '../atoms/Icon';
 import { AccessRightsTable, type AccessRightsRow } from '../organisms/AccessRightsTable';
+import type { AccessEditorGroup } from '../organisms/GroupsEditor';
 import type { AccessEditorUser } from '../organisms/NamedUsersEditor';
 import type { ReactNode } from 'react';
 
@@ -12,7 +13,8 @@ export interface TemplateDetailScreenProps {
       dataroom (voir `AccessRightsTable`). */
   rows: AccessRightsRow[];
   officeUsers: AccessEditorUser[];
-  onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[] }) => void;
+  groups: AccessEditorGroup[];
+  onChangeRow: (rowId: string, next: { allowedRoles: string[]; userIds: number[]; groupIds: number[] }) => void;
   /** Rôles EFFECTIVEMENT accordés à chaque ligne (id "folder:<id>") via un
       sous-dossier qui les coche explicitement, calculés en direct depuis le
       brouillon — voir `access/effectiveRoles.ts::templateEffectiveRoles`.
@@ -48,6 +50,7 @@ export function TemplateDetailScreen({
   templateDescription,
   rows,
   officeUsers,
+  groups,
   onChangeRow,
   effectiveRoles,
   loading,
@@ -100,6 +103,7 @@ export function TemplateDetailScreen({
             <AccessRightsTable
               rows={rows}
               officeUsers={officeUsers}
+              groups={groups}
               onChangeRow={onChangeRow}
               loading={loading}
               error={error}

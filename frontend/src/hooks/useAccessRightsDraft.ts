@@ -3,16 +3,19 @@ import { useCallback, useEffect, useState } from 'react';
 export interface AccessRightsEntry {
   allowedRoles: string[];
   userIds: number[];
+  groupIds: number[];
 }
 
-const EMPTY_ENTRY: AccessRightsEntry = { allowedRoles: [], userIds: [] };
+const EMPTY_ENTRY: AccessRightsEntry = { allowedRoles: [], userIds: [], groupIds: [] };
 
 function sameEntry(a: AccessRightsEntry, b: AccessRightsEntry): boolean {
   return (
     a.allowedRoles.length === b.allowedRoles.length &&
     a.allowedRoles.every(r => b.allowedRoles.includes(r)) &&
     a.userIds.length === b.userIds.length &&
-    a.userIds.every(id => b.userIds.includes(id))
+    a.userIds.every(id => b.userIds.includes(id)) &&
+    a.groupIds.length === b.groupIds.length &&
+    a.groupIds.every(id => b.groupIds.includes(id))
   );
 }
 

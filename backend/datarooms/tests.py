@@ -19,7 +19,8 @@ from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from .models import (
-    AccessRestriction, Dataroom, Document, Folder, HyperadminAccess, Module, Office, OfficeMembership, Tag,
+    AccessRestriction, Dataroom, Document, Folder, Group, HyperadminAccess, Module, Office, OfficeMembership,
+    Tag, Template, TemplateFolder,
 )
 from .tenancy.context import get_current_tenant, reset_current_tenant, set_current_tenant, TenantContext
 from .tenancy.middleware import TenantResolutionMiddleware
@@ -28,9 +29,9 @@ from .tenancy.router import TenantRouter
 from .tenancy.sso import consume_ticket, issue_ticket
 from .validators import (
     DASHBOARD_MAX_PAGES, DASHBOARD_MAX_PAGE_NAME, DASHBOARD_MAX_WIDGETS, LOGO_MAX_BYTES,
-    DashboardValidationError, TagValidationError, ThemeValidationError,
-    clean_dashboard_payload, clean_tag_payload, clean_theme_payload,
-    is_accepted_extension, tag_slug,
+    DashboardValidationError, GroupValidationError, TagValidationError, ThemeValidationError,
+    clean_dashboard_payload, clean_group_payload, clean_tag_payload, clean_theme_payload,
+    group_slug, is_accepted_extension, tag_slug,
 )
 
 User = get_user_model()
@@ -3346,3 +3347,246 @@ class TagApiTests(unittest.TestCase):
         self.addCleanup(etranger.delete)
         self.client.force_login(etranger)
         self.assertEqual(self.client.get("/api/tags/", HTTP_HOST=self._host()).status_code, 403)
+
+
+class GroupValidatorTests(TestCase):
+    def test_group_slug_folds_accents_and_case(self):
+        self.assertEqual(group_slug("Notaires"), group_slug("notaires"))
+        self.assertEqual(group_slug("Étude"), "etude")
+
+    def test_clean_group_payload_defaults_category_to_membre(self):
+        cleaned = clean_group_payload({"name": "Notaires"})
+        self.assertEqual(cleaned, {"name": "Notaires", "category": "membre"})
+
+    def test_clean_group_payload_rejects_unknown_category(self):
+        with self.assertRaises(GroupValidationError):
+            clean_group_payload({"name": "Notaires", "category": "superadmin"})
+
+    def test_clean_group_payload_rejects_empty_name(self):
+        with self.assertRaises(GroupValidationError):
+            clean_group_payload({"name": "   "})
+
+    def test_clean_group_payload_partial_ignores_missing_keys(self):
+        self.assertEqual(clean_group_payload({"category": "admin"}, partial=True), {"category": "admin"})
+
+
+class GroupApiTests(unittest.TestCase):
+    """Catalogue de groupes (/api/groups/...) et leur rôle de troisième critère
+    d'accès sur AccessRestriction/TemplateFolder — voir models.Group et
+    views._user_can_access. Même montage que TagApiTests (tenant sqlite dédié,
+    migré/nettoyé par test)."""
+
+    SUBDOMAIN = "grouptest"
+
+    def setUp(self):
+        self.client = Client()
+
+        self.alias = ensure_tenant_registered(self.SUBDOMAIN)
+        call_command("migrate", database=self.alias, verbosity=0)
+        db_path = tenant_db_path(self.SUBDOMAIN)
+
+        def _cleanup_tenant_db():
+            connections[self.alias].close()
+            connections.databases.pop(self.alias, None)
+            db_path.unlink(missing_ok=True)
+
+        self.addCleanup(_cleanup_tenant_db)
+
+        self.office = Office.objects.create(subdomain=self.SUBDOMAIN, name="Group Office")
+        self.addCleanup(self.office.delete)
+
+        self.admin = User.objects.create_user(username="group_admin", password="pw123456")
+        self.addCleanup(self.admin.delete)
+        OfficeMembership.objects.create(user=self.admin, office=self.office, role="admin")
+
+        self.membre = User.objects.create_user(username="group_membre", password="pw123456")
+        self.addCleanup(self.membre.delete)
+        OfficeMembership.objects.create(user=self.membre, office=self.office, role="membre")
+
+        self.piece_rapportee = User.objects.create_user(username="group_client", password="pw123456")
+        self.addCleanup(self.piece_rapportee.delete)
+        OfficeMembership.objects.create(user=self.piece_rapportee, office=self.office, role="client")
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            self.dataroom = Dataroom.objects.create(name="Succession Renard")
+            self.doc = Document.objects.create(
+                dataroom=self.dataroom, folder=None, name="acte.pdf", file="fake/acte.pdf"
+            )
+        finally:
+            reset_current_tenant(token)
+
+    def _host(self):
+        return f"{self.SUBDOMAIN}.localhost:8000"
+
+    def _post(self, path, payload):
+        return self.client.post(
+            path, data=json.dumps(payload), content_type="application/json", HTTP_HOST=self._host()
+        )
+
+    def _patch(self, path, payload):
+        return self.client.patch(
+            path, data=json.dumps(payload), content_type="application/json", HTTP_HOST=self._host()
+        )
+
+    def _create_group(self, name, category="membre", user_ids=None):
+        res = self._post("/api/groups/", {"name": name, "category": category, "user_ids": user_ids or []})
+        self.assertEqual(res.status_code, 201, res.content)
+        return res.json()
+
+    # --- catalogue -------------------------------------------------------
+
+    def test_a_member_can_list_but_not_create(self):
+        self.client.force_login(self.membre)
+        self.assertEqual(self.client.get("/api/groups/", HTTP_HOST=self._host()).status_code, 200)
+        res = self._post("/api/groups/", {"name": "Notaires", "category": "membre"})
+        self.assertEqual(res.status_code, 403, res.content)
+
+    def test_an_admin_can_create_a_group_with_members(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Notaires", category="admin", user_ids=[self.membre.id])
+        self.assertEqual(group["name"], "Notaires")
+        self.assertEqual(group["category"], "admin")
+        self.assertEqual(group["user_ids"], [self.membre.id])
+
+    def test_member_ids_are_filtered_to_real_office_members(self):
+        # Un id étranger à l'office (ici un simple entier arbitraire) est
+        # silencieusement ignoré — même défense en profondeur que les
+        # restrictions d'accès (_clean_group_member_ids).
+        self.client.force_login(self.admin)
+        group = self._create_group("Notaires", user_ids=[self.membre.id, 999999])
+        self.assertEqual(group["user_ids"], [self.membre.id])
+
+    def test_duplicate_name_is_rejected_not_merged(self):
+        # Contrairement à un Tag (fusion silencieuse), un groupe touche des
+        # droits d'accès : un nom déjà pris (même replié) est un conflit,
+        # jamais une fusion muette.
+        self.client.force_login(self.admin)
+        self._create_group("Notaires")
+        res = self._post("/api/groups/", {"name": "NOTAIRES", "category": "membre"})
+        self.assertEqual(res.status_code, 409, res.content)
+
+    def test_only_an_admin_can_rename_or_delete(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Notaires")
+        self.client.force_login(self.membre)
+        self.assertEqual(
+            self._patch(f"/api/groups/{group['id']}/", {"name": "Autre"}).status_code, 403
+        )
+        self.assertEqual(
+            self.client.delete(f"/api/groups/{group['id']}/", HTTP_HOST=self._host()).status_code, 403
+        )
+
+    def test_rename_updates_membership_and_category(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Notaires", category="membre")
+        res = self._patch(
+            f"/api/groups/{group['id']}/",
+            {"name": "Clercs", "category": "admin", "user_ids": [self.membre.id]},
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertEqual(body["name"], "Clercs")
+        self.assertEqual(body["category"], "admin")
+        self.assertEqual(body["user_ids"], [self.membre.id])
+
+    def test_a_non_member_gets_nothing(self):
+        etranger = User.objects.create_user(username="group_etranger", password="pw123456")
+        self.addCleanup(etranger.delete)
+        self.client.force_login(etranger)
+        self.assertEqual(self.client.get("/api/groups/", HTTP_HOST=self._host()).status_code, 403)
+
+    # --- troisième critère d'accès (_user_can_access) ---------------------
+
+    def test_client_in_group_gains_access_via_restriction(self):
+        # Sans restriction, un client n'a par défaut aucun accès (comportement
+        # inchangé, voir RoleBasedDefaultAccessTests). Une restriction qui
+        # coche le GROUPE du client (pas son id, pas son rôle) doit suffire.
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client", user_ids=[self.piece_rapportee.id])
+
+        res = self._post(f"/api/datarooms/{self.dataroom.id}/access/", {"group_ids": [group["id"]]})
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["group_ids"], [group["id"]])
+
+        self.client.force_login(self.piece_rapportee)
+        listing = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        self.assertIn(self.dataroom.id, {d["id"] for d in listing})
+
+    def test_client_not_in_the_named_group_stays_denied(self):
+        self.client.force_login(self.admin)
+        other_client = User.objects.create_user(username="group_other_client", password="pw123456")
+        self.addCleanup(other_client.delete)
+        OfficeMembership.objects.create(user=other_client, office=self.office, role="client")
+
+        group = self._create_group("Clients VIP", category="client", user_ids=[self.piece_rapportee.id])
+        self._post(f"/api/datarooms/{self.dataroom.id}/access/", {"group_ids": [group["id"]]})
+
+        self.client.force_login(other_client)
+        listing = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        self.assertNotIn(self.dataroom.id, {d["id"] for d in listing})
+
+    def test_most_permissive_group_wins_when_memberships_overlap(self):
+        # Le client appartient à DEUX groupes : un seul est coché sur la
+        # restriction. Le droit le plus permissif (via ce groupe-là) doit
+        # l'emporter, peu importe que son autre groupe ne soit coché nulle part.
+        self.client.force_login(self.admin)
+        allowed_group = self._create_group(
+            "Clients VIP", category="client", user_ids=[self.piece_rapportee.id]
+        )
+        self._create_group("Clients standard", category="client", user_ids=[self.piece_rapportee.id])
+
+        self._post(
+            f"/api/datarooms/{self.dataroom.id}/documents/{self.doc.id}/access/",
+            {"group_ids": [allowed_group["id"]]},
+        )
+
+        self.client.force_login(self.piece_rapportee)
+        res = self.client.get(f"/api/datarooms/{self.dataroom.id}/documents/", HTTP_HOST=self._host())
+        self.assertIn(self.doc.id, {d["id"] for d in res.json()})
+
+    def test_deleting_a_group_lifts_the_access_it_granted(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client", user_ids=[self.piece_rapportee.id])
+        self._post(f"/api/datarooms/{self.dataroom.id}/access/", {"group_ids": [group["id"]]})
+
+        res = self.client.delete(f"/api/groups/{group['id']}/", HTTP_HOST=self._host())
+        self.assertEqual(res.status_code, 204, res.content)
+
+        self.client.force_login(self.piece_rapportee)
+        listing = self.client.get("/api/datarooms/", HTTP_HOST=self._host()).json()
+        self.assertNotIn(self.dataroom.id, {d["id"] for d in listing})
+
+    def test_access_restrictions_listing_reports_group_ids(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client")
+        self._post(f"/api/datarooms/{self.dataroom.id}/access/", {"group_ids": [group["id"]]})
+
+        listing = self.client.get("/api/access-restrictions/", HTTP_HOST=self._host()).json()
+        entry = next(r for r in listing if r["dataroom_id"] == self.dataroom.id and r["kind"] == "dataroom")
+        self.assertEqual(entry["group_ids"], [group["id"]])
+
+    # --- application d'un Template avec des groupes -----------------------
+
+    def test_template_folder_groups_are_copied_to_the_real_restriction(self):
+        self.client.force_login(self.admin)
+        group = self._create_group("Clients VIP", category="client", user_ids=[self.piece_rapportee.id])
+
+        token = set_current_tenant(TenantContext(self.SUBDOMAIN, self.alias))
+        try:
+            template = Template.objects.create(name="Modèle groupé")
+            tf = TemplateFolder.objects.create(template=template, parent=None, name="Confidentiel")
+            tf.groups.set([group["id"]])
+        finally:
+            reset_current_tenant(token)
+
+        res = self._post("/api/datarooms/", {"name": "Nouveau dossier groupé", "template_id": template.id})
+        self.assertEqual(res.status_code, 201, res.content)
+        new_dataroom_id = res.json()["id"]
+
+        self.client.force_login(self.piece_rapportee)
+        level = self.client.get(f"/api/datarooms/{new_dataroom_id}/folders/", HTTP_HOST=self._host()).json()
+        # Le sous-dossier "Confidentiel" doit être visible pour ce client via
+        # son groupe, sans jamais avoir été nommé individuellement.
+        self.assertEqual(len(level["folders"]), 1)
+        self.assertEqual(level["folders"][0]["name"], "Confidentiel")
