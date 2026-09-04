@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { SuperadminAccount } from '../../api/endpoints';
 import { officeLoginUrl } from '../../hyperadmin/officeUrl';
 import { Button } from '../atoms/Button';
 import { Select } from '../atoms/Select';
@@ -7,11 +8,15 @@ import { Field } from '../molecules/Field';
 import { Modal } from './Modal';
 
 export type NewOfficeAdminMode = 'create' | 'attach';
+export type NewOfficeAdminRole = 'admin' | 'superadmin';
 
 export interface NewOfficeModalProps {
   open: boolean;
   /** Erreur renvoyée par l'API à la dernière tentative (sous-domaine déjà pris, mot de passe trop faible…). */
   error?: string | null;
+  /** Comptes déjà superadmin quelque part — voir SuperadminAccount. N'affiche
+      un sélecteur que si non vide ET rôle "superadmin" ET mode "attach". */
+  superadmins: SuperadminAccount[];
   onClose: () => void;
   onSubmit: (data: {
     subdomain: string;
@@ -19,6 +24,7 @@ export interface NewOfficeModalProps {
     admin_mode: NewOfficeAdminMode;
     admin_username: string;
     admin_password?: string;
+    admin_role: NewOfficeAdminRole;
   }) => void;
 }
 
@@ -27,21 +33,28 @@ export interface NewOfficeModalProps {
  * backend (POST /api/hyperadmin/offices/ fait les deux en un seul appel — pas
  * de création partielle en cas d'erreur). Même bascule create/attach que
  * OfficeUserModal pour l'admin : 'attach' rattache un compte EXISTANT par son
- * nom exact, sans annuaire à parcourir (même parti pris de sécurité que
- * attach_office_user_view).
+ * nom exact, sans annuaire général à parcourir (même parti pris de sécurité
+ * que attach_office_user_view) — SAUF pour les comptes déjà superadmin
+ * quelque part (voir `superadmins`), où un sélecteur dédié est proposé : un
+ * hyperadmin a par construction déjà tous les droits sur tous les offices,
+ * cette liste ne lui expose donc rien de plus que ce qu'il verrait déjà en
+ * parcourant chaque office un par un (voir hyperadmin_superadmins_view).
  */
-export function NewOfficeModal({ open, error, onClose, onSubmit }: NewOfficeModalProps) {
+export function NewOfficeModal({ open, error, superadmins, onClose, onSubmit }: NewOfficeModalProps) {
   const [subdomain, setSubdomain] = useState('');
   const [name, setName] = useState('');
   const [adminMode, setAdminMode] = useState<NewOfficeAdminMode>('create');
+  const [adminRole, setAdminRole] = useState<NewOfficeAdminRole>('admin');
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const creating = adminMode === 'create';
+  const showSuperadminPicker = adminMode === 'attach' && adminRole === 'superadmin' && superadmins.length > 0;
 
   function reset() {
     setSubdomain('');
     setName('');
     setAdminMode('create');
+    setAdminRole('admin');
     setAdminUsername('');
     setAdminPassword('');
   }
@@ -63,6 +76,7 @@ export function NewOfficeModal({ open, error, onClose, onSubmit }: NewOfficeModa
       admin_mode: adminMode,
       admin_username: trimmedAdmin,
       admin_password: creating ? adminPassword : undefined,
+      admin_role: adminRole,
     });
   }
 
@@ -115,6 +129,50 @@ export function NewOfficeModal({ open, error, onClose, onSubmit }: NewOfficeModa
           <option value="attach">Compte existant</option>
         </Select>
       </Field>
+
+      <Field label="Rôle">
+        <Select value={adminRole} onChange={e => setAdminRole(e.target.value as NewOfficeAdminRole)}>
+          <option value="admin">Admin</option>
+          <option value="superadmin">Superadmin</option>
+        </Select>
+      </Field>
+
+      {showSuperadminPicker && (
+        <Field label="Comptes déjà superadmin">
+          <div className="tiny dim" style={{ marginBottom: 6 }}>
+            Cliquer pour reprendre une identité déjà partagée entre offices plutôt que
+            d'en créer une nouvelle.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 150, overflowY: 'auto' }}>
+            {superadmins.map(s => (
+              <button
+                key={s.user_id}
+                type="button"
+                onClick={() => setAdminUsername(s.username)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  textAlign: 'left',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                  background: adminUsername === s.username ? 'var(--brass-100)' : 'var(--surface)',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                  color: 'inherit',
+                }}
+              >
+                <span className="tiny" style={{ fontWeight: 600 }}>
+                  {s.username}
+                </span>
+                <span className="tiny dim">{s.offices.map(o => o.subdomain).join(', ')}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
 
       <Field label="Nom d'utilisateur">
         <TextInput

@@ -2630,6 +2630,30 @@ class HyperadminTests(unittest.TestCase):
         self.assertEqual(res.status_code, 400)
         self.assertFalse(Office.objects.filter(subdomain="hyperadmin").exists())
 
+    def test_office_creation_rejects_underscore_in_subdomain(self):
+        # SlugField (Office.subdomain) accepte l'underscore, mais Django lui-même
+        # (HttpRequest.get_host, host_validation_re) rejette tout Host qui en
+        # contient un — un office créé sans ce garde-fou passerait la validation
+        # du modèle mais deviendrait injoignable pour de bon, sans aucun réglage
+        # capable de compenser après coup (voir Office.clean(), docs/journal.md
+        # 04/09/2026 — bug réel rencontré avec un office "max_test" nommé ainsi
+        # par un utilisateur ; NE PAS reprendre ce nom ici, il existe déjà pour
+        # de vrai dans cet environnement, ce test tournant sans base isolée —
+        # voir la remarque sur "Skipping setup of unused database(s)" ailleurs
+        # dans ce fichier). Vérifié à la SEULE frontière qui compte réellement :
+        # la création elle-même doit être refusée.
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": "hat_bad_underscore", "name": "Ne devrait pas exister",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+            },
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Office.objects.filter(subdomain="hat_bad_underscore").exists())
+
     def test_hyperadmin_modules_catalogue(self):
         coffre_fort, created_cf = Module.objects.get_or_create(
             slug="coffre-fort", defaults={"name": "Coffre-fort"}
@@ -2654,6 +2678,101 @@ class HyperadminTests(unittest.TestCase):
         slugs = {m["slug"] for m in res.json()}
         self.assertIn("coffre-fort", slugs)
         self.assertIn("confiance-rib", slugs)
+
+    def test_creating_office_with_explicit_admin_role(self):
+        # admin_role (04/09/2026) : omis => "admin" (comportement historique,
+        # déjà couvert par test_creating_office_provisions_tenant_database) ;
+        # explicite => respecté, y compris "superadmin". Testé sur les DEUX
+        # modes (attach ici, create dans le test suivant) — même endpoint,
+        # même paramètre, mais deux chemins de code différents avant la
+        # création du OfficeMembership.
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        subdomain = "hatsuperattach"
+        self._created_office_subdomains.append(subdomain)
+
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": subdomain, "name": "Super Attach",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+                "admin_role": "superadmin",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        office = Office.objects.get(subdomain=subdomain)
+        membership = OfficeMembership.objects.get(office=office, user=self.regular_user)
+        self.assertEqual(membership.role, "superadmin")
+
+    def test_creating_office_with_new_account_as_superadmin(self):
+        self.client.force_login(self.hyperadmin_user)
+        host = self._host()
+        subdomain = "hatsupercreate"
+        self._created_office_subdomains.append(subdomain)
+
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": subdomain, "name": "Super Create",
+                "admin_mode": "create", "admin_username": "hat_new_super",
+                "admin_password": "S3curePassw0rd!", "admin_role": "superadmin",
+            },
+            content_type="application/json", HTTP_HOST=host,
+        )
+        self.assertEqual(res.status_code, 201)
+        self.addCleanup(lambda: User.objects.filter(username="hat_new_super").delete())
+        office = Office.objects.get(subdomain=subdomain)
+        membership = OfficeMembership.objects.get(office=office)
+        self.assertEqual(membership.user.username, "hat_new_super")
+        self.assertEqual(membership.role, "superadmin")
+
+    def test_creating_office_rejects_invalid_admin_role(self):
+        # "membre"/"client" n'ont pas de sens comme PREMIER gestionnaire d'un
+        # office tout neuf — même filtrage que le rôle inconnu.
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.post(
+            "/api/hyperadmin/offices/",
+            {
+                "subdomain": "hatbadrole", "name": "X",
+                "admin_mode": "attach", "admin_username": "hat_regular",
+                "admin_role": "membre",
+            },
+            content_type="application/json", HTTP_HOST=self._host(),
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Office.objects.filter(subdomain="hatbadrole").exists())
+
+    def test_hyperadmin_superadmins_listing(self):
+        # hat_multi est superadmin sur DEUX offices — doit apparaître UNE
+        # fois, avec les deux offices listés (pas une ligne par membership).
+        # hat_regular (role="admin" dans setUp) ne doit PAS apparaître :
+        # cette liste est strictement scopée au rôle superadmin, pas
+        # "n'importe quel gestionnaire".
+        office_two = Office.objects.create(subdomain="hatsuperoffice2", name="Deuxième office")
+        self.addCleanup(office_two.delete)
+        multi_user = User.objects.create_user(username="hat_multi", password="pw123456")
+        self.addCleanup(multi_user.delete)
+        OfficeMembership.objects.create(user=multi_user, office=self.control_office, role="superadmin")
+        OfficeMembership.objects.create(user=multi_user, office=office_two, role="superadmin")
+
+        host = self._host()
+
+        self.client.force_login(self.regular_user)
+        res = self.client.get("/api/hyperadmin/superadmins/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 403)
+
+        self.client.force_login(self.hyperadmin_user)
+        res = self.client.get("/api/hyperadmin/superadmins/", HTTP_HOST=host)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        usernames = [entry["username"] for entry in data]
+        self.assertEqual(usernames.count("hat_multi"), 1)
+        self.assertNotIn("hat_regular", usernames)
+
+        multi_entry = next(entry for entry in data if entry["username"] == "hat_multi")
+        subdomains = {o["subdomain"] for o in multi_entry["offices"]}
+        self.assertEqual(subdomains, {self.CONTROL_SUBDOMAIN, "hatsuperoffice2"})
 
 
 class SearchApiTests(unittest.TestCase):

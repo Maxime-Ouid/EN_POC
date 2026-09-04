@@ -35,7 +35,15 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     # *.office.localhost (03/09/2026, voir CLAUDE.md) : un office créé en direct
     # depuis la console hyperadmin vit sous <nom>.office.localhost, deux labels
     # avant "localhost". Autorise désormais N labels, pas juste 0 ou 1.
-    r"^https://([a-z0-9-]+\.)*localhost:5173$",
+    # Underscore ajouté le 04/09/2026 : Office.subdomain est un SlugField Django,
+    # dont le validateur standard (validate_slug) accepte déjà lettres/chiffres/
+    # tiret/underscore — un office créé en direct avec un underscore (ex.
+    # "max_test") passait donc la validation du modèle mais ne matchait pas CE
+    # regex, bloquant silencieusement tout appel API une fois sur l'écran de
+    # connexion (même symptôme "Failed to fetch" que le blocage à N niveaux de
+    # sous-domaine déjà corrigé) — confirmé par un test direct (préflight CORS
+    # sans underscore accepté, avec underscore rejeté), voir docs/journal.md.
+    r"^https://([a-z0-9_-]+\.)*localhost:5173$",
 ]
 CORS_ALLOW_CREDENTIALS = True
 

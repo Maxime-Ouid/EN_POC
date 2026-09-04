@@ -45,10 +45,19 @@ export function ListControls({
         <span className="tiny dim">{unit}</span>
       </div>
       <div className="field" style={{ minWidth: 240 }}>
+        {/* type="search", pas juste autoComplete="off" : Chrome ignore délibérément
+            autoComplete sur un input[type=text] qu'il classe "champ d'identifiant"
+            (heuristique interne à son gestionnaire de mots de passe, pas contournable
+            par cet attribut seul — constaté : un identifiant enregistré sur ce
+            sous-domaine se retrouvait injecté ici, filtrant le tableau à zéro
+            résultat). type="search" a un rôle sémantique distinct que Chrome exclut
+            entièrement de cette logique d'autofill. */}
         <TextInput
+          type="search"
           value={search}
           placeholder="Rechercher..."
           aria-label={`Rechercher parmi les ${unit}`}
+          autoComplete="off"
           onChange={e => onSearchChange?.(e.target.value)}
         />
       </div>

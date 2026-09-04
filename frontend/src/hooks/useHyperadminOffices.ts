@@ -4,7 +4,7 @@
    tout chargement de données ; elle est neutralisée ici, et uniquement ici. */
 /* oxlint-disable react/set-state-in-effect */
 import { useCallback, useEffect, useState } from 'react';
-import { api, type HyperadminOfficeRow, type ModuleSummary } from '../api/endpoints';
+import { api, type HyperadminOfficeRow, type ModuleSummary, type SuperadminAccount } from '../api/endpoints';
 
 export interface HyperadminOfficesState {
   loading: boolean;
@@ -12,13 +12,19 @@ export interface HyperadminOfficesState {
   offices: HyperadminOfficeRow[];
   /** Catalogue complet — voir ModuleSummary. Chargé avec les offices, pas séparément. */
   modules: ModuleSummary[];
+  /** Comptes déjà superadmin quelque part — voir SuperadminAccount. Sert le
+      sélecteur "compte existant" de NewOfficeModal quand le rôle choisi est
+      superadmin, chargé ici pour rester disponible dès l'ouverture de la
+      modale plutôt que de partir en fetch séparé à chaque changement de rôle. */
+  superadmins: SuperadminAccount[];
 }
 
 /**
  * Offices vus par l'interface hyperadmin — GET /api/hyperadmin/offices/ +
- * GET /api/hyperadmin/modules/, chargés ensemble (aucun des deux ne dépend de
- * l'autre). Réservé au rôle transverse HyperadminAccess (403 sinon côté
- * backend) — voir hyperadmin/HyperadminApp.tsx, seul appelant.
+ * GET /api/hyperadmin/modules/ + GET /api/hyperadmin/superadmins/, chargés
+ * ensemble (aucun des trois ne dépend d'un autre). Réservé au rôle transverse
+ * HyperadminAccess (403 sinon côté backend) — voir hyperadmin/HyperadminApp.tsx,
+ * seul appelant.
  *
  * `enabled` (même patron que useOfficeUsers) : HyperadminApp appelle ce hook
  * AVANT de savoir si la session est authentifiée (les hooks ne peuvent pas
@@ -28,17 +34,18 @@ export interface HyperadminOfficesState {
  */
 export function useHyperadminOffices(enabled: boolean) {
   const [state, setState] = useState<HyperadminOfficesState>({
-    loading: enabled, error: null, offices: [], modules: [],
+    loading: enabled, error: null, offices: [], modules: [], superadmins: [],
   });
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [offices, modules] = await Promise.all([
+      const [offices, modules, superadmins] = await Promise.all([
         api.listHyperadminOffices(signal),
         api.listHyperadminModules(signal),
+        api.listHyperadminSuperadmins(signal),
       ]);
       if (signal?.aborted) return;
-      setState({ loading: false, error: null, offices, modules });
+      setState({ loading: false, error: null, offices, modules, superadmins });
     } catch (err) {
       if (signal?.aborted) return;
       setState({
@@ -46,6 +53,7 @@ export function useHyperadminOffices(enabled: boolean) {
         error: err instanceof Error ? err.message : 'Chargement impossible',
         offices: [],
         modules: [],
+        superadmins: [],
       });
     }
   }, []);
@@ -69,6 +77,7 @@ export function useHyperadminOffices(enabled: boolean) {
       admin_mode: 'create' | 'attach';
       admin_username: string;
       admin_password?: string;
+      admin_role?: 'admin' | 'superadmin';
     }) => {
       await api.createHyperadminOffice(payload);
       await refresh();

@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import User
@@ -20,6 +22,21 @@ class Office(models.Model):
     # hyperadmin_offices_view que depuis /admin/ Django) pour qu'aucun des deux
     # points de création ne puisse créer la collision.
     RESERVED_SUBDOMAINS = {"hyperadmin"}
+
+    # SlugField (validate_slug) accepte l'underscore — un vrai nom de domaine ne
+    # le peut pas (RFC 1034/1035), et Django lui-même l'applique sans exception
+    # possible : HttpRequest.get_host() rejette tout Host contenant un underscore
+    # AVANT même ALLOWED_HOSTS (host_validation_re, django/http/request.py,
+    # hors de portée d'un réglage), avec un 500 DisallowedHost — pas un 4xx
+    # applicatif lisible. Rencontré en réel le 04/09/2026 avec un office
+    # "max_test" créé depuis la console hyperadmin : `SlugField.full_clean()`
+    # l'avait laissé passer, l'office existait bien en base, mais son
+    # sous-domaine ne pouvait plus jamais être atteint — ni CORS ni ALLOWED_HOSTS
+    # n'auraient pu compenser. SUBDOMAIN_RE resserre donc DÈS LA VALIDATION DU
+    # MODÈLE à ce que Django (et un vrai DNS) accepteront réellement, avant que
+    # le problème ne devienne visible seulement une fois l'office créé — voir
+    # docs/journal.md pour le détail.
+    SUBDOMAIN_RE = re.compile(r"^[a-z0-9-]+$")
 
     subdomain = models.SlugField(unique=True)  # "officea"
     name = models.CharField(max_length=255)
@@ -50,6 +67,10 @@ class Office(models.Model):
     def clean(self):
         if self.subdomain in self.RESERVED_SUBDOMAINS:
             raise ValidationError({"subdomain": "réservé à l'interface hyperadmin"})
+        if self.subdomain and not self.SUBDOMAIN_RE.match(self.subdomain):
+            raise ValidationError(
+                {"subdomain": "lettres minuscules, chiffres et tirets uniquement (pas d'underscore)"}
+            )
 
     def __str__(self):
         return self.name

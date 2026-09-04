@@ -247,6 +247,19 @@ export interface ModuleSummary {
   description: string;
 }
 
+/**
+ * Un compte ayant déjà le rôle superadmin sur au moins un office — GET
+ * /api/hyperadmin/superadmins/. Une entrée par utilisateur (pas par
+ * membership) : `offices` liste TOUS les offices où il/elle est superadmin,
+ * pour repérer une identité déjà partagée (type carla) avant d'en créer une
+ * nouvelle par erreur.
+ */
+export interface SuperadminAccount {
+  user_id: number;
+  username: string;
+  offices: { subdomain: string; name: string }[];
+}
+
 export const api = {
   ping: () => apiFetch<{ status: string }>('/api/ping/'),
 
@@ -527,8 +540,11 @@ export const api = {
   /**
    * Crée un office ET son premier admin dans le même appel. `admin_mode: 'create'`
    * ouvre un nouveau compte (mot de passe requis) ; `'attach'` rattache un compte
-   * EXISTANT par son nom exact (pas d'annuaire, même parti pris que
-   * attachOfficeUser).
+   * EXISTANT par son nom exact (pas d'annuaire général, même parti pris que
+   * attachOfficeUser — seul `listHyperadminSuperadmins` ci-dessous fait exception,
+   * volontairement scopée aux hyperadmins). `admin_role` omis = "admin"
+   * (comportement historique) ; "superadmin" pour reprendre une identité déjà
+   * partagée entre offices sans repromouvoir après coup.
    */
   createHyperadminOffice: (payload: {
     subdomain: string;
@@ -536,6 +552,7 @@ export const api = {
     admin_mode: 'create' | 'attach';
     admin_username: string;
     admin_password?: string;
+    admin_role?: 'admin' | 'superadmin';
   }) => apiFetch<HyperadminOfficeRow>('/api/hyperadmin/offices/', { method: 'POST', body: payload }),
 
   /** Partiel : n'envoyer que ce qui change (is_active et/ou enabled_module_slugs). */
@@ -543,6 +560,16 @@ export const api = {
     officeId: number,
     patch: { is_active?: boolean; enabled_module_slugs?: string[] },
   ) => apiFetch<HyperadminOfficeRow>(`/api/hyperadmin/offices/${officeId}/`, { method: 'PATCH', body: patch }),
+
+  /**
+   * Comptes déjà superadmin quelque part, avec la liste de leurs offices —
+   * sert le sélecteur "compte existant" de la modale de création quand le
+   * rôle choisi est superadmin. Réservé aux hyperadmins (voir
+   * hyperadmin_superadmins_view : un hyperadmin a par construction déjà tous
+   * les droits sur tous les offices, cette liste ne lui expose rien de plus).
+   */
+  listHyperadminSuperadmins: (signal?: AbortSignal) =>
+    apiFetch<SuperadminAccount[]>('/api/hyperadmin/superadmins/', { signal }),
 
   /** Catalogue COMPLET des modules existants (pas seulement ceux activés quelque part). */
   listHyperadminModules: (signal?: AbortSignal) =>

@@ -137,6 +137,7 @@ export function HyperadminApp() {
       <NewOfficeModal
         open={createOpen}
         error={createError}
+        superadmins={offices.superadmins}
         onClose={() => setCreateOpen(false)}
         onSubmit={data => {
           setCreateError(null);

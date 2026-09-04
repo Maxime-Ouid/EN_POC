@@ -1973,6 +1973,13 @@ def hyperadmin_offices_view(request):
         admin_mode = request.data.get('admin_mode')
         admin_username = (request.data.get('admin_username') or '').strip()
         admin_password = request.data.get('admin_password') or ''
+        # Rôle du premier membre rattaché — admin par défaut (comportement
+        # historique, avant l'ajout du choix le 04/09/2026), superadmin pour
+        # reprendre une identité déjà partagée entre offices (type carla) sans
+        # devoir la repromouvoir après coup depuis office-user_detail_view.
+        # Jamais membre/client ici : ce flux crée le PREMIER gestionnaire d'un
+        # office tout neuf, pas un membre ordinaire.
+        admin_role = request.data.get('admin_role') or 'admin'
 
         # Validation COMPLÈTE avant toute écriture — pas de création partielle
         # (office sans admin, ou admin sans office) en cas d'erreur à mi-chemin.
@@ -1986,6 +1993,8 @@ def hyperadmin_offices_view(request):
 
         if admin_mode not in ('create', 'attach'):
             return Response({"error": "admin_mode invalide"}, status=400)
+        if admin_role not in ('admin', 'superadmin'):
+            return Response({"error": "rôle invalide"}, status=400)
         if not admin_username:
             return Response({"error": "nom d'utilisateur de l'administrateur requis"}, status=400)
 
@@ -2007,7 +2016,7 @@ def hyperadmin_offices_view(request):
         office.save()
         if admin_mode == 'create':
             admin_user = User.objects.create_user(username=admin_username, password=admin_password)
-        OfficeMembership.objects.create(user=admin_user, office=office, role="admin")
+        OfficeMembership.objects.create(user=admin_user, office=office, role=admin_role)
 
         # Provisionne + migre la base tenant de ce seul office — même corps que
         # la boucle de migrate_all_tenants.py, appliqué à cet office précis.
@@ -2056,3 +2065,36 @@ def hyperadmin_modules_view(request):
     return Response([
         {"slug": m.slug, "name": m.name, "description": m.description} for m in modules
     ])
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def hyperadmin_superadmins_view(request):
+    """Comptes ayant DÉJÀ le rôle superadmin sur au moins un office, avec la
+    liste de CES offices — sert la modale de création d'office (04/09/2026) :
+    quand l'hyperadmin rattache un compte existant en tant que superadmin, il
+    peut piocher dans une identité déjà partagée entre offices (type carla)
+    plutôt que de retaper un nom exact à l'aveugle.
+
+    Réservé aux hyperadmins, comme le reste de cette console — PAS le même
+    compromis de sécurité que attach_office_user_view (qui, lui, reste sans
+    annuaire : un admin d'office normal ne doit jamais voir qui est
+    superadmin ailleurs, voir "Écarts assumés" dans CLAUDE.md, §4.1 du
+    document de vision). Un hyperadmin a par construction déjà tous les
+    droits sur tous les offices (_effective_role) : cette liste ne lui
+    expose rien qu'il ne pourrait déjà reconstituer office par office depuis
+    leurs annuaires respectifs, juste consolidé pour ce flux précis."""
+    if not _is_hyperadmin(request.user):
+        return Response({"error": "réservé aux hyperadmins Notantis"}, status=403)
+
+    memberships = (
+        OfficeMembership.objects.filter(role="superadmin")
+        .select_related('user', 'office')
+        .order_by('user__username', 'office__name')
+    )
+    by_user = {}
+    for m in memberships:
+        entry = by_user.setdefault(
+            m.user_id, {"user_id": m.user_id, "username": m.user.username, "offices": []}
+        )
+        entry["offices"].append({"subdomain": m.office.subdomain, "name": m.office.name})
+    return Response(sorted(by_user.values(), key=lambda e: e["username"].lower()))

@@ -8,7 +8,7 @@ from .views import (
     dataroom_access_view, folder_access_view, document_access_view, access_restrictions_view,
     document_content_view, templates_view, template_detail_view, template_folders_view,
     template_folder_detail_view, hyperadmin_offices_view, hyperadmin_office_detail_view,
-    hyperadmin_modules_view,
+    hyperadmin_modules_view, hyperadmin_superadmins_view,
     search_view, tags_view, tag_detail_view, dataroom_tags_view, document_tags_view,
 )
 
@@ -51,4 +51,5 @@ urlpatterns = [
     path('hyperadmin/offices/', hyperadmin_offices_view),
     path('hyperadmin/offices/<int:office_id>/', hyperadmin_office_detail_view),
     path('hyperadmin/modules/', hyperadmin_modules_view),
+    path('hyperadmin/superadmins/', hyperadmin_superadmins_view),
 ]
